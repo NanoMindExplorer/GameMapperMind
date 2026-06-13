@@ -35,18 +35,35 @@ jobs:
           npm ci
           npm run build
 
-      # 5. Sinkronkan Aset Web ke Proyek Android Capacitor
+      # 5. Setup / Inisialisasi Capacitor secara otomatis jika perangkat belum terinstal
+      - name: Setup and Initialize Capacitor
+        run: |
+          # Install dependencies Capacitor secara lokal untuk runtime build CI
+          npm install @capacitor/core @capacitor/cli @capacitor/android
+
+          # Inisialisasi file konfigurasi Capacitor jika belum ada
+          if [ ! -f "capacitor.config.json" ] && [ ! -f "capacitor.config.ts" ]; then
+            npx cap init "Gamepad Mapper" "com.example.gamepadmapper" --web-dir=dist
+          fi
+
+          # Tambahkan folder platform android jika belum ada
+          if [ ! -d "android" ]; then
+            npx cap add android
+          fi
+
+      # 6. Sinkronkan Aset Web ke Proyek Android Capacitor
       - name: Capacitor Sync
         run: |
           npx cap sync android
 
-      # 6. Build APK menggunakan Gradle
+      # 7. Build APK menggunakan Gradle
       - name: Build Android APK
         run: |
           cd android
+          chmod +x gradlew
           ./gradlew assembleDebug
 
-      # 7. Upload Hasil APK (Menggunakan v4 untuk menghindari Deprecation Error)
+      # 8. Upload Hasil APK (Menggunakan v4 untuk menghindari Deprecation Error)
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:

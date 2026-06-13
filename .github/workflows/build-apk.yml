@@ -61,6 +61,22 @@ jobs:
             echo "Successfully injected Kotlin dependency exclusions into app/build.gradle"
           fi
 
+          # Inject Shizuku permissions into AndroidManifest.xml
+          if [ -f "android/app/src/main/AndroidManifest.xml" ]; then
+            node -e '
+              const fs = require("fs");
+              const path = "android/app/src/main/AndroidManifest.xml";
+              let content = fs.readFileSync(path, "utf8");
+              if (!content.includes("rikka.shizuku.permission.API_V23")) {
+                const target = "<application";
+                const insert = "    <uses-permission android:name=\"rikka.shizuku.permission.API_V23\" />\n    ";
+                content = content.replace(target, insert + target);
+                fs.writeFileSync(path, content, "utf8");
+                console.log("Successfully injected Shizuku permission to AndroidManifest.xml");
+              }
+            '
+          fi
+
       # 6. Sinkronkan Aset Web ke Proyek Android Capacitor
       - name: Capacitor Sync
         run: |

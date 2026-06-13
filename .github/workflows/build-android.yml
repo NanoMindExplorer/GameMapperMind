@@ -1,0 +1,62 @@
+name: Build Android APK
+
+on:
+  push:
+    branches:
+      - main  # Alur kerja berjalan setiap kali Anda push kode ke branch main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Mengambil kode dari repository Anda
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      # 2. Menyiapkan lingkungan runtime Node.js
+      - name: Setup Node.js Environment
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: 'npm'
+
+      # 3. Menginstal seluruh dependensi web proyek Anda
+      - name: Install Web Dependencies
+        run: npm ci
+
+      # 4. Melakukan Kompilasi Web React (menghasilkan folder /dist)
+      - name: Compile React Web Content
+        run: npm run build
+
+      # 5. Sinkronisasi aset web statis ke dalam folder Android Capacitor
+      - name: Sync React Assets to Capacitor Android
+        run: |
+          npx cap sync android
+
+      # 6. Menyiapkan JDK (Java Development Kit) untuk compiler Gradle Android
+      - name: Setup Java Development Kit (JDK) 17
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      # 7. Memberikan hak izin eksekusi pada Gradle android wrapper
+      - name: Grant Execute Permission for Gradle Wrapper
+        run: chmod +x android/gradlew
+
+      # 8. Melakukan kompilasi kode native Android menjadi APK (Debug Version)
+      - name: Build Debug Android APK
+        run: |
+          cd android
+          ./gradlew assembleDebug
+
+      # 9. Mengunggah hasil APK yang sukses di-build agar dapat Anda unduh langsung
+      - name: Upload Finished APK Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: App-Debug-APK
+          path: android/app/build/outputs/apk/debug/app-debug.apk

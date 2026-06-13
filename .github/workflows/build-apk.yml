@@ -51,6 +51,16 @@ jobs:
             npx cap add android
           fi
 
+          # Resolve duplicate Kotlin stdlib dependencies by excluding deprecated jdk7/jdk8 modules
+          if [ -f "android/app/build.gradle" ]; then
+            echo "" >> android/app/build.gradle
+            echo "configurations.all {" >> android/app/build.gradle
+            echo "    exclude group: \"org.jetbrains.kotlin\", module: \"kotlin-stdlib-jdk7\"" >> android/app/build.gradle
+            echo "    exclude group: \"org.jetbrains.kotlin\", module: \"kotlin-stdlib-jdk8\"" >> android/app/build.gradle
+            echo "}" >> android/app/build.gradle
+            echo "Successfully injected Kotlin dependency exclusions into app/build.gradle"
+          fi
+
       # 6. Sinkronkan Aset Web ke Proyek Android Capacitor
       - name: Capacitor Sync
         run: |

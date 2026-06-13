@@ -7,7 +7,8 @@
 import React from 'react';
 import { 
   Cpu, Zap, RefreshCw, Layers, ShieldCheck, CheckCircle2, XCircle, 
-  Settings, Play, Terminal, HelpCircle, Laptop, Smartphone, AlertTriangle 
+  Settings, Play, Terminal, HelpCircle, Laptop, Smartphone, AlertTriangle,
+  BookOpen, ChevronRight, ChevronDown, CheckSquare, Square, Sparkles, Check
 } from 'lucide-react';
 import { ShizukuState } from '../types';
 
@@ -17,11 +18,140 @@ interface ShizukuPanelProps {
   onLogMessage: (msg: string) => void;
 }
 
+const SHIZUKU_STEPS = [
+  {
+    title: "1. Aktifkan Opsi Pengembang (Developer Options)",
+    short: "Buka pengaturan sistem Android Anda untuk mengakses opsi developer.",
+    details: [
+      "Buka aplikasi ⚙️ Setelan / Pengaturan (Settings) pada HP Android Anda.",
+      "Gulir ke bawah, pilih Tentang Telepon (About Phone).",
+      "Cari 'Nomor Versi' (Build Number) atau versi OS/ROM Anda (misalnya Versi MIUI / HyperOS).",
+      "Ketuk cepat Nomor Versi tersebut sebanyak 7 kali berturut-turut hingga muncul balon teks berisi informasi 'Anda sekarang adalah pengembang!'."
+    ],
+    badge: "Prasyarat Awal"
+  },
+  {
+    title: "2. Aktifkan Proses Debug USB & Nirkabel",
+    short: "Aktifkan saluran transmisi perintah dan sentuhan virtual.",
+    details: [
+      "Pergi ke submenu Sistem -> Opsi Pengembang (Developer Options).",
+      "Aktifkan opsi 'Proses Debug USB' (USB Debugging).",
+      "Aktifkan opsi 'Proses Debug Nirkabel' (Wireless Debugging). Hubungkan perangkat ke Wi-Fi terlebih dahulu untuk mengaktifkan ini.",
+      "⚠️ SANGAT PENTING (HP Xiaomi, POCO, Oppo, Vivo, Realme): Cari dan aktifkan opsi 'Proses Debug USB (Setelan Keamanan)' / 'USB Debugging (Security Settings)' agar simulasi sentuhan tombol terdaftar secara lancar."
+    ],
+    badge: "Setelan Sistem"
+  },
+  {
+    title: "3. Jalankan Aplikasi & Sinkronkan Shizuku",
+    short: "Hubungkan Shizuku ke antrean driver HP menggunakan kode pairing.",
+    details: [
+      "Instal & buka aplikasi Shizuku (bisa diunduh via Google Play Store / Github).",
+      "Lakukan Penyandingan: Ketuk 'Sandingkan / Pairing', lalu ketuk opsi tersebut di Opsi Pengembang -> Wireless Debugging.",
+      "Pilih 'Sandingkan Perangkat dengan Kode Penyandingan'. Catat kode 6-digit nirkabel yang tertera di layar.",
+      "Masukkan kode tersebut pada baris notifikasi Shizuku yang muncul untuk menyelesaikan pairing.",
+      "Berhasil pairing? Kembali ke beranda Shizuku dan klik 'Mulai / Start' untuk mengaktifkannya!"
+    ],
+    badge: "Koneksi Shizuku"
+  },
+  {
+    title: "4. Izinkan Otorisasi Layanan Nexion",
+    short: "Berikan izin binder IPC aman ke aplikasi Nexion ini.",
+    details: [
+      "Ketuk tombol 'Authorize Shizuku AIDL Bindings' di panel atas.",
+      "Jendela pop-up bawaan Shizuku akan langsung muncul di HP Anda.",
+      "Silakan ketuk opsi 'Izinkan Selalu' (Allow Always). Otorisasi akan sukses seketika!"
+    ],
+    badge: "Izin Aplikasi"
+  },
+  {
+    title: "5. Aktifkan Izin Aksesibilitas & Tampilan Di Atas Aplikasi Lain",
+    short: "Izinkan aplikasi membuat overlay controller & menangkap tombol fisik.",
+    details: [
+      "Buka Pengaturan HP -> Aplikasi -> Kelola Aplikasi -> Cari 'Nexion' -> Aktifkan 'Tampilkan di atas aplikasi lain' (Display over other apps / Draw over other apps) agar tombol overlay HUD bisa muncul mengambang saat Anda bermain game.",
+      "⚠️ SANGAT DIANJURKAN: Buka Pengaturan -> Setelan Tambahan -> Aksesibilitas -> Pilih 'Layanan yang Diunduh/Terpasang' -> Pilih 'Nexion Mapper' -> Ketuk SAKELAR 'Gunakan Nexion Mapper'.",
+      "Layanan Aksesibilitas (Accessibility Service) membantu menangkap input tombol fisik bluetooth/OTG gamepad dari background dengan responsif & tanpa delay."
+    ],
+    badge: "Overlay & Akses"
+  },
+  {
+    title: "6. Boot Daemon Shuttle & Mulai Bermain!",
+    short: "Aktifkan engine pemeta virtual dengan respons instan.",
+    details: [
+      "Klik tombol 'BOOT NEXION SHUTTLE DAEMON' di atas.",
+      "Secara instan, Anda akan melihat terminal STDOUT di sebelah kanan mencetak kode verifikasi.",
+      "Status akan berubah menjadi 'CORE DAEMON ACTIVE'. Berhasil! Pasang Gamepad Anda, buka tab 'Gamepad Tester' atau 'Overlay Editor' untuk merancang layout tombol favorit!"
+    ],
+    badge: "Finishing"
+  }
+];
+
+const DESKTOP_STEPS = [
+  {
+    title: "1. Aktifkan Proses Debug USB",
+    short: "Berikan komputer wewenang penuh untuk mengirim perintah data input.",
+    details: [
+      "Aktifkan Opsi Pengembang terlebih dahulu di HP Anda (Ketuk 'Nomor Versi' 7 kali di Tentang Telepon).",
+      "Masuk ke Opsi Pengembang, lalu hidupkan sakelar 'Proses Debug USB'.",
+      "💡 Bagi pengguna Xiaomi/POCO/Oppo: Hidupkan pula 'Proses Debug USB (Setelan Keamanan)' agar touchpad virtual berjalan."
+    ],
+    badge: "Opsi Pengembang"
+  },
+  {
+    title: "2. Sambungkan HP ke PC/Laptop",
+    short: "Gunakan kabel USB data orisinal dengan sambungan solid.",
+    details: [
+      "Hubungkan HP ke komputer dengan kabel USB yang bisa mentransfer berkas.",
+      "Pilih opsi 'Transfer File' (MTP) pada popup koneksi USB di HP.",
+      "Saat HP menampilkan popup 'Izinkan Debugging USB dari PC ini?', centang 'Selalu izinkan' lalu ketuk Oke."
+    ],
+    badge: "Konektivitas USB"
+  },
+  {
+    title: "3. Jalankan Berkas Companion PC",
+    short: "Jalankan skrip pembantu untuk menginjeksi core driver daemon.",
+    details: [
+      "Unduh zip Nexion Desktop Companion di PC Anda dan ekstrak arsip tersebut.",
+      "Buka folder hasil ekstrak, jalankan file pembantu instalasi:",
+      "• Mac/Linux: Jalankan terminal lalu ketik perintah './start.sh'",
+      "• Windows: Klik ganda file 'start.bat' untuk membukanya langsung.",
+      "Skrip pendamping akan otomatis menyuntikkan driver mapper ke memory heap lokal HP."
+    ],
+    badge: "Script Companion"
+  },
+  {
+    title: "4. Aktifkan Izin Aksesibilitas & Tampilan Di Atas Aplikasi Lain",
+    short: "Izinkan aplikasi overlay controller & mendeteksi hardware.",
+    details: [
+      "Pergi ke Setelan HP -> Aplikasi -> Kelola Aplikasi -> Pilih 'Nexion' -> Nyalakan izin 'Tampilkan di Atas Aplikasi Lain' (Draw Over Other Apps / Display over details).",
+      "Pergi ke Setelan HP -> Setelan Tambahan -> Aksesibilitas -> Layanan Terpasang -> Aktifkan layanan 'Nexion Mapper'.",
+      "Izin overlay ini diperlukan agar panel tombol konfigurasi map bisa melayang di atas layar game Anda untuk penempatan langsung."
+    ],
+    badge: "Overlay & Akses"
+  },
+  {
+    title: "5. Aktifkan Driver & Lakukan Kalibrasi",
+    short: "Hubungkan terminal aplikasi dan nikmati pengalaman nol-latensi.",
+    details: [
+      "Ketuk tombol biru 'INITIALIZE VIA DESKTOP ADAPTER' di atas.",
+      "Jika terminal logs mencetak pesan sukses, mapping aktif sepenuhnya!",
+      "Selamat bermain! Sesuaikan sensor gyro, arah swipe, dan area analog sesukamu."
+    ],
+    badge: "Boot Up"
+  }
+];
+
 export default function ShizukuPanel({ shizukuState, setShizukuState, onLogMessage }: ShizukuPanelProps) {
   const [activeTab, setActiveTab] = React.useState<'shizuku' | 'desktop'>('shizuku');
   const [isLoading, setIsLoading] = React.useState(false);
   const [shizukuPermission, setShizukuPermission] = React.useState<'GRANTED' | 'DENIED' | 'PROMPT'>('PROMPT');
   const [customLog, setCustomLog] = React.useState('');
+
+  // Interactive guide states
+  const [expandedShizukuStep, setExpandedShizukuStep] = React.useState<number | null>(0);
+  const [expandedDesktopStep, setExpandedDesktopStep] = React.useState<number | null>(0);
+  
+  const [shizukuChecklist, setShizukuChecklist] = React.useState<boolean[]>([false, false, false, false, false, false]);
+  const [desktopChecklist, setDesktopChecklist] = React.useState<boolean[]>([false, false, false, false, false]);
 
   const triggerAction = async (action: 'start' | 'stop' | 'toggle_mode', mode?: 'shizuku' | 'desktop') => {
     setIsLoading(true);
@@ -259,8 +389,173 @@ export default function ShizukuPanel({ shizukuState, setShizukuState, onLogMessa
             <div className="space-y-1">
               <h4 className="text-xs font-bold text-amber-400">Low-Level System Guard Notification</h4>
               <p className="text-[11px] text-slate-300 leading-relaxed">
-                If inputs fail to register, verify that "Allow Mock Input injection/USB Debugging (Secure Settings)" is turned on in your Android Developer Options.
+                Jika input tidak terdeteksi, pastikan Anda juga mengaktifkan opsi "Bypass touch input driver queue / USB Debugging (Setelan Keamanan)" di Opsi Developer masing-masing merk handphone.
               </p>
+            </div>
+          </div>
+
+          {/* INTERACTIVE ACTIVATION GUIDE (PANDUAN AKTIFASI) */}
+          <div className="bg-slate-950/60 rounded-xl border border-indigo-950/60 p-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="p-1 px-1.5 bg-indigo-500/10 text-indigo-400 rounded-md border border-indigo-500/20 text-xs font-bold">
+                  PRO
+                </div>
+                <h3 className="text-sm font-semibold text-slate-100 flex items-center gap-1.5 font-sans">
+                  <BookOpen className="w-4 h-4 text-indigo-400" />
+                  Materi Panduan Aktifasi Interaktif
+                </h3>
+              </div>
+              <span className="text-[10px] text-slate-500 bg-slate-900 border border-slate-800 px-2 py-0.5 rounded font-mono">
+                {activeTab === 'shizuku' ? 'Shizuku Wizard' : 'ADB Wizard'}
+              </span>
+            </div>
+
+            {/* Progress Checklist bar */}
+            <div>
+              <div className="flex justify-between items-center mb-1.5">
+                <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Progress Checklist Aktifasi</span>
+                <span className="text-xs font-bold font-mono text-indigo-400">
+                  {activeTab === 'shizuku' 
+                    ? `${shizukuChecklist.filter(Boolean).length}/${SHIZUKU_STEPS.length} Langkah` 
+                    : `${desktopChecklist.filter(Boolean).length}/${DESKTOP_STEPS.length} Langkah`} 
+                  {` `}(
+                  {activeTab === 'shizuku' 
+                    ? Math.round((shizukuChecklist.filter(Boolean).length / SHIZUKU_STEPS.length) * 100)
+                    : Math.round((desktopChecklist.filter(Boolean).length / DESKTOP_STEPS.length) * 100)}%)
+                </span>
+              </div>
+              <div className="w-full bg-slate-900 h-1.5 rounded-full overflow-hidden border border-slate-800/60">
+                <div 
+                  className="bg-gradient-to-r from-indigo-500 to-purple-500 h-full transition-all duration-500 rounded-full"
+                  style={{ 
+                    width: activeTab === 'shizuku' 
+                      ? `${(shizukuChecklist.filter(Boolean).length / SHIZUKU_STEPS.length) * 100}%` 
+                      : `${(desktopChecklist.filter(Boolean).length / DESKTOP_STEPS.length) * 100}%` 
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Step list Container */}
+            <div className="space-y-2.5">
+              {(activeTab === 'shizuku' ? SHIZUKU_STEPS : DESKTOP_STEPS).map((step, idx) => {
+                const isShizuku = activeTab === 'shizuku';
+                const isExpanded = isShizuku ? expandedShizukuStep === idx : expandedDesktopStep === idx;
+                const isCompleted = isShizuku ? shizukuChecklist[idx] : desktopChecklist[idx];
+                
+                const handleToggleExpand = () => {
+                  if (isShizuku) {
+                    setExpandedShizukuStep(isExpanded ? null : idx);
+                  } else {
+                    setExpandedDesktopStep(isExpanded ? null : idx);
+                  }
+                };
+
+                const handleToggleCheck = (e: React.MouseEvent) => {
+                  e.stopPropagation();
+                  if (isShizuku) {
+                    const newChecklist = [...shizukuChecklist];
+                    newChecklist[idx] = !newChecklist[idx];
+                    setShizukuChecklist(newChecklist);
+                    if (newChecklist[idx]) {
+                      onLogMessage(`Tutorial: Langkah Shizuku ${idx + 1} ditandai selesai ✅`);
+                    }
+                  } else {
+                    const newChecklist = [...desktopChecklist];
+                    newChecklist[idx] = !newChecklist[idx];
+                    setDesktopChecklist(newChecklist);
+                    if (newChecklist[idx]) {
+                      onLogMessage(`Tutorial: Langkah ADB ${idx + 1} ditandai selesai ✅`);
+                    }
+                  }
+                };
+
+                return (
+                  <div 
+                    key={idx} 
+                    className={`rounded-lg border transition-all overflow-hidden ${
+                      isExpanded 
+                        ? 'border-indigo-500/40 bg-indigo-950/10 shadow-[0_4px_16px_rgba(99,102,241,0.05)]' 
+                        : 'border-slate-800/80 bg-slate-900/30 hover:border-slate-800 hover:bg-slate-900/50'
+                    }`}
+                  >
+                    {/* Header bar of step */}
+                    <div 
+                      onClick={handleToggleExpand}
+                      className="px-3.5 py-3 flex items-center justify-between cursor-pointer select-none"
+                    >
+                      <div className="flex items-center gap-3 min-w-0 flex-1">
+                        {/* Custom Interactive Checkbox */}
+                        <button 
+                          type="button"
+                          onClick={handleToggleCheck}
+                          className="focus:outline-none flex-shrink-0"
+                          title="Tandai Selesai"
+                        >
+                          {isCompleted ? (
+                            <div className="w-5 h-5 bg-gradient-to-br from-emerald-500 to-teal-600 border border-emerald-400 rounded flex items-center justify-center text-white shadow-md active:scale-95 transition-transform">
+                              <Check className="w-3.5 h-3.5 stroke-[3px]" />
+                            </div>
+                          ) : (
+                            <div className="w-5 h-5 rounded border border-slate-700 hover:border-slate-500 flex items-center justify-center bg-slate-950 active:scale-95 transition-transform">
+                              <span className="text-[10px] text-slate-500 font-bold font-mono">{idx + 1}</span>
+                            </div>
+                          )}
+                        </button>
+
+                        <div className="min-w-0 pr-2">
+                          <h4 className={`text-xs font-bold tracking-tight transition-colors ${
+                            isCompleted ? 'text-slate-400 line-through' : 'text-slate-100 font-sans'
+                          }`}>
+                            {step.title}
+                          </h4>
+                          <p className="text-[10px] text-slate-400 truncate mt-0.5 font-sans">
+                            {step.short}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <span className="text-[8px] bg-slate-950 border border-slate-800 text-indigo-300 font-mono px-1.5 py-0.5 rounded uppercase font-semibold">
+                          {step.badge}
+                        </span>
+                        {isExpanded ? (
+                          <ChevronDown className="w-4 h-4 text-slate-500 shrink-0" />
+                        ) : (
+                          <ChevronRight className="w-4 h-4 text-slate-500 shrink-0" />
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Expandable step guidelines */}
+                    {isExpanded && (
+                      <div className="px-3.5 pb-4 pt-1 border-t border-slate-800/40 bg-slate-950/40 text-[11px] text-slate-300 space-y-2 leading-relaxed">
+                        <ul className="list-disc pl-4 space-y-2 text-slate-300 text-justify font-sans">
+                          {step.details.map((detail, dIdx) => (
+                            <li key={dIdx} className="marker:text-indigo-400">
+                              {detail}
+                            </li>
+                          ))}
+                        </ul>
+                        <div className="pt-2 flex justify-end">
+                          <button 
+                            type="button"
+                            onClick={handleToggleCheck}
+                            className={`px-3 py-1 text-[10px] font-semibold rounded transition-all active:scale-[0.97] flex items-center gap-1 ${
+                              isCompleted 
+                                ? 'bg-slate-900 border border-slate-800 text-slate-400 hover:bg-slate-800/50' 
+                                : 'bg-indigo-600/20 border border-indigo-500/40 text-indigo-300 hover:bg-indigo-600/30'
+                            }`}
+                          >
+                            {isCompleted ? 'Batalkan Status Selesai' : 'Tandai Selesai & Lanjutkan'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>

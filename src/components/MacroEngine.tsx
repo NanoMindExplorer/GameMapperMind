@@ -26,6 +26,30 @@ export default function MacroEngineComponent({ initialMacros, onLogMessage }: Ma
   const [recY, setRecY] = React.useState(500);
   const [recPointer, setRecPointer] = React.useState(1);
 
+  const playbackIntervalRef = React.useRef<NodeJS.Timeout | null>(null);
+
+  React.useEffect(() => {
+    const handleKill = () => {
+      if (playbackIntervalRef.current) {
+        clearInterval(playbackIntervalRef.current);
+        playbackIntervalRef.current = null;
+      }
+      setIsPlaying(false);
+      setIsRecording(false);
+      // Purge action list of all macros (clearing the macro buffer)
+      setMacros(prev => prev.map(m => ({ ...m, actions: [] })));
+      onLogMessage(`[KILL-SWITCH] Macro playback terminated and macro buffers cleared.`);
+    };
+
+    window.addEventListener('emergency-kill', handleKill);
+    return () => {
+      window.removeEventListener('emergency-kill', handleKill);
+      if (playbackIntervalRef.current) {
+        clearInterval(playbackIntervalRef.current);
+      }
+    };
+  }, [onLogMessage]);
+
   const selectedMacro = macros.find(m => m.id === selectedMacroId);
 
   const handleTriggerPlayback = () => {
@@ -38,6 +62,7 @@ export default function MacroEngineComponent({ initialMacros, onLogMessage }: Ma
     const interval = setInterval(() => {
       if (tickCount >= selectedMacro.actions.length) {
         clearInterval(interval);
+        playbackIntervalRef.current = null;
         setIsPlaying(false);
         onLogMessage(`Macro Engine: Sequence [${selectedMacro.name}] executed completely. Dispatched ${selectedMacro.actions.length} evdev touch coordinates.`);
       } else {
@@ -46,6 +71,8 @@ export default function MacroEngineComponent({ initialMacros, onLogMessage }: Ma
         tickCount++;
       }
     }, 120 / playbackSpeed);
+
+    playbackIntervalRef.current = interval;
   };
 
   const startRecordScenario = () => {

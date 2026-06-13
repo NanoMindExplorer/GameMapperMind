@@ -14,9 +14,10 @@ import OverlayWysiwyg from './components/OverlayWysiwyg';
 import MacroEngine from './components/MacroEngine';
 import GamepadTester from './components/GamepadTester';
 import GameSelector from './components/GameSelector';
+import AITunnelPanel from './components/AITunnelPanel';
 import { 
   Terminal, Shield, Settings, Activity, Compass, Cpu, HelpCircle, 
-  ChevronRight, Sparkles, BookOpen, Layers
+  ChevronRight, Sparkles, BookOpen, Layers, Bot, ShieldAlert
 } from 'lucide-react';
 
 export default function App() {
@@ -40,7 +41,24 @@ export default function App() {
 
   const [profiles, setProfiles] = React.useState<GamepadProfile[]>(INITIAL_PROFILES);
   const [activeProfileId, setActiveProfileId] = React.useState('genshin');
-  const [selectedMainView, setSelectedMainView] = React.useState<'shizuku' | 'overlay' | 'profile' | 'macro' | 'tester'>('shizuku');
+  const [selectedMainView, setSelectedMainView] = React.useState<'shizuku' | 'overlay' | 'profile' | 'macro' | 'tester' | 'ai_tunnel'>('shizuku');
+  const [isKilling, setIsKilling] = React.useState(false);
+
+  const handleGlobalKillSwitch = async () => {
+    setIsKilling(true);
+    try {
+      const res = await fetch('/api/ai/kill-switch', { method: 'POST' });
+      if (res.ok) {
+        window.dispatchEvent(new CustomEvent('emergency-kill'));
+        await fetchStatus();
+        handleLogMessage('CRITICAL: Global emergency kill-switch initiated. AI autonomous streams disconnected & macro triggers purged.');
+      }
+    } catch (err) {
+      console.error("Failed to trigger emergency kill-switch", err);
+    } finally {
+      setIsKilling(false);
+    }
+  };
 
   // Query real simulation logs and stats from server
   const fetchStatus = async () => {
@@ -105,34 +123,82 @@ export default function App() {
       {/* Corporate Brand Header Section */}
       <header className="border-b border-slate-900/80 bg-slate-950/40 backdrop-blur-md sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex justify-between items-center">
-          <div className="flex items-center gap-3">
-            <div className="relative flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-600 border border-indigo-400/20 shadow-lg shadow-indigo-600/10">
-              <span className="font-mono text-lg font-bold tracking-tighter text-white">N</span>
-              <div className="absolute -inset-1 rounded-xl bg-gradient-to-tr from-indigo-500 to-violet-500 opacity-20 blur-sm pointer-events-none" />
+          <div className="flex items-center gap-3.5 group">
+            {/* High-fidelity gaming controller & crosshair cyber badge */}
+            <div className="relative flex items-center justify-center w-12 h-12 rounded-xl bg-slate-950 border-2 border-indigo-500/30 group-hover:border-pink-500/60 shadow-lg shadow-indigo-950/50 transition-all duration-300 overflow-hidden cursor-crosshair">
+              {/* Futuristic honeycomb layout behind */}
+              <div className="absolute inset-0 opacity-[0.06] bg-[radial-gradient(#ffffff_1px,transparent_1px)] [background-size:16px_16px] pointer-events-none" />
+              
+              {/* Real Game Controller + Crosshair Laser sight Vector */}
+              <svg className="w-8 h-8 text-indigo-400 group-hover:text-pink-400 group-hover:scale-110 group-hover:rotate-[15deg] transition-all duration-500 relative z-10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                {/* Controller Chassis Shield */}
+                <path d="M6 12c-2.5 0-4-1.5-4-3.5S3.5 5 6 5c1 0 2 0.5 3 1.5 1-1 2-1.5 3-1.5 2.5 0 4 1.5 4 3.5s-1.5 3.5-4 3.5" className="opacity-40" />
+                {/* Modern Controller Wing Silhouette */}
+                <path d="M2 10.5C2 7.5 4 5 7 5h10c3 0 5 2.5 5 5.5 0 3.5-2 6.5-4 6.5s-2.5-1.5-4-1.5-2 1.5-4 1.5-4-3-4-6.5Z" strokeLinecap="round" strokeLinejoin="round" />
+                {/* Joystick points with electric orbits */}
+                <circle cx="7.5" cy="11.5" r="1.5" fill="currentColor" className="animate-pulse" />
+                <circle cx="16.5" cy="11.5" r="1.5" fill="currentColor" className="animate-pulse delay-100" />
+                {/* Action buttons (X/Y/A/B) simulated clusters */}
+                <path d="M15.5 10h2M16.5 9v2" strokeWidth="1" />
+                <path d="M6.5 10h2M7.5 9v2" strokeWidth="1" />
+                {/* Epic central power diamond */}
+                <polygon points="12,9.5 13.5,11.5 12,13.5 10.5,11.5" fill="currentColor" className="opacity-90 animate-ping duration-1000" />
+              </svg>
+              
+              {/* Outer corner cyber brackets detailing */}
+              <div className="absolute top-1 left-1 w-2 h-2 border-t-2 border-l-2 border-indigo-500/60 rounded-tl" />
+              <div className="absolute top-1 right-1 w-2 h-2 border-t-2 border-r-2 border-indigo-500/60 rounded-tr" />
+              <div className="absolute bottom-1 left-1 w-2 h-2 border-b-2 border-l-2 border-indigo-500/60 rounded-bl" />
+              <div className="absolute bottom-1 right-1 w-2 h-2 border-b-2 border-r-2 border-indigo-500/60 rounded-br" />
+
+              {/* Futuristic neon scanline aura overlay */}
+              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-indigo-500/10 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000 pointer-events-none" />
+              <div className="absolute -inset-1.5 rounded-xl bg-gradient-to-tr from-indigo-500 to-pink-500 opacity-0 group-hover:opacity-15 blur transition-opacity duration-300 pointer-events-none" />
             </div>
+
+            {/* Typography brand styling */}
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-sm font-bold font-sans tracking-wide text-white uppercase sm:text-base">
-                  Gamepad Mapper Mind
-                </h1>
-                <span className="text-[9px] font-mono leading-none font-bold bg-indigo-950/80 text-indigo-400 border border-indigo-900 px-1.5 py-0.5 rounded uppercase">
-                  Nexion Core
+                <span className="font-orbitron text-xs sm:text-sm font-black tracking-widest text-slate-100 uppercase group-hover:text-pink-400 group-hover:text-glow-pink transition-all duration-300">
+                  GAMEPAD <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-500 font-extrabold text-glow-indigo">MAPPER</span>
+                </span>
+                <span className="text-[8px] font-mono leading-none font-bold bg-pink-950/50 text-pink-400 border border-pink-900/60 px-1.5 py-0.5 rounded-md uppercase tracking-wider animate-pulse">
+                  X-PRO AGENT
                 </span>
               </div>
-              <p className="text-[10px] text-slate-400 tracking-wider">Low-Level Touch Injection & Gyro Fusion</p>
+              <p className="text-[9px] uppercase font-mono text-slate-400 tracking-widest mt-0.5 group-hover:text-indigo-400 transition-colors">
+                LOW-LEVEL TACTILE CORE & VERTICAL VISUAL VLM
+              </p>
             </div>
           </div>
 
-          {/* Quick HUD State indications */}
-          <div className="hidden md:flex items-center gap-6 text-xs text-slate-400 font-mono">
-            <div className="flex items-center gap-2">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-              <span>Socket IPC: @gampad_mapper_ipc</span>
+          {/* Quick HUD State indications & Emergency Kill Switch */}
+          <div className="flex items-center gap-4">
+            <div className="hidden md:flex items-center gap-6 text-xs text-slate-400 font-mono pr-2">
+              <div className="flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                <span>Socket IPC: @gampad_mapper_ipc</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse"></span>
+                <span>Input Polling: 250Hz</span>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse"></span>
-              <span>Input Polling: 250Hz</span>
-            </div>
+
+            <button
+              onClick={handleGlobalKillSwitch}
+              disabled={isKilling}
+              id="global-kill-switch-btn"
+              className="relative group px-3.5 py-1.5 text-xs font-bold font-mono uppercase bg-red-950/40 hover:bg-red-900/40 border border-red-500/50 hover:border-red-500 text-red-400 rounded-lg shadow-md shadow-red-500/5 hover:shadow-red-500/15 active:scale-[0.97] transition-all flex items-center gap-2"
+              title="Stop all active AI inputs and purge macro buffers"
+            >
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+              </span>
+              <ShieldAlert className="w-3.5 h-3.5 text-red-400 group-hover:scale-110 transition-transform" />
+              <span>KILL SWITCH</span>
+            </button>
           </div>
         </div>
       </header>
@@ -197,6 +263,17 @@ export default function App() {
             <Compass className="w-3.5 h-3.5" />
             Sensor & Input Diagnostics
           </button>
+          <button
+            onClick={() => setSelectedMainView('ai_tunnel')}
+            className={`px-4 py-2 text-xs font-semibold rounded-lg flex items-center gap-2 transition-all ${
+              selectedMainView === 'ai_tunnel' 
+                ? 'bg-slate-900 text-pink-400 border border-slate-800' 
+                : 'text-slate-400 hover:text-pink-300 hover:bg-slate-950/40'
+            }`}
+          >
+            <Bot className="w-3.5 h-3.5 text-pink-400" />
+            AI Tunnel & Copilot
+          </button>
         </div>
 
         {/* Dynamic Inner views representing our monorepo features */}
@@ -236,6 +313,12 @@ export default function App() {
 
           {selectedMainView === 'tester' && (
             <GamepadTester
+              onLogMessage={handleLogMessage}
+            />
+          )}
+
+          {selectedMainView === 'ai_tunnel' && (
+            <AITunnelPanel
               onLogMessage={handleLogMessage}
             />
           )}

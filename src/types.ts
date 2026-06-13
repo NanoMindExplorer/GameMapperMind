@@ -65,3 +65,18 @@ export interface ShizukuState {
   daemonVersion: string;
   logLines: string[];
 }
+
+export interface AITunnelState {
+  isEnabled: boolean;
+  activeAgent: 'vision_agent' | 'vlm_gemini' | 'reinforcement_rl';
+  tunnelStatus: 'WAITING_FOR_CLIENT' | 'TUNNEL_CONNECTED' | 'AUTOPILOT_DRIVING';
+  clientIp: string;
+  apiToken: string;
+  responseDelayMs: number;
+  confidenceScore: number;
+  logs: string[];
+  totalModelCommandsExecuted: number;
+  allowAutonomousTap: boolean;
+  allowMacroTriggers: boolean;
+}
+

@@ -47,9 +47,17 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
       let activeGP: Gamepad | null = null;
       
       for (let i = 0; i < gamepads.length; i++) {
-        if (gamepads[i]) {
+        if (gamepads[i] && gamepads[i]!.mapping !== '') {
           activeGP = gamepads[i];
-          break; // pick the first active connected gamepad
+          break;
+        }
+      }
+      if (!activeGP) {
+        for (let i = 0; i < gamepads.length; i++) {
+          if (gamepads[i]) {
+            activeGP = gamepads[i];
+            break;
+          }
         }
       }
       

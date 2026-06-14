@@ -261,7 +261,7 @@ export default function App() {
   const activeProfile = profiles.find(p => p.id === activeProfileId) || profiles[0];
 
   const handleGamepadPress = React.useCallback(async (button: string, isPressed: boolean) => {
-    const mapping = activeProfile.buttons.find(b => b.mappedKey && b.mappedKey.toLowerCase().includes(button.toLowerCase()));
+    const mapping = activeProfile.buttons.find(b => b.mappedKey === button);
     if (mapping) {
       // Calculate physical coordinates based on screen
       const x = Math.round((mapping.x / 100) * window.innerWidth);
@@ -308,6 +308,8 @@ export default function App() {
         const targetX = Math.round(baseX + (axes.lx * 150));
         const targetY = Math.round(baseY + (axes.ly * 150));
         
+        const isSameAsLast = activeStickPointer.current.lastX === targetX && activeStickPointer.current.lastY === targetY;
+        
         if (activeStickPointer.current.id !== 'L_STICK') {
            // touch down
            activeStickPointer.current.id = 'L_STICK';
@@ -320,18 +322,20 @@ export default function App() {
         }
 
         // move
-        if (shizukuState.status === 'CONNECTED_SHIZUKU' && typeof window !== 'undefined' && 'Capacitor' in window) {
-           // In capacitor just swipe iteratively
-           // This is just a fallback for real injector, we use swift swipe logic
-           injectInput(`input swipe ${activeStickPointer.current.lastX || baseX} ${activeStickPointer.current.lastY || baseY} ${targetX} ${targetY} 10`);
-        } else {
-           fetch("/api/daemon/inject", {
-             method: "POST", headers: { "Content-Type": "application/json" },
-             body: JSON.stringify({ command: "touch_move", id: 'L_STICK', x: targetX, y: targetY })
-           });
+        if (!isSameAsLast) {
+          if (shizukuState.status === 'CONNECTED_SHIZUKU' && typeof window !== 'undefined' && 'Capacitor' in window) {
+             // In capacitor just swipe iteratively
+             // This is just a fallback for real injector, we use swift swipe logic
+             injectInput(`input swipe ${activeStickPointer.current.lastX || baseX} ${activeStickPointer.current.lastY || baseY} ${targetX} ${targetY} 10`);
+          } else {
+             fetch("/api/daemon/inject", {
+               method: "POST", headers: { "Content-Type": "application/json" },
+               body: JSON.stringify({ command: "touch_move", id: 'L_STICK', x: targetX, y: targetY })
+             });
+          }
+          activeStickPointer.current.lastX = targetX;
+          activeStickPointer.current.lastY = targetY;
         }
-        activeStickPointer.current.lastX = targetX;
-        activeStickPointer.current.lastY = targetY;
       }
     }
   }, [activeProfile, shizukuState.status, injectInput]);

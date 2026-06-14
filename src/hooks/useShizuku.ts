@@ -1,3 +1,4 @@
+import React from 'react';
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { ShizukuState } from '../types';
 
@@ -79,7 +80,7 @@ export function useShizuku() {
     return false;
   };
 
-  const injectInput = async (command: string) => {
+  const injectInput = React.useCallback(async (command: string) => {
     if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
       try {
         await ShizukuPlugin.injectInput({ command });
@@ -90,7 +91,7 @@ export function useShizuku() {
       }
     }
     return false;
-  };
+  }, []);
 
   return { checkShizukuStatus, requestShizukuPermission, executeShizukuCommand, startDaemon, stopDaemon, injectInput };
 }

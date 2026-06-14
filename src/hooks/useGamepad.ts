@@ -10,16 +10,24 @@ export function useGamepad(
 
   useEffect(() => {
     let animationFrameId: number;
-    let timeoutId: number;
 
     const poll = () => {
       const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
       let activeGP: Gamepad | null = null;
       
       for (let i = 0; i < gamepads.length; i++) {
-        if (gamepads[i]) {
+        if (gamepads[i] && gamepads[i]!.mapping !== '') {
+          // Prefer controllers with known mapping (standard)
           activeGP = gamepads[i];
           break;
+        }
+      }
+      if (!activeGP) {
+        for (let i = 0; i < gamepads.length; i++) {
+          if (gamepads[i]) {
+            activeGP = gamepads[i];
+            break;
+          }
         }
       }
 
@@ -39,7 +47,13 @@ export function useGamepad(
 
         map.forEach((btnName, idx) => {
           if (buttons[idx]) {
-            const isPressed = buttons[idx].pressed;
+            let isPressed = buttons[idx].pressed;
+            
+            // Fix R2 and L2 (analog triggers) which fluctuate. Add actuation point.
+            if (btnName === 'BUTTON_L2' || btnName === 'BUTTON_R2') {
+               isPressed = buttons[idx].value > 0.3;
+            }
+
             currentButtons[btnName] = isPressed;
             const wasPressed = !!previousButtons.current[btnName];
             
@@ -59,18 +73,19 @@ export function useGamepad(
         const ry = axes[3] || 0;
         
         // Deadzone filter
-        const deadzone = 0.1;
+        const deadzone = 0.05;
         const flx = Math.abs(lx) > deadzone ? lx : 0;
         const fly = Math.abs(ly) > deadzone ? ly : 0;
         const frx = Math.abs(rx) > deadzone ? rx : 0;
         const fry = Math.abs(ry) > deadzone ? ry : 0;
         
-        if (
-          Math.abs(flx - previousAxes.current.lx) > 0.05 ||
-          Math.abs(fly - previousAxes.current.ly) > 0.05 ||
-          Math.abs(frx - previousAxes.current.rx) > 0.05 ||
-          Math.abs(fry - previousAxes.current.ry) > 0.05
-        ) {
+        const isNeutral = flx === 0 && fly === 0 && frx === 0 && fry === 0;
+        const hasChanged = Math.abs(flx - previousAxes.current.lx) > 0.002 ||
+                           Math.abs(fly - previousAxes.current.ly) > 0.002 ||
+                           Math.abs(frx - previousAxes.current.rx) > 0.002 ||
+                           Math.abs(fry - previousAxes.current.ry) > 0.002;
+                           
+        if (hasChanged || !isNeutral) {
            previousAxes.current = { lx: flx, ly: fly, rx: frx, ry: fry };
            if (onAxisMove) onAxisMove(previousAxes.current);
         }
@@ -78,23 +93,14 @@ export function useGamepad(
       } else {
         setConnectedGamepad(null);
       }
-
-      if (document.hidden) {
-        timeoutId = window.setTimeout(poll, 16);
-      } else {
-        animationFrameId = requestAnimationFrame(poll);
-      }
+      
+      animationFrameId = requestAnimationFrame(poll);
     };
 
-    if (document.hidden) {
-      timeoutId = window.setTimeout(poll, 16);
-    } else {
-      animationFrameId = requestAnimationFrame(poll);
-    }
+    animationFrameId = requestAnimationFrame(poll);
 
     return () => {
       cancelAnimationFrame(animationFrameId);
-      clearTimeout(timeoutId);
     };
   }, [onButtonChange, onAxisMove]);
 

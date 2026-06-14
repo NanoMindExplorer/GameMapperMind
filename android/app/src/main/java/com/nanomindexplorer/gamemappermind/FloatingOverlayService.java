@@ -27,8 +27,8 @@ import java.io.DataOutputStream;
 
 public class FloatingOverlayService extends Service {
     private WindowManager windowManager;
-    private View handleContainer;
-    private java.util.List<View> virtualButtonWindows = new java.util.ArrayList<>();
+    private static View handleContainer;
+    private static java.util.List<View> virtualButtonWindows = new java.util.ArrayList<>();
     private static final String CHANNEL_ID = "OverlayServiceChannel";
     private boolean isEditMode = false;
     private String currentConfigJson = "{}";
@@ -340,6 +340,14 @@ public class FloatingOverlayService extends Service {
 
             new Handler(Looper.getMainLooper()).post(() -> {
                 try {
+                    // Prevent duplicate handleContainer (Ghost Icons) if Service restarted rapidly
+                    if (handleContainer != null) {
+                        try {
+                            windowManager.removeView(handleContainer);
+                        } catch (Exception e) {}
+                        handleContainer = null;
+                    }
+
                     // 2. Handle Container (WRAP_CONTENT)
                     handleContainer = new FrameLayout(FloatingOverlayService.this);
                     TextView icon = new TextView(FloatingOverlayService.this);

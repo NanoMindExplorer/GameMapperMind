@@ -15,9 +15,14 @@ public class MainActivity extends BridgeActivity {
     private androidx.activity.result.ActivityResultLauncher<Intent> overlayPermissionLauncher;
 
     @Override
-    protected void onCreate(Bundle savedInstanceState) {
+    public void init(Bundle savedInstanceState) {
+        super.init(savedInstanceState);
         registerPlugin(ShizukuPlugin.class);
         registerPlugin(OverlayPlugin.class);
+    }
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
         overlayPermissionLauncher = registerForActivityResult(

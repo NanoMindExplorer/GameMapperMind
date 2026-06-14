@@ -118,6 +118,22 @@ app.get("/api/daemon/calibration", (req, res) => {
   res.json(calibrationState);
 });
 
+app.post("/api/daemon/inject", (req, res) => {
+  const { command, x, y, duration } = req.body;
+  
+  if (command === "tap") {
+    daemonState.logLines.push(`[INJECT-SIM] Executing physical tap at [${x}, ${y}]`);
+  } else if (command === "swipe") {
+    daemonState.logLines.push(`[INJECT-SIM] Executing physical swipe / drag`);
+  } else if (command === "key") {
+    daemonState.logLines.push(`[INJECT-SIM] Executing macro key press`);
+  }
+  
+  if (daemonState.logLines.length > 50) daemonState.logLines.shift();
+  
+  res.json({ success: true, status: "injected_simulated" });
+});
+
 // API Get/Set Active Profile ID
 app.get("/api/profile/active", (req, res) => {
   res.json({ profileId: activeProfileId });

@@ -24,9 +24,12 @@ import {
 } from 'lucide-react';
 
 import { useShizuku } from './hooks/useShizuku';
+import { useGamepad } from './hooks/useGamepad';
+import { useOverlay } from './hooks/useOverlay';
 
 export default function App() {
-  const { checkShizukuStatus } = useShizuku();
+  const { checkShizukuStatus, executeShizukuCommand } = useShizuku();
+  const { startOverlay, stopOverlay } = useOverlay();
   const [shizukuState, setShizukuState] = React.useState<ShizukuState>({
     status: 'CONNECTED_SHIZUKU',
     daemonRunning: true,
@@ -172,13 +175,11 @@ export default function App() {
   const handleToggleOverlay = async () => {
     try {
       if (overlayActive) {
-        await (OverlayPlugin as any).stopOverlay();
+        await stopOverlay();
         setOverlayActive(false);
         handleLogMessage('SYSTEM: Native floating overlay deactivated.');
       } else {
-        await (OverlayPlugin as any).startOverlay({
-          config: JSON.stringify(activeProfile)
-        });
+        await startOverlay(activeProfile);
         setOverlayActive(true);
         handleLogMessage('SYSTEM: Native floating overlay activated. You can now minimize the app.');
       }
@@ -230,6 +231,28 @@ export default function App() {
   }, []);
 
   const activeProfile = profiles.find(p => p.id === activeProfileId) || profiles[0];
+
+  const handleGamepadPress = React.useCallback(async (button: string) => {
+    const mapping = activeProfile.buttons.find(b => b.key.toLowerCase() === button.toLowerCase());
+    if (mapping) {
+      // Calculate physical coordinates based on screen
+      const x = Math.round((mapping.x / 100) * window.innerWidth);
+      const y = Math.round((mapping.y / 100) * window.innerHeight);
+
+      if (shizukuState.status === 'CONNECTED_SHIZUKU' && typeof window !== 'undefined' && 'Capacitor' in window) {
+         executeShizukuCommand(`input tap ${x} ${y}`);
+         // Log but throttle it to prevent spam
+      } else {
+         fetch("/api/daemon/inject", {
+           method: "POST",
+           headers: { "Content-Type": "application/json" },
+           body: JSON.stringify({ command: "tap", x, y })
+         });
+      }
+    }
+  }, [activeProfile, shizukuState.status, executeShizukuCommand]);
+
+  const { connectedGamepad } = useGamepad(handleGamepadPress);
 
   const handleLogMessage = (msg: string) => {
     setShizukuState(prev => {
@@ -299,6 +322,15 @@ export default function App() {
 
           {/* Quick HUD State indications & Emergency Kill Switch */}
           <div className="flex items-center gap-4">
+            <div className="hidden md:flex items-center gap-6 text-[10px] text-slate-400 font-mono pr-2 border-r border-slate-800">
+              <div className="flex items-center gap-2" title={connectedGamepad ? `${connectedGamepad.id}` : 'No gamepad connected'}>
+                <span className={`w-1.5 h-1.5 rounded-full ${connectedGamepad ? 'bg-green-500 animate-pulse' : 'bg-slate-600'}`}></span>
+                <span className={connectedGamepad ? 'text-green-400' : 'text-slate-500'}>
+                  GP: {connectedGamepad ? 'CONNECTED' : 'DISCONNECTED'}
+                </span>
+              </div>
+            </div>
+            
             <div className="hidden md:flex items-center gap-6 text-xs text-slate-400 font-mono pr-2">
               {isEditingSettings ? (
                 <div className="flex items-center gap-4">

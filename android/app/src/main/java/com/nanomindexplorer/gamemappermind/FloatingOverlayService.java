@@ -117,12 +117,43 @@ public class FloatingOverlayService extends Service {
         }
     }
 
+    private void injectTouchViaShizuku(int x, int y) {
+        try {
+            if (rikka.shizuku.Shizuku.pingBinder() && rikka.shizuku.Shizuku.checkSelfPermission() == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                java.lang.reflect.Method method = rikka.shizuku.Shizuku.class.getDeclaredMethod("newProcess", String[].class, String[].class, String.class);
+                method.setAccessible(true);
+                // Add randomization for anti-ban
+                int dx = x + (int)((Math.random() - 0.5) * 10);
+                int dy = y + (int)((Math.random() - 0.5) * 10);
+                method.invoke(null, new String[]{"sh", "-c", "input tap " + dx + " " + dy}, null, null);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
     @Override
     public void onCreate() {
         super.onCreate();
 
-        floatingContainer = new FrameLayout(this);
-        FrameLayout container = (FrameLayout) floatingContainer;
+        floatingContainer = new InterceptFrameLayout(this);
+        InterceptFrameLayout container = (InterceptFrameLayout) floatingContainer;
+        
+        container.setInputEventListener(new InterceptFrameLayout.InputEventListener() {
+            @Override
+            public boolean onGamepadEvent(MotionEvent event) {
+                return false;
+            }
+
+            @Override
+            public boolean onKeyEvent(KeyEvent event) {
+                if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                    // Try to map to Shizuku command
+                    injectTouchViaShizuku(500, 500); // Placeholder coordinate
+                }
+                return false;
+            }
+        });
         
         // This is the draggable handle
         TextView icon = new TextView(this);

@@ -391,7 +391,7 @@ export default function MacroEngineComponent({ macros, onUpdateMacros, onLogMess
         <div className="p-3 bg-indigo-950/20 rounded border border-indigo-900/40 mt-4 flex items-start gap-2.5">
           <Info className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
           <p className="text-[10px] text-slate-350 leading-relaxed text-justify">
-            Macros bypass conventional overlays and target pure virtual evdev touch frames in the abstract kernel namespace. Playback intervals are slightly varied dynamically dynamically (+/- 2ms jitter) to confound third-party heuristics detection.
+            Macros bypass conventional overlays and target pure virtual evdev touch frames in the abstract kernel namespace. Playback intervals are slightly varied dynamically (+/- 2ms jitter) to confound third-party heuristics detection.
           </p>
         </div>
       </div>

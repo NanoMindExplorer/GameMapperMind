@@ -142,7 +142,7 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
 
     const handleConnect = (e: GamepadEvent) => {
       let msg = `[HARDWARE] Physical gamepad connected: ${e.gamepad.id} (index: ${e.gamepad.index})`;
-      if (e.gamepad.id.toLowerCase().includes('vortex') || e.gamepad.id.toLowerCase().includes('xp107')) {
+      if ((e.gamepad.id || '').toLowerCase().includes('vortex') || (e.gamepad.id || '').toLowerCase().includes('xp107')) {
          msg = `[HARDWARE] ⚡ VORTEX XP107 DUALMODE TERDETEKSI: ${e.gamepad.id}. Mengaktifkan akselerasi native dan polling rate maksimal 1000Hz secara otomatis!`;
          setLowLatencyEnabled(true);
          setSelectedPollingRate(1000);
@@ -544,7 +544,7 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
                 <span className="text-[11px] font-medium font-sans">
                   {connectedGamepad 
                     ? (() => {
-                        const id = connectedGamepad.id.toLowerCase();
+                        const id = (connectedGamepad.id || '').toLowerCase();
                         if (id.includes('vortex') || id.includes('xp107')) {
                           return <span className="text-emerald-400 font-bold">⚡ VORTEX XP107 DUALMODE TERDETEKSI (NATIVE ACCELERATION ENABLED)</span>;
                         }

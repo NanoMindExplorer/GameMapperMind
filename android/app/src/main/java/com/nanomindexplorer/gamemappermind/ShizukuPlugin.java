@@ -55,7 +55,15 @@ public class ShizukuPlugin extends Plugin {
 
         try {
             if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
-                Process process = Shizuku.newProcess(new String[]{"sh", "-c", command}, null, null);
+                Process process = null;
+                try {
+                    java.lang.reflect.Method method = Shizuku.class.getDeclaredMethod("newProcess", String[].class, String[].class, String.class);
+                    method.setAccessible(true);
+                    process = (Process) method.invoke(null, new String[]{"sh", "-c", command}, null, null);
+                } catch (Exception e) {
+                    call.reject("Failed to invoke newProcess via reflection", e);
+                    return;
+                }
                 
                 BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
                 StringBuilder output = new StringBuilder();

@@ -170,6 +170,20 @@ export default function App() {
     syncActiveProfileIdOnServer(id);
   };
 
+  // Global listeners to prevent any d-pad or keyboard scrolling
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Prevent scrolling from arrow keys / space
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
+        e.preventDefault();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown, { passive: false });
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
   const [overlayActive, setOverlayActive] = React.useState(false);
   const [toastMessage, setToastMessage] = React.useState<{text: string, type: 'success' | 'error'} | null>(null);
 

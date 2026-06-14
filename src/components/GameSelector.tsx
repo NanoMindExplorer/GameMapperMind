@@ -4,9 +4,9 @@
  * @author NanoMind Explorer
  */
 
-import React from 'react';
+import React, { useRef } from 'react';
 import { GamepadProfile } from '../types';
-import { Target, Settings, Sliders, Box, HardDrive, Cpu, AlertTriangle, Play, Flame, Plus, Trash2, Edit2, Check, X } from 'lucide-react';
+import { Target, Settings, Sliders, Box, HardDrive, Cpu, AlertTriangle, Play, Flame, Plus, Trash2, Edit2, Check, X, ShieldAlert, Download, Upload } from 'lucide-react';
 
 interface GameSelectorProps {
   profiles: GamepadProfile[];
@@ -23,6 +23,7 @@ export default function GameSelector({ profiles, activeProfileId, onProfileSelec
   const [activeSubTab, setActiveSubTab] = React.useState<'parameters' | 'hardware'>('parameters');
   const [isEditingMeta, setIsEditingMeta] = React.useState(false);
   const [editMetaValues, setEditMetaValues] = React.useState({ name: '', packageName: '', description: '' });
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const updateProfileValue = (key: keyof GamepadProfile, value: any) => {
     const updated = { ...activeProfile, [key]: value };
@@ -43,7 +44,8 @@ export default function GameSelector({ profiles, activeProfileId, onProfileSelec
       deadzone: 0.1,
       smoothing: 0.2,
       isCustom: true,
-      buttons: []
+      buttons: [],
+      antiBanEnabled: false
     };
     onCreateProfile(newProfile);
     onLogMessage(`Profile Engine: Created new blank profile [${newId}]`);
@@ -54,6 +56,46 @@ export default function GameSelector({ profiles, activeProfileId, onProfileSelec
       onDeleteProfile(activeProfile.id);
       onLogMessage(`Profile Engine: Deleted profile [${activeProfile.name}]`);
     }
+  };
+
+  const handleExportProfile = () => {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(activeProfile, null, 2));
+    const downloadAnchorNode = document.createElement('a');
+    downloadAnchorNode.setAttribute("href",     dataStr);
+    downloadAnchorNode.setAttribute("download", `${activeProfile.name.replace(/\s+/g, '_')}_profile.json`);
+    document.body.appendChild(downloadAnchorNode);
+    downloadAnchorNode.click();
+    downloadAnchorNode.remove();
+    onLogMessage(`Profile Engine: Exported profile [${activeProfile.name}] to JSON`);
+  };
+
+  const handleImportProfile = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const importedData = JSON.parse(e.target?.result as string);
+        if (importedData && typeof importedData === 'object' && importedData.id && typeof importedData.name === 'string') {
+          // generate a new id to prevent conflicts
+          const importedProfile: GamepadProfile = {
+            ...importedData,
+            id: `custom_imported_${Date.now()}`,
+            name: `${importedData.name} (Imported)`,
+            isCustom: true
+          };
+          onCreateProfile(importedProfile);
+          onLogMessage(`Profile Engine: Successfully imported profile [${importedProfile.name}]`);
+        } else {
+          onLogMessage("Profile Engine: Failed. Invalid profile JSON format.");
+        }
+      } catch (err) {
+         onLogMessage("Profile Engine: Failed to parse JSON file.");
+      }
+    };
+    reader.readAsText(file);
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const startEditingMetaData = () => {
@@ -93,13 +135,36 @@ export default function GameSelector({ profiles, activeProfileId, onProfileSelec
         <div className="md:col-span-5 space-y-4">
           <div className="flex items-center justify-between">
              <span className="block text-[10px] font-mono font-bold text-slate-500 uppercase">CHOOSE ACTIVE PROFILE</span>
-             <button
-               onClick={handleCreateNew}
-               className="flex items-center gap-1.5 px-2.5 py-1 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 rounded text-[10px] font-bold uppercase transition-colors"
-             >
-               <Plus className="w-3 h-3" />
-               New Profile
-             </button>
+             <div className="flex items-center gap-1.5">
+               <button
+                 onClick={() => fileInputRef.current?.click()}
+                 className="p-1 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded"
+                 title="Import JSON Profile"
+               >
+                 <Upload className="w-3.5 h-3.5" />
+               </button>
+               <input
+                 type="file"
+                 ref={fileInputRef}
+                 className="hidden"
+                 accept=".json"
+                 onChange={handleImportProfile}
+               />
+               <button
+                 onClick={handleExportProfile}
+                 className="p-1 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded mr-1"
+                 title="Export Active Profile as JSON"
+               >
+                 <Download className="w-3.5 h-3.5" />
+               </button>
+               <button
+                 onClick={handleCreateNew}
+                 className="flex items-center gap-1.5 px-2.5 py-1 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 rounded text-[10px] font-bold uppercase transition-colors"
+               >
+                 <Plus className="w-3 h-3" />
+                 New Profile
+               </button>
+             </div>
           </div>
           <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1">
             {profiles.map((p) => {
@@ -231,21 +296,38 @@ export default function GameSelector({ profiles, activeProfileId, onProfileSelec
                   </div>
                 </div>
 
-                <div>
-                  <div className="flex justify-between text-[10px] text-slate-400 mb-1 uppercase font-semibold">
-                    <span>Exponential Jitter Filter Damping</span>
-                    <span>{(activeProfile.smoothing * 100).toFixed(0)}%</span>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <div className="flex justify-between items-start text-[10px] text-slate-400 mb-1 uppercase font-semibold">
+                      <span>Exponential Smoothing Damping</span>
+                      <span>{(activeProfile.smoothing * 100).toFixed(0)}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0.05"
+                      max="0.95"
+                      step="0.05"
+                      className="w-full accent-indigo-500"
+                      value={activeProfile.smoothing}
+                      onChange={(e) => updateProfileValue('smoothing', parseFloat(e.target.value))}
+                    />
+                    <span className="block text-[8px] text-slate-500 mt-0.5 leading-normal">High frequency jitter attenuation performance. Higher keeps signals static.</span>
                   </div>
-                  <input
-                    type="range"
-                    min="0.05"
-                    max="0.95"
-                    step="0.05"
-                    className="w-full accent-indigo-500"
-                    value={activeProfile.smoothing}
-                    onChange={(e) => updateProfileValue('smoothing', parseFloat(e.target.value))}
-                  />
-                  <span className="block text-[8px] text-slate-500 mt-0.5 leading-normal">Exponential smoothing factor representing high frequency jitter attenuation performance. Higher keeps signals static.</span>
+
+                  <div className="flex flex-col">
+                    <div className="flex flex-col gap-1 text-[10px] text-slate-400 mb-1 uppercase font-semibold">
+                      <div className="flex justify-between">
+                        <span className="flex items-center gap-1"><ShieldAlert className="w-3.5 h-3.5 text-emerald-400"/> Anti-Ban Touch Randomizer</span>
+                        <button 
+                          onClick={() => updateProfileValue('antiBanEnabled', !activeProfile.antiBanEnabled)}
+                          className={`w-8 h-4 rounded-full relative transition-colors ${activeProfile.antiBanEnabled ? 'bg-emerald-500' : 'bg-slate-700'}`}
+                        >
+                          <span className={`absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full transition-transform ${activeProfile.antiBanEnabled ? 'translate-x-4' : 'translate-x-0'}`}></span>
+                        </button>
+                      </div>
+                    </div>
+                    <span className="block text-[8px] text-slate-500 mt-1 leading-normal text-start">Humanizes synthetic touch events by slightly randomizing coordinate impacts across a ~4px radial radius. Strongly recommended for competitive shooters.</span>
+                  </div>
                 </div>
               </div>
             ) : (

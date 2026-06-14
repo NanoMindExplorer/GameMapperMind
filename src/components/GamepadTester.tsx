@@ -85,6 +85,11 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
         if (buttons[4]?.pressed) buttonMap['l_shoulder'] = true;
         if (buttons[5]?.pressed) buttonMap['r_shoulder'] = true;
         
+        if (buttons[8]?.pressed) buttonMap['select'] = true;
+        if (buttons[9]?.pressed) buttonMap['start'] = true;
+        if (buttons[10]?.pressed) buttonMap['l3'] = true;
+        if (buttons[11]?.pressed) buttonMap['r3'] = true;
+        
         const buttonsStr = JSON.stringify(buttonMap);
         if (buttonsStr !== lastStateRef.current.buttonsStr) {
           setPressedButtons(buttonMap);
@@ -196,15 +201,15 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
   }, [lowLatencyEnabled, selectedPollingRate, directInputBypass, threadPriorityBoost, bleConnectionTuning, optimizeJitter]);
 
   // Dynamic Signal-To-Noise ratio & micro-drift simulation references
-  const [snrHistory, setSnrHistory] = React.useState<number[]>(Array(50).fill(28));
+  const [snrHistory, setSnrHistory] = React.useState<number[]>(Array(50).fill(0));
   const [driftStimulus, setDriftStimulus] = React.useState<number>(0);
 
   // Real-time gyro drift deviation & sensor fusion tracking vectors
   const [showDriftOverlay, setShowDriftOverlay] = React.useState(false);
   const [showDriftCorrectionOverlay, setShowDriftCorrectionOverlay] = React.useState(true);
-  const [accumulatedDrift, setAccumulatedDrift] = React.useState({ x: 0.15, y: -0.08, z: 0.05 });
-  const [correctionVector, setCorrectionVector] = React.useState({ x: -0.147, y: 0.078, z: -0.049 });
-  const [residualError, setResidualError] = React.useState({ x: 0.003, y: -0.002, z: 0.001 });
+  const [accumulatedDrift, setAccumulatedDrift] = React.useState({ x: 0, y: 0, z: 0 });
+  const [correctionVector, setCorrectionVector] = React.useState({ x: 0, y: 0, z: 0 });
+  const [residualError, setResidualError] = React.useState({ x: 0, y: 0, z: 0 });
   const [fusionEfficiency, setFusionEfficiency] = React.useState(98.5);
   const [driftTrail, setDriftTrail] = React.useState<{x: number, y: number}[]>([]);
 
@@ -274,10 +279,10 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
       });
 
       if (!useRealSensor) {
-        // Compute base motion with pure noise
-        baseMotionX = noiseValue + (Math.random() - 0.5) * currentDrift * 3;
-        baseMotionY = noiseValue + (Math.random() - 0.5) * currentDrift * 3;
-        baseMotionZ = noiseValue + (Math.random() - 0.5) * currentDrift * 1.5;
+        // As requested by user: No physical sensor connected = pure flatline. Dummy simulation removed.
+        baseMotionX = 0;
+        baseMotionY = 0;
+        baseMotionZ = 0;
       } else {
         // Apply noise and stimulus dynamically to real sensor data to make it look "fusioned"
         baseMotionX = (baseMotionX / 40) + noiseValue + (Math.random() - 0.5) * currentDrift * 2;
@@ -300,9 +305,16 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
       // Drift & Fusion Real-time feedback calculation loop
       setAccumulatedDrift(prev => {
         const decayMultiplier = isCalibrating ? 0.82 : 0.992; // faster convergence under calibration
-        const biasFluctX = (Math.random() - 0.5) * 0.006 + 0.0002;
-        const biasFluctY = (Math.random() - 0.5) * 0.006 - 0.0001;
-        const biasFluctZ = (Math.random() - 0.5) * 0.004 + 0.0003;
+        
+        let biasFluctX = 0;
+        let biasFluctY = 0;
+        let biasFluctZ = 0;
+
+        if (useRealSensor || isCalibrating) {
+          biasFluctX = (Math.random() - 0.5) * 0.006 + 0.0002;
+          biasFluctY = (Math.random() - 0.5) * 0.006 - 0.0001;
+          biasFluctZ = (Math.random() - 0.5) * 0.004 + 0.0003;
+        }
         
         let newX = prev.x * decayMultiplier + biasFluctX;
         let newY = prev.y * decayMultiplier + biasFluctY;
@@ -389,14 +401,20 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
         const noiseContribution = activeNoiseFloor + (currentDrift * 0.02);
         const snrRatio = signalPower / Math.max(0.0001, noiseContribution);
         snrDb = snrRatio > 0.1 ? 20 * Math.log10(snrRatio) : 5;
-        // Inject realistic low term fluctuations
-        snrDb += Math.sin(Date.now() / 800) * 2 + (Math.random() - 0.5) * 1.5;
-        // Settle around 25-35dB under standard motion, and spikes high on trigger input/drift excitation
-        snrDb += currentDrift * 15;
+        
+        if (useRealSensor) {
+          // Inject realistic low term fluctuations
+          snrDb += Math.sin(Date.now() / 800) * 2 + (Math.random() - 0.5) * 1.5;
+          // Settle around 25-35dB under standard motion, and spikes high on trigger input/drift excitation
+          snrDb += currentDrift * 15;
+        } else {
+          // No sensor, zero signal
+          snrDb = 0;
+        }
       }
 
-      // Clamp SNR between 2dB and 58dB
-      const finalSnr = Math.max(2, Math.min(58, snrDb));
+      // Clamp SNR between 2dB and 58dB when active, otherwise stick to 0
+      const finalSnr = useRealSensor || isCalibrating ? Math.max(2, Math.min(58, snrDb)) : 0;
 
       setSnrHistory(prev => {
         const next = [...prev, finalSnr];
@@ -545,146 +563,121 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
           </div>
 
           {/* Interactive Gamepad Simulator graphic layout representation */}
-          <div className="relative w-full aspect-[21/10] bg-slate-950 rounded-xl border border-slate-850/80 p-6 flex items-center justify-between shadow-inner overflow-hidden">
+          <div className="relative w-full overflow-hidden bg-slate-950 rounded-xl border border-slate-850/80 p-4 shadow-inner">
             <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(ellipse_at_center,rgba(99,102,241,0.06),transparent)]" />
-
-            {/* Left dpad, joystick, Triggers panel */}
-            <div className="z-10 flex flex-col justify-between h-full w-[40%]">
-              {/* Trigger */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-[10px] font-mono text-slate-400">
-                  <span>LT TRIGGER</span>
-                  <span>{Math.round(triggers.lt * 100)}%</span>
+            
+            {/* Top Triggers Indicators */}
+            <div className="relative w-full max-w-[380px] mx-auto flex justify-between px-6 mb-3">
+              <div className="flex flex-col items-center w-20">
+                <span className="text-[10px] font-mono text-slate-400 mb-1">LT {Math.round(triggers.lt * 100)}%</span>
+                <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden border border-slate-700">
+                   <div className="h-full bg-indigo-500 transition-all duration-75" style={{ width: `${triggers.lt * 100}%` }}></div>
                 </div>
-                <input 
-                  type="range" 
-                  min="0" 
-                  max="100"
-                  className="w-full accent-indigo-500 bg-slate-900" 
-                  value={triggers.lt * 100} 
-                  onChange={(e) => {
-                    const v = parseFloat(e.target.value) / 100;
-                    setTriggers(prev => ({ ...prev, lt: v }));
-                    onLogMessage(`Gamepad Tester Generic Motion: Trigger LT value -> ${v.toFixed(3)}`);
-                  }}
-                />
               </div>
-
-              {/* DPad layout */}
-              <div className="p-2 border border-slate-800 rounded bg-slate-900/40 w-28 mx-auto flex flex-col items-center gap-1">
-                <button 
-                  onClick={() => simulateInteractiveEvent('d_up')} 
-                  className={`w-8 py-0.5 text-[9px] font-bold border rounded transition-colors ${pressedButtons['d_up'] ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400' : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'}`}
-                >
-                  UP
-                </button>
-                <div className="flex justify-between w-full">
-                  <button 
-                    onClick={() => simulateInteractiveEvent('d_left')} 
-                    className={`w-8 py-0.5 text-[9px] font-bold border rounded transition-colors ${pressedButtons['d_left'] ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400' : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'}`}
-                  >
-                    L
-                  </button>
-                  <button 
-                    onClick={() => simulateInteractiveEvent('d_right')} 
-                    className={`w-8 py-0.5 text-[9px] font-bold border rounded transition-colors ${pressedButtons['d_right'] ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400' : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'}`}
-                  >
-                    R
-                  </button>
-                </div>
-                <button 
-                  onClick={() => simulateInteractiveEvent('d_down')} 
-                  className={`w-8 py-0.5 text-[9px] font-bold border rounded transition-colors ${pressedButtons['d_down'] ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400' : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'}`}
-                >
-                  DOWN
-                </button>
-              </div>
-
-              {/* Analog Stick L Controller */}
-              <div className="space-y-1">
-                <span className="block text-[9px] font-bold text-slate-400 font-mono text-center mb-1">LEFT STICK</span>
-                <div className="flex justify-center gap-2">
-                  <button onClick={() => handleStickMoveSimulate('l', -1.0, 0)} className="p-1 px-2.5 bg-slate-900 border border-slate-800 text-slate-300 rounded text-[9px] hover:bg-slate-800">←</button>
-                  <button onClick={() => handleStickMoveSimulate('l', 0, -1.0)} className="p-1 px-2.5 bg-slate-900 border border-slate-800 text-slate-300 rounded text-[9px] hover:bg-slate-800">↑</button>
-                  <button onClick={() => handleStickMoveSimulate('l', 0, 1.0)} className="p-1 px-2.5 bg-slate-900 border border-slate-800 text-slate-300 rounded text-[9px] hover:bg-slate-800">↓</button>
-                  <button onClick={() => handleStickMoveSimulate('l', 1.0, 0)} className="p-1 px-2.5 bg-slate-900 border border-slate-800 text-slate-300 rounded text-[9px] hover:bg-slate-800">→</button>
+              <div className="flex flex-col items-center w-20">
+                <span className="text-[10px] font-mono text-slate-400 mb-1">RT {Math.round(triggers.rt * 100)}%</span>
+                <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden border border-slate-700">
+                   <div className="h-full bg-indigo-500 transition-all duration-75" style={{ width: `${triggers.rt * 100}%` }}></div>
                 </div>
               </div>
             </div>
 
-            {/* Middle Logo details */}
-            <div className="flex flex-col items-center justify-center space-y-2 select-none w-[20%] text-center">
-              <div className="font-semibold text-[11px] text-indigo-400 uppercase tracking-widest leading-none">NEXION</div>
-              <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-ping"></div>
-              <span className="text-[7px] text-slate-500 uppercase font-mono tracking-widest font-bold">SYSTEM XP107</span>
-            </div>
-
-            {/* Right ABXY, triggers, right Joy panel */}
-            <div className="z-10 flex flex-col justify-between h-full w-[40%]">
-              {/* Trigger */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-[10px] font-mono text-slate-400">
-                  <span>RT TRIGGER</span>
-                  <span>{Math.round(triggers.rt * 100)}%</span>
+            {/* Gamepad Body (VORTEX XP107 STYLE) */}
+            <div className="relative w-full max-w-[420px] aspect-[2/1] mx-auto bg-slate-900 border-2 border-slate-800 rounded-[5rem] shadow-2xl flex p-4 pb-8 sm:p-6 sm:pb-10">
+              
+              {/* Left Side (Left Stick Top, DPad Bottom) */}
+              <div className="relative w-1/3 h-full flex flex-col justify-between">
+                
+                {/* Left Stick (Top Left) */}
+                <div className="w-14 h-14 sm:w-16 sm:h-16 bg-slate-800 border-2 border-slate-700 rounded-full flex items-center justify-center relative shadow-inner mx-auto mt-1 sm:mt-2">
+                  <div 
+                     className={`w-9 h-9 sm:w-10 sm:h-10 bg-slate-600 rounded-full shadow-lg border-b-2 border-slate-900 transition-transform duration-75 ${pressedButtons['l3'] ? 'bg-indigo-500 scale-90' : ''}`}
+                     style={{ transform: `translate(${stickLeft.x * 12}px, ${stickLeft.y * 12}px)` }}
+                  ></div>
+                  <span className="absolute -top-4 text-[8px] font-bold text-slate-500 uppercase font-mono tracking-wider">L-Stick</span>
                 </div>
-                <input 
-                  type="range" 
-                  min="0" 
-                  max="100"
-                  className="w-full accent-indigo-500 bg-slate-900" 
-                  value={triggers.rt * 100} 
-                  onChange={(e) => {
-                    const v = parseFloat(e.target.value) / 100;
-                    setTriggers(prev => ({ ...prev, rt: v }));
-                    onLogMessage(`Gamepad Tester Generic Motion: Trigger RT value -> ${v.toFixed(3)}`);
-                  }}
-                />
-              </div>
 
-              {/* Action buttons list */}
-              <div className="grid grid-cols-3 gap-1 w-28 mx-auto py-1">
-                <div></div>
-                <button 
-                  onClick={() => simulateInteractiveEvent('y')} 
-                  className={`w-9 h-9 rounded-full font-bold flex items-center justify-center border text-xs shadow ${pressedButtons['y'] ? 'bg-indigo-500/20 border-indigo-500 text-indigo-400' : 'bg-slate-900 border-slate-800 text-slate-300 hover:text-white'}`}
-                >
-                  Y
-                </button>
-                <div></div>
-                <button 
-                  onClick={() => simulateInteractiveEvent('x')} 
-                  className={`w-9 h-9 rounded-full font-bold flex items-center justify-center border text-xs shadow ${pressedButtons['x'] ? 'bg-indigo-500/20 border-indigo-500 text-indigo-400' : 'bg-slate-900 border-slate-800 text-slate-300 hover:text-white'}`}
-                >
-                  X
-                </button>
-                <div></div>
-                <button 
-                  onClick={() => simulateInteractiveEvent('b')} 
-                  className={`w-9 h-9 rounded-full font-bold flex items-center justify-center border text-xs shadow ${pressedButtons['b'] ? 'bg-indigo-500/20 border-indigo-500 text-indigo-400' : 'bg-slate-900 border-slate-800 text-slate-300 hover:text-white'}`}
-                >
-                  B
-                </button>
-                <div></div>
-                <button 
-                  onClick={() => simulateInteractiveEvent('a')} 
-                  className={`w-9 h-9 rounded-full font-bold flex items-center justify-center border text-xs shadow ${pressedButtons['a'] ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400 shadow shadow-emerald-500/10' : 'bg-slate-900 border-slate-800 text-slate-300 hover:text-white'}`}
-                >
-                  A
-                </button>
-                <div></div>
-              </div>
-
-              {/* Analog Stick R Controller */}
-              <div className="space-y-1">
-                <span className="block text-[9px] font-bold text-slate-400 font-mono text-center mb-1">RIGHT STICK</span>
-                <div className="flex justify-center gap-2">
-                  <button onClick={() => handleStickMoveSimulate('r', -1.0, 0)} className="p-1 px-2.5 bg-slate-900 border border-slate-800 text-slate-300 rounded text-[9px] hover:bg-slate-800">←</button>
-                  <button onClick={() => handleStickMoveSimulate('r', 0, -1.0)} className="p-1 px-2.5 bg-slate-900 border border-slate-800 text-slate-300 rounded text-[9px] hover:bg-slate-800">↑</button>
-                  <button onClick={() => handleStickMoveSimulate('r', 0, 1.0)} className="p-1 px-2.5 bg-slate-900 border border-slate-800 text-slate-300 rounded text-[9px] hover:bg-slate-800">↓</button>
-                  <button onClick={() => handleStickMoveSimulate('r', 1.0, 0)} className="p-1 px-2.5 bg-slate-900 border border-slate-800 text-slate-300 rounded text-[9px] hover:bg-slate-800">→</button>
+                {/* D-Pad (Bottom Left) */}
+                <div className="relative w-16 h-16 mx-auto mb-1 sm:mb-2">
+                  <div className="absolute top-0 left-1/2 -translate-x-1/2 w-5 h-6 bg-slate-800 border border-slate-700 rounded-t flex justify-center items-start pt-1">
+                     <div className={`w-2.5 h-2.5 rounded-full shadow-inner ${pressedButtons['d_up'] ? 'bg-indigo-500' : 'bg-slate-700'}`}></div>
+                  </div>
+                  <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-5 h-6 bg-slate-800 border border-slate-700 rounded-b flex justify-center items-end pb-1">
+                     <div className={`w-2.5 h-2.5 rounded-full shadow-inner ${pressedButtons['d_down'] ? 'bg-indigo-500' : 'bg-slate-700'}`}></div>
+                  </div>
+                  <div className="absolute left-0 top-1/2 -translate-y-1/2 w-6 h-5 bg-slate-800 border border-slate-700 rounded-l flex justify-start items-center pl-1">
+                     <div className={`w-2.5 h-2.5 rounded-full shadow-inner ${pressedButtons['d_left'] ? 'bg-indigo-500' : 'bg-slate-700'}`}></div>
+                  </div>
+                  <div className="absolute right-0 top-1/2 -translate-y-1/2 w-6 h-5 bg-slate-800 border border-slate-700 rounded-r flex justify-end items-center pr-1">
+                     <div className={`w-2.5 h-2.5 rounded-full shadow-inner ${pressedButtons['d_right'] ? 'bg-indigo-500' : 'bg-slate-700'}`}></div>
+                  </div>
+                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-5 h-5 bg-slate-800 z-10"></div>
                 </div>
               </div>
+
+              {/* Middle Logo details */}
+              <div className="w-1/3 flex flex-col items-center justify-center space-y-4 sm:space-y-6 z-10 pt-2 sm:pt-4">
+                <div className="font-semibold text-[13px] sm:text-[15px] text-indigo-400 uppercase tracking-widest leading-none drop-shadow-md">NEXION</div>
+                <div className="flex gap-4 sm:gap-6">
+                   {/* Select */}
+                   <div className="flex flex-col items-center gap-1.5">
+                     <div className={`w-3.5 h-1.5 rounded-full shadow-inner ${pressedButtons['select'] ? 'bg-indigo-400' : 'bg-slate-700'}`}></div>
+                     <span className="text-[6px] text-slate-500 uppercase font-bold tracking-widest">Select</span>
+                   </div>
+                   {/* Middle LED */}
+                   <div className="w-2.5 h-2.5 bg-indigo-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(99,102,241,0.6)] mt-0.5"></div>
+                   {/* Start */}
+                   <div className="flex flex-col items-center gap-1.5">
+                     <div className={`w-3.5 h-1.5 rounded-full shadow-inner ${pressedButtons['start'] ? 'bg-indigo-400' : 'bg-slate-700'}`}></div>
+                     <span className="text-[6px] text-slate-500 uppercase font-bold tracking-widest">Start</span>
+                   </div>
+                </div>
+                <span className="text-[8px] text-slate-500 uppercase font-mono tracking-widest font-bold">VORTEX XP107 SYNC</span>
+              </div>
+
+              {/* Right Side (ABXY Top, Right Stick Bottom) */}
+              <div className="relative w-1/3 h-full flex flex-col justify-between">
+                
+                {/* ABXY (Top Right) */}
+                <div className="relative w-20 h-20 sm:w-24 sm:h-24 mx-auto mt-1 sm:mt-2">
+                   {/* Y */}
+                   <div className={`absolute top-0 left-1/2 -translate-x-1/2 w-6 h-6 sm:w-7 sm:h-7 rounded-full shadow-lg flex items-center justify-center font-bold text-[9px] sm:text-[10px] transition-transform duration-75 ${pressedButtons['y'] ? 'bg-yellow-500 text-slate-900 scale-95' : 'bg-slate-800 border-b-2 border-slate-900 text-yellow-500'}`}>Y</div>
+                   {/* X */}
+                   <div className={`absolute left-0 top-1/2 -translate-y-1/2 w-6 h-6 sm:w-7 sm:h-7 rounded-full shadow-lg flex items-center justify-center font-bold text-[9px] sm:text-[10px] transition-transform duration-75 ${pressedButtons['x'] ? 'bg-blue-500 text-slate-900 scale-95' : 'bg-slate-800 border-b-2 border-slate-900 text-blue-500'}`}>X</div>
+                   {/* B */}
+                   <div className={`absolute right-0 top-1/2 -translate-y-1/2 w-6 h-6 sm:w-7 sm:h-7 rounded-full shadow-lg flex items-center justify-center font-bold text-[9px] sm:text-[10px] transition-transform duration-75 ${pressedButtons['b'] ? 'bg-red-500 text-slate-900 scale-95' : 'bg-slate-800 border-b-2 border-slate-900 text-red-500'}`}>B</div>
+                   {/* A */}
+                   <div className={`absolute bottom-0 left-1/2 -translate-x-1/2 w-6 h-6 sm:w-7 sm:h-7 rounded-full shadow-lg flex items-center justify-center font-bold text-[9px] sm:text-[10px] transition-transform duration-75 ${pressedButtons['a'] ? 'bg-emerald-500 text-slate-900 scale-95' : 'bg-slate-800 border-b-2 border-slate-900 text-emerald-500'}`}>A</div>
+                </div>
+
+                {/* Right Stick (Bottom Right) */}
+                <div className="w-14 h-14 sm:w-16 sm:h-16 bg-slate-800 border-2 border-slate-700 rounded-full flex items-center justify-center relative shadow-inner mx-auto mb-1 sm:mb-2">
+                  <div 
+                     className={`w-9 h-9 sm:w-10 sm:h-10 bg-slate-600 rounded-full shadow-lg border-b-2 border-slate-900 transition-transform duration-75 ${pressedButtons['r3'] ? 'bg-indigo-500 scale-90' : ''}`}
+                     style={{ transform: `translate(${stickRight.x * 12}px, ${stickRight.y * 12}px)` }}
+                  ></div>
+                  <span className="absolute -bottom-4 text-[8px] font-bold text-slate-500 uppercase font-mono tracking-wider">R-Stick</span>
+                </div>
+
+              </div>
+
             </div>
+            
+            {/* L1 / R1 Shoulders */}
+            <div className="absolute top-14 left-1/2 -translate-x-1/2 w-[280px] sm:w-[320px] flex justify-between px-2 pointer-events-none opacity-80">
+               <div className={`w-16 h-4 border border-slate-700 rounded-t-xl shadow-lg transition-colors duration-75 ${pressedButtons['l_shoulder'] ? 'bg-indigo-500' : 'bg-slate-800'}`}></div>
+               <div className={`w-16 h-4 border border-slate-700 rounded-t-xl shadow-lg transition-colors duration-75 ${pressedButtons['r_shoulder'] ? 'bg-indigo-500' : 'bg-slate-800'}`}></div>
+            </div>
+            <div className="absolute top-10 left-1/2 -translate-x-1/2 w-[280px] sm:w-[320px] flex justify-between px-8 text-[8px] font-mono font-bold text-slate-500 uppercase pointer-events-none">
+              <span>LB</span><span>RB</span>
+            </div>
+            
+            {/* Fallback Simulator Guide */}
+            {!connectedGamepad && (
+              <div className="mt-4 text-[9px] text-center text-slate-500 uppercase tracking-widest font-mono">
+                 <span className="border border-slate-800 bg-slate-900 rounded px-2 py-1">Mode Visualisasi Terpasang. Hubungkan Gamepad USB/Bluetooth untuk sinkronisasi gerakan.</span>
+              </div>
+            )}
           </div>
         </div>
 

@@ -29,7 +29,9 @@ const SHIZUKU_STEPS = [
       "Cari 'Nomor Versi' (Build Number) atau versi OS/ROM Anda (misalnya Versi MIUI / HyperOS).",
       "Ketuk cepat Nomor Versi tersebut sebanyak 7 kali berturut-turut hingga muncul balon teks berisi informasi 'Anda sekarang adalah pengembang!'."
     ],
-    badge: "Prasyarat Awal"
+    badge: "Prasyarat Awal",
+    actionButton: "Buka Opsi Pengembang",
+    actionMessage: "[SYSTEM] Intent: android.settings.APPLICATION_DEVELOPMENT_SETTINGS dipanggil."
   },
   {
     title: "2. Aktifkan Proses Debug USB & Nirkabel",
@@ -70,9 +72,12 @@ const SHIZUKU_STEPS = [
     details: [
       "Buka Pengaturan HP -> Aplikasi -> Kelola Aplikasi -> Cari 'Nexion' -> Aktifkan 'Tampilkan di atas aplikasi lain' (Display over other apps / Draw over other apps) agar tombol overlay HUD bisa muncul mengambang saat Anda bermain game.",
       "⚠️ SANGAT DIANJURKAN: Buka Pengaturan -> Setelan Tambahan -> Aksesibilitas -> Pilih 'Layanan yang Diunduh/Terpasang' -> Pilih 'Nexion Mapper' -> Ketuk SAKELAR 'Gunakan Nexion Mapper'.",
-      "Layanan Aksesibilitas (Accessibility Service) membantu menangkap input tombol fisik bluetooth/OTG gamepad dari background dengan responsif & tanpa delay."
+      "Layanan Aksesibilitas (Accessibility Service) membantu menangkap input tombol fisik bluetooth/OTG gamepad dari background dengan responsif & tanpa delay.",
+      "🔋 MATIKAN PENGHEMAT BATERAI: Pergi ke Info Aplikasi -> Baterai (Battery) -> Pilih 'Tidak Dibatasi' (Unrestricted / No Restrictions). Ini sangat krusial agar overlay Anda tidak dihentikan (force close) atau freeze oleh sistem saat bermain game berat."
     ],
-    badge: "Overlay & Akses"
+    badge: "Overlay & Akses",
+    actionButton: "Buka Pengaturan Aplikasi & Izin",
+    actionMessage: "[SYSTEM] Intent: android.settings.APPLICATION_DETAILS_SETTINGS dipanggil. Buka menu Aksesibilitas dan Overlay."
   },
   {
     title: "6. Boot Daemon Shuttle & Mulai Bermain!",
@@ -95,7 +100,9 @@ const DESKTOP_STEPS = [
       "Masuk ke Opsi Pengembang, lalu hidupkan sakelar 'Proses Debug USB'.",
       "💡 Bagi pengguna Xiaomi/POCO/Oppo: Hidupkan pula 'Proses Debug USB (Setelan Keamanan)' agar touchpad virtual berjalan."
     ],
-    badge: "Opsi Pengembang"
+    badge: "Opsi Pengembang",
+    actionButton: "Buka Opsi Pengembang",
+    actionMessage: "[SYSTEM] Intent: android.settings.APPLICATION_DEVELOPMENT_SETTINGS dipanggil."
   },
   {
     title: "2. Sambungkan HP ke PC/Laptop",
@@ -125,9 +132,12 @@ const DESKTOP_STEPS = [
     details: [
       "Pergi ke Setelan HP -> Aplikasi -> Kelola Aplikasi -> Pilih 'Nexion' -> Nyalakan izin 'Tampilkan di Atas Aplikasi Lain' (Draw Over Other Apps / Display over details).",
       "Pergi ke Setelan HP -> Setelan Tambahan -> Aksesibilitas -> Layanan Terpasang -> Aktifkan layanan 'Nexion Mapper'.",
-      "Izin overlay ini diperlukan agar panel tombol konfigurasi map bisa melayang di atas layar game Anda untuk penempatan langsung."
+      "Izin overlay ini diperlukan agar panel tombol konfigurasi map bisa melayang di atas layar game Anda untuk penempatan langsung.",
+      "🔋 MATIKAN PENGHEMAT BATERAI: Pada menu Info Aplikasi Nexion, ubah mode Baterai menjadi 'Tidak Dibatasi' (Unrestricted). Ini mencegah overlay keluar sendiri atau ngelag di tengah permainan."
     ],
-    badge: "Overlay & Akses"
+    badge: "Overlay & Akses",
+    actionButton: "Buka Pengaturan Aplikasi & Izin",
+    actionMessage: "[SYSTEM] Intent: android.settings.APPLICATION_DETAILS_SETTINGS dipanggil. Buka menu Aksesibilitas dan Overlay."
   },
   {
     title: "5. Aktifkan Driver & Lakukan Kalibrasi",
@@ -575,17 +585,30 @@ export default function ShizukuPanel({ shizukuState, setShizukuState, onLogMessa
                             </li>
                           ))}
                         </ul>
-                        <div className="pt-2 flex justify-end">
+                        
+                        <div className="pt-2 flex justify-between items-center">
+                          {('actionButton' in step && step.actionButton) ? (
+                            <button
+                              onClick={() => {
+                                onLogMessage((step as any).actionMessage);
+                              }}
+                              className="px-3 py-1.5 bg-slate-800 text-slate-200 border border-slate-700 rounded text-[10px] sm:text-xs hover:bg-indigo-600/30 hover:border-indigo-500/40 hover:text-indigo-300 flex items-center gap-1.5 transition-all active:scale-95 shadow font-semibold"
+                            >
+                              <Settings className="w-3.5 h-3.5" />
+                              {(step as any).actionButton}
+                            </button>
+                          ) : <div />}
+                          
                           <button 
                             type="button"
                             onClick={handleToggleCheck}
-                            className={`px-3 py-1 text-[10px] font-semibold rounded transition-all active:scale-[0.97] flex items-center gap-1 ${
+                            className={`px-3 py-1.5 text-[10px] sm:text-xs font-semibold rounded transition-all active:scale-[0.97] flex items-center gap-1 ${
                               isCompleted 
                                 ? 'bg-slate-900 border border-slate-800 text-slate-400 hover:bg-slate-800/50' 
-                                : 'bg-indigo-600/20 border border-indigo-500/40 text-indigo-300 hover:bg-indigo-600/30'
+                                : 'bg-emerald-600/20 border border-emerald-500/40 text-emerald-400 hover:bg-emerald-600/30'
                             }`}
                           >
-                            {isCompleted ? 'Batalkan Status Selesai' : 'Tandai Selesai & Lanjutkan'}
+                            {isCompleted ? 'Batalkan Status Selesai' : 'Tandai Selesai & Lanjut'}
                           </button>
                         </div>
                       </div>

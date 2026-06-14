@@ -22,11 +22,18 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
   const [screenshotMode, setScreenshotMode] = React.useState<'genshin' | 'pubg' | 'codm' | 'efootball'>('genshin');
   const [isDragging, setIsDragging] = React.useState(false);
 
+    // Sync opacity local state with profile if provided on load
+    React.useEffect(() => {
+    if (activeProfile.globalOpacity !== undefined && activeProfile.globalOpacity !== globalNodeOpacity) {
+      setGlobalNodeOpacity(activeProfile.globalOpacity);
+    }
+  }, [activeProfile.id]);
+
   // Visual Protection & Graphics Quality Engine State
   const [hideGrid, setHideGrid] = React.useState(false);
   const [hideAllNodes, setHideAllNodes] = React.useState(false);
   const [bgDimLevel, setBgDimLevel] = React.useState(0); // 0% Dim = Maximum Raw Graphic Quality (Perfect graphics, No obstruction)
-  const [globalNodeOpacity, setGlobalNodeOpacity] = React.useState(80); // 80% default opacity
+  const [globalNodeOpacity, setGlobalNodeOpacity] = React.useState(activeProfile.globalOpacity ?? 80); // 80% default opacity
 
   // Update screenshot background to match active profiles
   React.useEffect(() => {
@@ -80,18 +87,54 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
     onUpdateProfile({ ...activeProfile, buttons: updatedButtons });
   };
 
-  const handleAddNewButton = (type: 'button' | 'analog_stick' | 'gyro_area' | 'swipe') => {
+  const handleAddNewButton = (
+    type: 'button' | 'analog_stick' | 'gyro_area' | 'swipe',
+    swipeDirection?: 'UP' | 'DOWN' | 'LEFT' | 'RIGHT'
+  ) => {
     const freshId = `btn_${Date.now().toString().slice(-4)}`;
+    
+    let label = 'New Tap';
+    let mappedKey = 'BUTTON_B';
+    let androidEventCode = 97;
+    
+    if (type === 'analog_stick') {
+      label = 'L-Stick';
+      mappedKey = 'L_STICK';
+      androidEventCode = 0;
+    } else if (type === 'gyro_area') {
+      label = 'Camera Trigger';
+      mappedKey = 'GYRO';
+      androidEventCode = 0;
+    } else if (type === 'swipe') {
+      if (swipeDirection === 'UP') {
+        label = 'Swipe Atas (UP)';
+        mappedKey = 'R_STICK_UP';
+        androidEventCode = 201;
+      } else if (swipeDirection === 'DOWN') {
+        label = 'Swipe Bawah (DOWN)';
+        mappedKey = 'R_STICK_DOWN';
+        androidEventCode = 202;
+      } else if (swipeDirection === 'LEFT') {
+        label = 'Swipe Kiri (LEFT)';
+        mappedKey = 'R_STICK_LEFT';
+        androidEventCode = 203;
+      } else if (swipeDirection === 'RIGHT') {
+        label = 'Swipe Kanan (RIGHT)';
+        mappedKey = 'R_STICK_RIGHT';
+        androidEventCode = 204;
+      }
+    }
+
     let newBtn: VirtualButton = {
       id: freshId,
-      label: type === 'button' ? 'New Tap' : type === 'analog_stick' ? 'L-Stick' : type === 'swipe' ? 'Swipe Atas (UP)' : 'Camera Trigger',
+      label,
       type,
       x: 50,
       y: 50,
       width: type === 'button' ? 56 : type === 'analog_stick' ? 120 : type === 'swipe' ? 68 : 200,
       height: type === 'button' ? 56 : type === 'analog_stick' ? 120 : type === 'swipe' ? 68 : 120,
-      mappedKey: type === 'button' ? 'BUTTON_B' : type === 'analog_stick' ? 'L_STICK' : type === 'swipe' ? 'SWIPE_UP' : 'GYRO',
-      androidEventCode: type === 'button' ? 97 : type === 'swipe' ? 201 : 0,
+      mappedKey,
+      androidEventCode,
       opacity: 0.6
     };
     onUpdateProfile({
@@ -195,16 +238,17 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
                 Transparansi Tombol Global
               </span>
               <div className="flex items-center gap-2">
-                <input
+                  <input
                   type="range"
-                  min="10"
+                  min="0"
                   max="100"
-                  step="10"
+                  step="5"
                   className="w-24 md:w-28 accent-emerald-500 h-1 bg-slate-950 rounded-lg appearance-none cursor-pointer"
                   value={globalNodeOpacity}
                   onChange={(e) => {
                     const val = parseInt(e.target.value);
                     setGlobalNodeOpacity(val);
+                    onUpdateProfile({ ...activeProfile, globalOpacity: val });
                   }}
                 />
                 <span className="text-[10px] text-emerald-400 font-mono font-bold">{globalNodeOpacity}% Opacity</span>
@@ -279,7 +323,7 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
           {/* Real simulated active mapping nodes mapped across bounds */}
           {activeProfile.buttons.map((btn) => {
             const isSelected = btn.id === selectedButtonId;
-            const isSwipe = btn.type === 'swipe' || btn.mappedKey?.startsWith('SWIPE_');
+            const isSwipe = btn.type === 'swipe' || (btn.androidEventCode >= 201 && btn.androidEventCode <= 204);
             let btnColor = 'border-emerald-500 bg-emerald-500/15';
             if (btn.type === 'analog_stick') {
               btnColor = 'border-blue-500 bg-blue-500/10';
@@ -325,25 +369,25 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
                 
                 {isSwipe && (
                   <div className="absolute inset-0 flex flex-col justify-center items-center pointer-events-none p-1 overflow-hidden">
-                    {btn.mappedKey === 'SWIPE_UP' && (
+                    {btn.androidEventCode === 201 && (
                       <div className="flex flex-col items-center select-none gap-0.5 mt-auto pb-1">
                         <span className="text-purple-300 text-[10px] font-extrabold font-mono animate-bounce">↑</span>
                         <span className="text-[7.5px] text-purple-400 font-mono tracking-tighter">UP</span>
                       </div>
                     )}
-                    {btn.mappedKey === 'SWIPE_DOWN' && (
+                    {btn.androidEventCode === 202 && (
                       <div className="flex flex-col items-center select-none gap-0.5 mb-auto pt-1">
                         <span className="text-[7.5px] text-purple-400 font-mono tracking-tighter">DOWN</span>
                         <span className="text-purple-300 text-[10px] font-extrabold font-mono animate-bounce">↓</span>
                       </div>
                     )}
-                    {btn.mappedKey === 'SWIPE_LEFT' && (
+                    {btn.androidEventCode === 203 && (
                       <div className="flex items-center justify-center select-none gap-1 w-full h-full">
                         <span className="text-purple-300 text-[10px] font-extrabold font-mono animate-pulse">←</span>
                         <span className="text-[7px] text-purple-400 font-mono tracking-tighter">KIRI</span>
                       </div>
                     )}
-                    {btn.mappedKey === 'SWIPE_RIGHT' && (
+                    {btn.androidEventCode === 204 && (
                       <div className="flex items-center justify-center select-none gap-1 w-full h-full">
                         <span className="text-[7px] text-purple-400 font-mono tracking-tighter">KANAN</span>
                         <span className="text-purple-300 text-[10px] font-extrabold font-mono animate-pulse">→</span>
@@ -390,13 +434,37 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
             <Plus className="w-3.5 h-3.5" />
             Add Gyroscopic Control Zone
           </button>
-          <button
-            onClick={() => handleAddNewButton('swipe')}
-            className="flex items-center gap-1.5 px-3 py-2 bg-purple-950 text-purple-300 hover:bg-purple-900/60 border border-purple-900/40 text-xs font-semibold rounded-lg transition-colors"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            Add Swipe 4-Arah Gesture
-          </button>
+          
+          <div className="flex gap-1">
+            <button
+              onClick={() => handleAddNewButton('swipe', 'UP')}
+              className="flex items-center gap-1.5 px-3 py-2 bg-purple-950 text-purple-300 hover:bg-purple-900/60 border border-purple-900/40 text-[10px] font-semibold rounded-l-lg transition-colors"
+              title="Swipe Atas (UP)"
+            >
+              UP ↑
+            </button>
+            <button
+              onClick={() => handleAddNewButton('swipe', 'DOWN')}
+              className="flex items-center gap-1.5 px-3 py-2 bg-purple-950 text-purple-300 hover:bg-purple-900/60 border-y border-purple-900/40 text-[10px] font-semibold transition-colors"
+              title="Swipe Bawah (DOWN)"
+            >
+              DOWN ↓
+            </button>
+            <button
+              onClick={() => handleAddNewButton('swipe', 'LEFT')}
+              className="flex items-center gap-1.5 px-3 py-2 bg-purple-950 text-purple-300 hover:bg-purple-900/60 border-y border-l border-purple-900/40 text-[10px] font-semibold transition-colors"
+              title="Swipe Kiri (LEFT)"
+            >
+              LEFT ←
+            </button>
+            <button
+              onClick={() => handleAddNewButton('swipe', 'RIGHT')}
+              className="flex items-center gap-1.5 px-3 py-2 bg-purple-950 text-purple-300 hover:bg-purple-900/60 border border-purple-900/40 text-[10px] font-semibold rounded-r-lg transition-colors"
+              title="Swipe Kanan (RIGHT)"
+            >
+              RIGHT →
+            </button>
+          </div>
         </div>
       </div>
 
@@ -444,16 +512,20 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
                           const val = e.target.value;
                           handleUpdateBtnProperty('mappedKey', val);
                           // Auto set appropriate event codes if selecting swipe or standard buttons
-                          if (val === 'SWIPE_UP') {
+                          if (val === 'R_STICK_UP' || val === 'SWIPE_UP') {
+                            handleUpdateBtnProperty('type', 'swipe');
                             handleUpdateBtnProperty('androidEventCode', 201);
                             handleUpdateBtnProperty('label', 'Swipe Atas (UP)');
-                          } else if (val === 'SWIPE_DOWN') {
+                          } else if (val === 'R_STICK_DOWN' || val === 'SWIPE_DOWN') {
+                            handleUpdateBtnProperty('type', 'swipe');
                             handleUpdateBtnProperty('androidEventCode', 202);
                             handleUpdateBtnProperty('label', 'Swipe Bawah (DOWN)');
-                          } else if (val === 'SWIPE_LEFT') {
+                          } else if (val === 'R_STICK_LEFT' || val === 'SWIPE_LEFT') {
+                            handleUpdateBtnProperty('type', 'swipe');
                             handleUpdateBtnProperty('androidEventCode', 203);
                             handleUpdateBtnProperty('label', 'Swipe Kiri (LEFT)');
-                          } else if (val === 'SWIPE_RIGHT') {
+                          } else if (val === 'R_STICK_RIGHT' || val === 'SWIPE_RIGHT') {
+                            handleUpdateBtnProperty('type', 'swipe');
                             handleUpdateBtnProperty('androidEventCode', 204);
                             handleUpdateBtnProperty('label', 'Swipe Kanan (RIGHT)');
                           } else if (val === 'BUTTON_A') {
@@ -476,7 +548,13 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
                           onLogMessage(`Overlay Inspector: Mapped trigger slot to tactile action: ${val}`);
                         }}
                       >
-                        <optgroup label="Swipe Layar 4 Arah">
+                        <optgroup label="Arah Analog Kanan (R-Stick / R3)">
+                          <option value="R_STICK_UP">R_STICK_UP (R-Stick ↑)</option>
+                          <option value="R_STICK_DOWN">R_STICK_DOWN (R-Stick ↓)</option>
+                          <option value="R_STICK_LEFT">R_STICK_LEFT (R-Stick ←)</option>
+                          <option value="R_STICK_RIGHT">R_STICK_RIGHT (R-Stick →)</option>
+                        </optgroup>
+                        <optgroup label="Swipe Layar 4 Arah (Legacy)">
                           <option value="SWIPE_UP">SWIPE_UP (Geser Atas)</option>
                           <option value="SWIPE_DOWN">SWIPE_DOWN (Geser Bawah)</option>
                           <option value="SWIPE_LEFT">SWIPE_LEFT (Geser Kiri)</option>
@@ -543,13 +621,13 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
 
                   <div>
                     <div className="flex justify-between text-[10px] text-slate-400 mb-1 uppercase font-semibold">
-                      <span>Node Scale Dim</span>
+                      <span>Ukuran (Lebar & Tinggi) / Resize</span>
                       <span>{selectedButton.width}px</span>
                     </div>
                     <input
                       type="range"
                       min="30"
-                      max="240"
+                      max="300"
                       className="w-full accent-indigo-500"
                       value={selectedButton.width}
                       onChange={(e) => {

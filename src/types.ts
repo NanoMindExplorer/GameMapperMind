@@ -31,6 +31,8 @@ export interface GamepadProfile {
   deadzone: number;
   smoothing: number; // exponential smoothing factor
   isCustom: boolean;
+  globalOpacity?: number; // Master opacity for all virtual buttons
+  antiBanEnabled?: boolean; // Anti-ban humanized randomization
 }
 
 export interface MacroAction {

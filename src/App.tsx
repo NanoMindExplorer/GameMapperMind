@@ -47,6 +47,8 @@ export default function App() {
   const [selectedMainView, setSelectedMainView] = React.useState<'shizuku' | 'overlay' | 'profile' | 'macro' | 'tester' | 'ai_tunnel'>('shizuku');
   const [isKilling, setIsKilling] = React.useState(false);
 
+  const [macros, setMacros] = React.useState<GamepadMacro[]>(INITIAL_MACROS);
+
   // Persistence
   React.useEffect(() => {
     import('@capacitor/preferences').then(({ Preferences }) => {
@@ -65,12 +67,32 @@ export default function App() {
           setActiveProfileId(res.value);
         }
       });
+      Preferences.get({ key: 'nexion_macros' }).then((res) => {
+        if (res.value) {
+          try {
+            const parsed = JSON.parse(res.value);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setMacros(parsed);
+            }
+          } catch (e) { console.error('Failed to parse macros', e); }
+        }
+      });
     });
   }, []);
 
   const saveProfilesToStorage = async (newProfiles: GamepadProfile[]) => {
     const { Preferences } = await import('@capacitor/preferences');
     await Preferences.set({ key: 'nexion_profiles', value: JSON.stringify(newProfiles) });
+  };
+
+  const saveMacrosToStorage = async (newMacros: GamepadMacro[]) => {
+    const { Preferences } = await import('@capacitor/preferences');
+    await Preferences.set({ key: 'nexion_macros', value: JSON.stringify(newMacros) });
+  };
+
+  const handleUpdateMacros = (newMacros: GamepadMacro[]) => {
+    setMacros(newMacros);
+    saveMacrosToStorage(newMacros);
   };
 
   const handleUpdateProfile = (updatedProfile: GamepadProfile) => {
@@ -357,7 +379,8 @@ export default function App() {
 
           {selectedMainView === 'macro' && (
             <MacroEngine
-              initialMacros={INITIAL_MACROS}
+              macros={macros}
+              onUpdateMacros={handleUpdateMacros}
               onLogMessage={handleLogMessage}
             />
           )}

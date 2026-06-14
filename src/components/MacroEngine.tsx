@@ -6,20 +6,25 @@
 
 import React from 'react';
 import { GamepadMacro, MacroAction } from '../types';
-import { Play, Square, RefreshCcw, Activity, Plus, FastForward, Check, Trash2, ArrowDownCircle, Info } from 'lucide-react';
+import { Play, Square, RefreshCcw, Activity, Plus, FastForward, Check, Trash2, ArrowDownCircle, Info, Edit2 } from 'lucide-react';
+import { useShizuku } from '../hooks/useShizuku';
 
 interface MacroEngineProps {
-  initialMacros: GamepadMacro[];
+  macros: GamepadMacro[];
+  onUpdateMacros: (newMacros: GamepadMacro[]) => void;
   onLogMessage: (msg: string) => void;
 }
 
-export default function MacroEngineComponent({ initialMacros, onLogMessage }: MacroEngineProps) {
-  const [macros, setMacros] = React.useState<GamepadMacro[]>(initialMacros);
-  const [selectedMacroId, setSelectedMacroId] = React.useState<string>(initialMacros[0]?.id || '');
+export default function MacroEngineComponent({ macros, onUpdateMacros, onLogMessage }: MacroEngineProps) {
+  const { executeShizukuCommand } = useShizuku();
+  const [selectedMacroId, setSelectedMacroId] = React.useState<string>(macros[0]?.id || '');
   const [isRecording, setIsRecording] = React.useState(false);
   const [isPlaying, setIsPlaying] = React.useState(false);
   const [recordTicks, setRecordTicks] = React.useState(0);
   const [playbackSpeed, setPlaybackSpeed] = React.useState(1.0);
+  
+  const [isEditingMeta, setIsEditingMeta] = React.useState(false);
+  const [editMetaValues, setEditMetaValues] = React.useState({ name: '', triggerKey: '' });
 
   // Recording coordinates simulation state
   const [recX, setRecX] = React.useState(500);
@@ -31,13 +36,12 @@ export default function MacroEngineComponent({ initialMacros, onLogMessage }: Ma
   React.useEffect(() => {
     const handleKill = () => {
       if (playbackIntervalRef.current) {
-        clearInterval(playbackIntervalRef.current);
+        clearTimeout(playbackIntervalRef.current);
         playbackIntervalRef.current = null;
       }
       setIsPlaying(false);
       setIsRecording(false);
-      // Purge action list of all macros (clearing the macro buffer)
-      setMacros(prev => prev.map(m => ({ ...m, actions: [] })));
+      onUpdateMacros(macros.map(m => ({ ...m, actions: [] })));
       onLogMessage(`[KILL-SWITCH] Macro playback terminated and macro buffers cleared.`);
     };
 
@@ -45,34 +49,53 @@ export default function MacroEngineComponent({ initialMacros, onLogMessage }: Ma
     return () => {
       window.removeEventListener('emergency-kill', handleKill);
       if (playbackIntervalRef.current) {
-        clearInterval(playbackIntervalRef.current);
+        clearTimeout(playbackIntervalRef.current);
       }
     };
   }, [onLogMessage]);
 
   const selectedMacro = macros.find(m => m.id === selectedMacroId);
 
-  const handleTriggerPlayback = () => {
-    if (isPlaying || !selectedMacro) return;
+  const handleTriggerPlayback = async () => {
+    if (isPlaying || !selectedMacro || selectedMacro.actions.length === 0) return;
     setIsPlaying(true);
     onLogMessage(`Macro Engine: Initializing playback sequence [${selectedMacro.name}] at speed: ${playbackSpeed.toFixed(1)}x`);
     
-    // Simulate progression delays
+    // Simulate progression delays and execute actual command via Shizuku
     let tickCount = 0;
-    const interval = setInterval(() => {
-      if (tickCount >= selectedMacro.actions.length) {
-        clearInterval(interval);
-        playbackIntervalRef.current = null;
-        setIsPlaying(false);
-        onLogMessage(`Macro Engine: Sequence [${selectedMacro.name}] executed completely. Dispatched ${selectedMacro.actions.length} evdev touch coordinates.`);
-      } else {
-        const action = selectedMacro.actions[tickCount];
-        onLogMessage(`[EVDEV INJECTION] Type: ${action.type} | Pointer: ${action.pointerId} | ABS_MT_POSITION_X: ${action.x || 0} | ABS_MT_POSITION_Y: ${action.y || 0}`);
-        tickCount++;
-      }
-    }, 120 / playbackSpeed);
+    
+    const playNext = async () => {
+       if (tickCount >= selectedMacro.actions.length) {
+         setIsPlaying(false);
+         onLogMessage(`Macro Engine: Sequence [${selectedMacro.name}] executed completely. Dispatched ${selectedMacro.actions.length} evdev touch coordinates.`);
+         return;
+       }
+       if (!isPlaying) return; // user killed it
 
-    playbackIntervalRef.current = interval;
+       const action = selectedMacro.actions[tickCount];
+       onLogMessage(`[EVDEV INJECTION] Type: ${action.type} | Pointer: ${action.pointerId} | X: ${action.x || 0} | Y: ${action.y || 0}`);
+       
+       let devCommand = '';
+       if (action.type === 'touch_down') {
+         devCommand = `input tap ${action.x || 500} ${action.y || 500}`;
+       } else if (action.type === 'touch_move') {
+         devCommand = `input swipe ${action.x || 500} ${action.y || 500} ${action.x || 500} ${action.y || 500} 50`;
+       }
+       
+       if (devCommand) {
+         try {
+           await executeShizukuCommand(devCommand);
+         } catch (e) {
+           onLogMessage(`Macro Engine Error: Native execution failed.`);
+         }
+       }
+       
+       tickCount++;
+       const nextDelay = (action.delayMs || 33) / playbackSpeed;
+       playbackIntervalRef.current = setTimeout(playNext, nextDelay);
+    };
+    
+    playNext();
   };
 
   const startRecordScenario = () => {
@@ -86,7 +109,7 @@ export default function MacroEngineComponent({ initialMacros, onLogMessage }: Ma
       playbackSpeed: 1.0,
       actions: []
     };
-    setMacros([...macros, freshMacro]);
+    onUpdateMacros([...macros, freshMacro]);
     setSelectedMacroId(freshMacro.id);
     onLogMessage(`Macro Engine: Recorder armed. Interceptable ABS inputs will spool to sequence buffer.`);
   };
@@ -108,7 +131,7 @@ export default function MacroEngineComponent({ initialMacros, onLogMessage }: Ma
       delayMs: 33
     };
 
-    setMacros(prev => prev.map(m => {
+    onUpdateMacros(macros.map(m => {
       if (m.id === selectedMacroId) {
         return {
           ...m,
@@ -125,7 +148,7 @@ export default function MacroEngineComponent({ initialMacros, onLogMessage }: Ma
   const handleRemoveMacro = (id: string) => {
     if (macros.length <= 1) return;
     const filtered = macros.filter(m => m.id !== id);
-    setMacros(filtered);
+    onUpdateMacros(filtered);
     setSelectedMacroId(filtered[0].id);
     onLogMessage(`Macro Engine: Retrenched macro sequence [${id}]`);
   };
@@ -197,13 +220,46 @@ export default function MacroEngineComponent({ initialMacros, onLogMessage }: Ma
         {selectedMacro ? (
           <div className="space-y-4">
             <div className="flex justify-between items-center bg-slate-950 p-4 rounded-lg border border-slate-850 shadow-inner">
-              <div className="space-y-0.5">
-                <h4 className="text-xs font-bold text-slate-200">{selectedMacro.name}</h4>
-                <div className="text-[10px] font-mono text-slate-400">Trigger Key binding: {selectedMacro.triggerKey}</div>
-              </div>
+              {isEditingMeta ? (
+                <div className="flex-1 mr-4 space-y-2">
+                  <input
+                    type="text"
+                    className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-slate-200 outline-none focus:border-indigo-500"
+                    placeholder="Macro Name"
+                    value={editMetaValues.name}
+                    onChange={(e) => setEditMetaValues({...editMetaValues, name: e.target.value})}
+                  />
+                  <input
+                    type="text"
+                    className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-[10px] font-mono text-slate-400 outline-none focus:border-indigo-500"
+                    placeholder="Trigger Key"
+                    value={editMetaValues.triggerKey}
+                    onChange={(e) => setEditMetaValues({...editMetaValues, triggerKey: e.target.value})}
+                  />
+                  <div className="flex justify-end gap-2 mt-1">
+                    <button onClick={() => setIsEditingMeta(false)} className="px-2 py-1 rounded text-[9px] font-bold text-slate-400 hover:text-slate-200 bg-slate-800 uppercase">Cancel</button>
+                    <button onClick={() => {
+                      onUpdateMacros(macros.map(m => m.id === selectedMacro.id ? { ...m, name: editMetaValues.name, triggerKey: editMetaValues.triggerKey } : m));
+                      setIsEditingMeta(false);
+                      onLogMessage(`Macro Engine: Metadata updated for [${editMetaValues.name}]`);
+                    }} className="px-2 py-1 flex items-center gap-1 rounded text-[9px] font-bold text-white bg-indigo-500 hover:bg-indigo-400 uppercase"><Check className="w-3 h-3" /> Save</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-0.5 flex-1 cursor-pointer group" onClick={() => {
+                  setEditMetaValues({ name: selectedMacro.name, triggerKey: selectedMacro.triggerKey });
+                  setIsEditingMeta(true);
+                }}>
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-xs font-bold text-slate-200 group-hover:text-indigo-300 transition-colors">{selectedMacro.name}</h4>
+                    <Edit2 className="w-3 h-3 text-slate-500 group-hover:text-indigo-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                  </div>
+                  <div className="text-[10px] font-mono text-slate-400">Trigger Key binding: {selectedMacro.triggerKey}</div>
+                </div>
+              )}
               <button
                 onClick={() => handleRemoveMacro(selectedMacro.id)}
-                disabled={macros.length <= 1 || isRecording}
+                disabled={macros.length <= 1 || isRecording || isEditingMeta}
                 className="p-1.5 hover:bg-rose-950/40 text-slate-400 hover:text-rose-450 rounded disabled:opacity-30 disabled:pointer-events-none transition-all"
                 title="Discard macro sequence"
               >

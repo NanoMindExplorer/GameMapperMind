@@ -69,6 +69,30 @@ public class FloatingOverlayService extends Service {
                     method.setAccessible(true);
                     shizukuProcess = (Process) method.invoke(null, new String[]{"sh"}, null, null);
                     shizukuOut = new DataOutputStream(shizukuProcess.getOutputStream());
+                    
+                    // Create Background Threads to act as "Drainers" for stdout and stderr to prevent ANRs due to full OS buffer block
+                    new Thread(() -> {
+                        try (java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(shizukuProcess.getInputStream()))) {
+                            String line;
+                            while ((line = reader.readLine()) != null) {
+                                // Just consume to prevent buffer full block
+                            }
+                        } catch (Exception e) {
+                            Log.e("GameMapper", "Shizuku stdout drainer exception", e);
+                        }
+                    }).start();
+
+                    new Thread(() -> {
+                        try (java.io.BufferedReader errReader = new java.io.BufferedReader(new java.io.InputStreamReader(shizukuProcess.getErrorStream()))) {
+                            String line;
+                            while ((line = errReader.readLine()) != null) {
+                                // Just consume stderr
+                            }
+                        } catch (Exception e) {
+                            Log.e("GameMapper", "Shizuku stderr drainer exception", e);
+                        }
+                    }).start();
+                    
                     Log.d("GameMapper", "Shizuku daemon shell started successfully");
                 }
             } else {

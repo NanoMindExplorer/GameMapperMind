@@ -60,7 +60,7 @@ public class ShizukuPlugin extends Plugin {
                 if (persistentProcess == null) {
                     java.lang.reflect.Method method = Shizuku.class.getDeclaredMethod("newProcess", String[].class, String[].class, String.class);
                     method.setAccessible(true);
-                    persistentProcess = (Process) method.invoke(null, new String[]{"sh"}, null, null);
+                    persistentProcess = (Process) method.invoke(null, new Object[]{new String[]{"sh"}, null, null});
                     processOutputStream = new DataOutputStream(persistentProcess.getOutputStream());
                     
                     // Drain stdout to prevent blocking
@@ -142,7 +142,7 @@ public class ShizukuPlugin extends Plugin {
                 try {
                     java.lang.reflect.Method method = Shizuku.class.getDeclaredMethod("newProcess", String[].class, String[].class, String.class);
                     method.setAccessible(true);
-                    process = (Process) method.invoke(null, new String[]{"sh", "-c", command}, null, null);
+                    process = (Process) method.invoke(null, new Object[]{new String[]{"sh", "-c", command}, null, null});
                 } catch (Exception e) {
                     call.reject("Failed to invoke newProcess via reflection", e);
                     return;

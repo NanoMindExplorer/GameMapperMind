@@ -14,6 +14,17 @@ import java.lang.reflect.Method;
 public class TouchDaemon {
     public static void main(String[] args) {
         Log.i("GameMapper", "TouchDaemon native binder started in app_process!");
+        
+        try {
+            Method getRuntime = Class.forName("dalvik.system.VMRuntime").getDeclaredMethod("getRuntime");
+            Object vmRuntime = getRuntime.invoke(null);
+            Method setHiddenApiExemptions = vmRuntime.getClass().getDeclaredMethod("setHiddenApiExemptions", String[].class);
+            setHiddenApiExemptions.invoke(vmRuntime, new Object[]{new String[]{"L"}});
+            Log.i("GameMapper", "Hidden API exemptions applied");
+        } catch (Throwable t) {
+            Log.w("GameMapper", "Could not bypass hidden API restrictions", t);
+        }
+
         try {
             InputManager im = (InputManager) InputManager.class.getDeclaredMethod("getInstance").invoke(null);
             Method injectMethod = InputManager.class.getDeclaredMethod("injectInputEvent", InputEvent.class, int.class);

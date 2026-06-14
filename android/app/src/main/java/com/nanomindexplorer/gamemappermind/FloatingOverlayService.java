@@ -67,7 +67,7 @@ public class FloatingOverlayService extends Service {
                     Log.d("GameMapper", "Starting persistent Shizuku shell process");
                     java.lang.reflect.Method method = rikka.shizuku.Shizuku.class.getDeclaredMethod("newProcess", String[].class, String[].class, String.class);
                     method.setAccessible(true);
-                    shizukuProcess = (Process) method.invoke(null, new String[]{"sh"}, null, null);
+                    shizukuProcess = (Process) method.invoke(null, new Object[]{new String[]{"sh"}, null, null});
                     shizukuOut = new DataOutputStream(shizukuProcess.getOutputStream());
                     
                     // Boot up the TouchDaemon inside the shell using app_process

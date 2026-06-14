@@ -17,6 +17,9 @@ import android.widget.FrameLayout;
 import android.widget.TextView;
 import android.graphics.Color;
 import android.util.Log;
+import android.os.Handler;
+import android.os.Looper;
+import android.widget.Toast;
 import androidx.core.app.NotificationCompat;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -83,9 +86,11 @@ public class FloatingOverlayService extends Service {
                 shizukuOut.flush();
             } catch (Exception e) {
                 Log.e("GameMapper", "Fast injection failed", e);
+                new Handler(Looper.getMainLooper()).post(() -> Toast.makeText(FloatingOverlayService.this, "Shizuku injection failed!", Toast.LENGTH_SHORT).show());
             }
         } else {
             Log.w("GameMapper", "Cannot inject, Shizuku daemon out stream is null");
+            new Handler(Looper.getMainLooper()).post(() -> Toast.makeText(FloatingOverlayService.this, "Shizuku not connected!", Toast.LENGTH_SHORT).show());
         }
     }
 
@@ -199,7 +204,7 @@ public class FloatingOverlayService extends Service {
                                 switch (event.getAction()) {
                                     case MotionEvent.ACTION_DOWN:
                                         Log.d("GameMapper", "Virtual button clicked: " + btnId + " at " + injectX + ", " + injectY);
-                                        injectCommand("input tap " + injectX + " " + injectY);
+                                        injectCommand("input swipe " + injectX + " " + injectY + " " + injectX + " " + injectY + " 30");
                                         v.setAlpha(0.5f); // feedback
                                         break;
                                     case MotionEvent.ACTION_UP:

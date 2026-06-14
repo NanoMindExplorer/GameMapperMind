@@ -6,6 +6,7 @@ export function useGamepad(onButtonPress?: (button: string, value?: number) => v
 
   useEffect(() => {
     let animationFrameId: number;
+    let timeoutId: number;
 
     const poll = () => {
       const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
@@ -46,13 +47,23 @@ export function useGamepad(onButtonPress?: (button: string, value?: number) => v
         setConnectedGamepad(null);
       }
 
-      animationFrameId = requestAnimationFrame(poll);
+      // Fallback to setTimeout when webview is backgrounded/throttled
+      if (document.hidden) {
+        timeoutId = window.setTimeout(poll, 16);
+      } else {
+        animationFrameId = requestAnimationFrame(poll);
+      }
     };
 
-    animationFrameId = requestAnimationFrame(poll);
+    if (document.hidden) {
+      timeoutId = window.setTimeout(poll, 16);
+    } else {
+      animationFrameId = requestAnimationFrame(poll);
+    }
 
     return () => {
       cancelAnimationFrame(animationFrameId);
+      clearTimeout(timeoutId);
     };
   }, [onButtonPress]);
 

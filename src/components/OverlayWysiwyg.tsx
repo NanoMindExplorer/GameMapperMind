@@ -685,46 +685,6 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
           )}
         </div>
 
-        {/* Custom informational HUD badge specifically for eFootball Mobile 2026 */}
-        {activeProfile.id === 'efootball' && (
-          <div className="mt-4 p-4 rounded-lg bg-emerald-950/15 border border-emerald-500/25 text-slate-350 text-[11px] space-y-2.5">
-            <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-400">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              eFootball™ Tactical Controller Map
-            </div>
-            <div className="space-y-3 leading-relaxed">
-              <div>
-                <span className="font-bold text-emerald-400 block mb-0.5">⚔️ Saat Menyerang (Dengan Bola):</span>
-                <ul className="list-disc list-inside space-y-0.5 pl-1 font-mono text-[9px] text-slate-300">
-                  <li><span className="text-slate-400">L-Stick:</span> Gerakan Pemain (Dribble)</li>
-                  <li><span className="text-slate-400">A (PS: X):</span> Umpan Pendek / Ground Pass</li>
-                  <li><span className="text-slate-400">X (PS: ◻):</span> Tembak / Shoot</li>
-                  <li><span className="text-slate-400">Y (PS: △):</span> Umpan Terobosan / Through Ball</li>
-                  <li><span className="text-slate-400">B (PS: ◯):</span> Umpan Lambung / Lofted Pass</li>
-                  <li><span className="text-slate-400">R1 / RB:</span> Lari Cepat / Dash</li>
-                  <li><span className="text-slate-400">R2 / RT:</span> Dash + Lari / Knock-on</li>
-                  <li><span className="text-slate-400">L1 / LB:</span> Ganti Kursor Manual</li>
-                </ul>
-              </div>
-              <div>
-                <span className="font-bold text-rose-450 block mb-0.5">🛡️ Saat Bertahan (Tanpa Bola):</span>
-                <ul className="list-disc list-inside space-y-0.5 pl-1 font-mono text-[9px] text-slate-300">
-                  <li><span className="text-slate-400">A (PS: X):</span> Panggil Tekanan Rekan</li>
-                  <li><span className="text-slate-400">X (PS: ◻):</span> Tekel / Tackle</li>
-                  <li><span className="text-slate-400">Y (PS: △):</span> Kiper Maju / Goalkeeper Rush</li>
-                  <li><span className="text-slate-400">B (PS: ◯):</span> Tekanan Dasar / Pressure</li>
-                  <li><span className="text-slate-400">R1 / RB:</span> Dash (Kejar Bola)</li>
-                  <li><span className="text-slate-400">R2 / RT:</span> Match-up (Bayangi Lawan)</li>
-                  <li><span className="text-slate-400">L1 / LB:</span> Ganti Kursor Pemain</li>
-                </ul>
-              </div>
-              <div className="pt-2 border-t border-emerald-500/10 text-[9px] text-slate-400 text-justify">
-                💡 <span className="font-semibold text-amber-300">Stunning Shot/Pass:</span> Atur K2er 4-way Swipe di R3 atau kombinasikan Tombol Lari + Tombol Umpan. <span className="text-rose-400 font-bold">Gyro otomatis dimatikan (0.0x)</span> untuk stabilitas bidikan tactile murni.
-              </div>
-            </div>
-          </div>
-        )}
-
         <div className="p-4 bg-slate-950 rounded-lg border border-slate-800 flex items-center justify-between text-xs text-slate-400 mt-6 md:mt-2 bg-gradient-to-r from-slate-950 to-indigo-950/20">
           <span>Active Nodes: {activeProfile.buttons.length}</span>
           <span className="text-[10px] uppercase font-bold text-indigo-400 font-mono tracking-wider">uinput Ready</span>

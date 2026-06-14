@@ -261,7 +261,7 @@ export default function App() {
   const activeProfile = profiles.find(p => p.id === activeProfileId) || profiles[0];
 
   const handleGamepadPress = React.useCallback(async (button: string) => {
-    const mapping = activeProfile.buttons.find(b => b.key.toLowerCase() === button.toLowerCase());
+    const mapping = activeProfile.buttons.find(b => b.mappedKey && b.mappedKey.toLowerCase().includes(button.toLowerCase()));
     if (mapping) {
       // Calculate physical coordinates based on screen
       const x = Math.round((mapping.x / 100) * window.innerWidth);

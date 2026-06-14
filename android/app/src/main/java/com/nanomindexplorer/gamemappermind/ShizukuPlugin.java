@@ -7,6 +7,7 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import rikka.shizuku.Shizuku;
+import android.util.Log;
 
 import java.io.BufferedReader;
 import java.io.DataOutputStream;
@@ -28,9 +29,11 @@ public class ShizukuPlugin extends Plugin {
                 hasPermission = Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED;
             }
         } catch (Throwable e) {
+            Log.e("GameMapper", "checkStatus error", e);
             e.printStackTrace();
         }
 
+        Log.d("GameMapper", "Shizuku status: running=" + isRunning + ", permission=" + hasPermission);
         JSObject result = new JSObject();
         result.put("isRunning", isRunning);
         result.put("hasPermission", hasPermission);
@@ -51,6 +54,7 @@ public class ShizukuPlugin extends Plugin {
 
     @PluginMethod
     public void startDaemon(PluginCall call) {
+        Log.d("GameMapper", "Shizuku startDaemon called");
         try {
             if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
                 if (persistentProcess == null) {
@@ -58,6 +62,7 @@ public class ShizukuPlugin extends Plugin {
                     method.setAccessible(true);
                     persistentProcess = (Process) method.invoke(null, new String[]{"sh"}, null, null);
                     processOutputStream = new DataOutputStream(persistentProcess.getOutputStream());
+                    Log.d("GameMapper", "Shizuku daemon shell started from JS");
                 }
                 JSObject result = new JSObject();
                 result.put("success", true);

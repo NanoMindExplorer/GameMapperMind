@@ -16,6 +16,7 @@ import android.view.WindowManager;
 import android.widget.FrameLayout;
 import android.widget.TextView;
 import android.graphics.Color;
+import android.util.Log;
 import androidx.core.app.NotificationCompat;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -59,25 +60,32 @@ public class FloatingOverlayService extends Service {
         try {
             if (rikka.shizuku.Shizuku.pingBinder() && rikka.shizuku.Shizuku.checkSelfPermission() == android.content.pm.PackageManager.PERMISSION_GRANTED) {
                 if (shizukuProcess == null) {
+                    Log.d("GameMapper", "Starting persistent Shizuku shell process");
                     java.lang.reflect.Method method = rikka.shizuku.Shizuku.class.getDeclaredMethod("newProcess", String[].class, String[].class, String.class);
                     method.setAccessible(true);
                     shizukuProcess = (Process) method.invoke(null, new String[]{"sh"}, null, null);
                     shizukuOut = new DataOutputStream(shizukuProcess.getOutputStream());
+                    Log.d("GameMapper", "Shizuku daemon shell started successfully");
                 }
+            } else {
+                Log.w("GameMapper", "Shizuku not ready or permission denied");
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            Log.e("GameMapper", "Failed to init Shizuku daemon", e);
         }
     }
 
     private void injectCommand(String cmd) {
         if (shizukuOut != null) {
             try {
+                Log.d("GameMapper", "Injecting fast command: " + cmd);
                 shizukuOut.writeBytes(cmd + "\n");
                 shizukuOut.flush();
             } catch (Exception e) {
-                e.printStackTrace();
+                Log.e("GameMapper", "Fast injection failed", e);
             }
+        } else {
+            Log.w("GameMapper", "Cannot inject, Shizuku daemon out stream is null");
         }
     }
 
@@ -190,6 +198,7 @@ public class FloatingOverlayService extends Service {
                                 
                                 switch (event.getAction()) {
                                     case MotionEvent.ACTION_DOWN:
+                                        Log.d("GameMapper", "Virtual button clicked: " + btnId + " at " + injectX + ", " + injectY);
                                         injectCommand("input tap " + injectX + " " + injectY);
                                         v.setAlpha(0.5f); // feedback
                                         break;

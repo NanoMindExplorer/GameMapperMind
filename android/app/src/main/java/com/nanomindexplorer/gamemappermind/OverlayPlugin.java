@@ -4,6 +4,7 @@ import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
 import android.provider.Settings;
+import android.util.Log;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -15,6 +16,7 @@ public class OverlayPlugin extends Plugin {
 
     @PluginMethod
     public void startOverlay(PluginCall call) {
+        Log.d("GameMapper", "startOverlay requested");
         if (!Settings.canDrawOverlays(getContext())) {
             Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                     Uri.parse("package:" + getContext().getPackageName()));
@@ -34,11 +36,13 @@ public class OverlayPlugin extends Plugin {
         } else {
             getContext().startService(serviceIntent);
         }
+        Log.d("GameMapper", "startOverlay service launched");
         call.resolve();
     }
 
     @PluginMethod
     public void stopOverlay(PluginCall call) {
+        Log.d("GameMapper", "stopOverlay requested");
         Intent serviceIntent = new Intent(getContext(), FloatingOverlayService.class);
         getContext().stopService(serviceIntent);
         call.resolve();

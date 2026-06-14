@@ -155,6 +155,7 @@ jobs:
       - name: Build Android APK
         run: |
           cd android
+          gradle wrapper
           chmod +x gradlew
           ./gradlew assembleDebug
 

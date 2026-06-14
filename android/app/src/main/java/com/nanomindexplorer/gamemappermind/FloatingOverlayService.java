@@ -123,16 +123,12 @@ public class FloatingOverlayService extends Service {
 
         if (intent != null && intent.hasExtra("config")) {
             currentConfigJson = intent.getStringExtra("config");
-            new Handler(Looper.getMainLooper()).post(() -> {
-                updateOverlayViews(currentConfigJson);
-                createTestButton();
-            });
-        } else {
-            new Handler(Looper.getMainLooper()).post(() -> {
-                updateOverlayViews(currentConfigJson);
-                createTestButton();
-            });
         }
+        
+        new Handler(Looper.getMainLooper()).post(() -> {
+            updateOverlayViews(currentConfigJson);
+            createTestButton();
+        });
 
         return START_STICKY;
     }
@@ -213,87 +209,86 @@ public class FloatingOverlayService extends Service {
 
             for (int i = 0; i < buttons.length(); i++) {
                 JSONObject btn = buttons.getJSONObject(i);
-                    TextView btnView = new TextView(this);
-                    btnView.setText(btn.optString("label", "btn"));
-                    btnView.setTextColor(Color.WHITE);
-                    btnView.setGravity(Gravity.CENTER);
-                    
-                    android.graphics.drawable.GradientDrawable gd = new android.graphics.drawable.GradientDrawable();
-                    gd.setColor(isEditMode ? Color.parseColor("#901e293b") : Color.parseColor("#401e293b")); // semi transparent in play mode visible
-                    gd.setCornerRadius(100f);
-                    gd.setStroke(isEditMode ? 4 : 2, Color.parseColor("#818cf8"));
-                    btnView.setBackground(gd);
-                    
-                    int w = btn.optInt("width", 100);
-                    int h = btn.optInt("height", 100);
-                    double xPct = btn.optDouble("x", 50) / 100.0;
-                    double yPct = btn.optDouble("y", 50) / 100.0;
-                    
-                    final WindowManager.LayoutParams params = new WindowManager.LayoutParams(
-                            w,
-                            h,
-                            Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ? 
-                                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : WindowManager.LayoutParams.TYPE_PHONE,
-                            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
-                            PixelFormat.TRANSLUCENT);
-                    params.gravity = Gravity.TOP | Gravity.LEFT;
-                    params.x = (int)(screenWidth * xPct) - w/2;
-                    params.y = (int)(screenHeight * yPct) - h/2;
-                    
-                    btnView.setAlpha(isEditMode ? 1.0f : (float)(btn.optDouble("opacity", 100) / 100.0));
-                    windowManager.addView(btnView, params);
-                    virtualButtonWindows.add(btnView);
-                    
-                    final String btnId = btn.optString("id");
-                    Log.d("GameMapper", "WindowManager addView executed for button ID: " + btnId);
-                    
-                    // Setup touch listeners
-                    btnView.setOnTouchListener(new View.OnTouchListener() {
-                        private int initialX;
-                        private int initialY;
-                        private float initialTouchX;
-                        private float initialTouchY;
+                TextView btnView = new TextView(this);
+                btnView.setText(btn.optString("label", "btn"));
+                btnView.setTextColor(Color.WHITE);
+                btnView.setGravity(Gravity.CENTER);
+                
+                android.graphics.drawable.GradientDrawable gd = new android.graphics.drawable.GradientDrawable();
+                gd.setColor(isEditMode ? Color.parseColor("#901e293b") : Color.parseColor("#401e293b")); // semi transparent in play mode visible
+                gd.setCornerRadius(100f);
+                gd.setStroke(isEditMode ? 4 : 2, Color.parseColor("#818cf8"));
+                btnView.setBackground(gd);
+                
+                int w = btn.optInt("width", 100);
+                int h = btn.optInt("height", 100);
+                double xPct = btn.optDouble("x", 50) / 100.0;
+                double yPct = btn.optDouble("y", 50) / 100.0;
+                
+                final WindowManager.LayoutParams params = new WindowManager.LayoutParams(
+                        w,
+                        h,
+                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ? 
+                            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : WindowManager.LayoutParams.TYPE_PHONE,
+                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                        PixelFormat.TRANSLUCENT);
+                params.gravity = Gravity.TOP | Gravity.LEFT;
+                params.x = (int)(screenWidth * xPct) - w/2;
+                params.y = (int)(screenHeight * yPct) - h/2;
+                
+                btnView.setAlpha(isEditMode ? 1.0f : (float)(btn.optDouble("opacity", 100) / 100.0));
+                windowManager.addView(btnView, params);
+                virtualButtonWindows.add(btnView);
+                
+                final String btnId = btn.optString("id");
+                Log.d("GameMapper", "WindowManager addView executed for button ID: " + btnId);
+                
+                // Setup touch listeners
+                btnView.setOnTouchListener(new View.OnTouchListener() {
+                    private int initialX;
+                    private int initialY;
+                    private float initialTouchX;
+                    private float initialTouchY;
 
-                        @Override
-                        public boolean onTouch(View v, MotionEvent event) {
-                            if (isEditMode) {
-                                switch (event.getAction()) {
-                                    case MotionEvent.ACTION_DOWN:
-                                        initialX = params.x;
-                                        initialY = params.y;
-                                        initialTouchX = event.getRawX();
-                                        initialTouchY = event.getRawY();
-                                        return true;
-                                    case MotionEvent.ACTION_MOVE:
-                                        params.x = initialX + (int)(event.getRawX() - initialTouchX);
-                                        params.y = initialY + (int)(event.getRawY() - initialTouchY);
-                                        windowManager.updateViewLayout(v, params);
-                                        return true;
-                                }
-                            } else {
-                                // PLAY MODE: Injected clicks
-                                int loc[] = new int[2];
-                                v.getLocationOnScreen(loc);
-                                int injectX = loc[0] + v.getWidth() / 2;
-                                int injectY = loc[1] + v.getHeight() / 2;
-                                
-                                switch (event.getAction()) {
-                                    case MotionEvent.ACTION_DOWN:
-                                        Log.d("GameMapper", "Virtual button clicked: " + btnId + " at " + injectX + ", " + injectY);
-                                        injectCommand("input swipe " + injectX + " " + injectY + " " + injectX + " " + injectY + " 30");
-                                        v.setAlpha(0.5f); // feedback
-                                        break;
-                                    case MotionEvent.ACTION_UP:
-                                    case MotionEvent.ACTION_CANCEL:
-                                        v.setAlpha((float)(btn.optDouble("opacity", 100) / 100.0));
-                                        break;
-                                }
-                                return true;
+                    @Override
+                    public boolean onTouch(View v, MotionEvent event) {
+                        if (isEditMode) {
+                            switch (event.getAction()) {
+                                case MotionEvent.ACTION_DOWN:
+                                    initialX = params.x;
+                                    initialY = params.y;
+                                    initialTouchX = event.getRawX();
+                                    initialTouchY = event.getRawY();
+                                    return true;
+                                case MotionEvent.ACTION_MOVE:
+                                    params.x = initialX + (int)(event.getRawX() - initialTouchX);
+                                    params.y = initialY + (int)(event.getRawY() - initialTouchY);
+                                    windowManager.updateViewLayout(v, params);
+                                    return true;
                             }
-                            return false;
+                        } else {
+                            // PLAY MODE: Injected clicks
+                            int loc[] = new int[2];
+                            v.getLocationOnScreen(loc);
+                            int injectX = loc[0] + v.getWidth() / 2;
+                            int injectY = loc[1] + v.getHeight() / 2;
+                            
+                            switch (event.getAction()) {
+                                case MotionEvent.ACTION_DOWN:
+                                    Log.d("GameMapper", "Virtual button clicked: " + btnId + " at " + injectX + ", " + injectY);
+                                    injectCommand("input swipe " + injectX + " " + injectY + " " + injectX + " " + injectY + " 30");
+                                    v.setAlpha(0.5f); // feedback
+                                    break;
+                                case MotionEvent.ACTION_UP:
+                                case MotionEvent.ACTION_CANCEL:
+                                    v.setAlpha((float)(btn.optDouble("opacity", 100) / 100.0));
+                                    break;
+                            }
+                            return true;
                         }
-                    });
-                }
+                        return false;
+                    }
+                });
             }
 
         } catch (Exception e) {
@@ -314,7 +309,7 @@ public class FloatingOverlayService extends Service {
                     // 2. Handle Container (WRAP_CONTENT)
                     handleContainer = new FrameLayout(FloatingOverlayService.this);
                     TextView icon = new TextView(FloatingOverlayService.this);
-                    icon.setText("🎮");
+                    icon.setText("\uD83C\uDFAE"); // Gamepad icon
                     icon.setTextSize(20f);
                     icon.setGravity(Gravity.CENTER);
                     

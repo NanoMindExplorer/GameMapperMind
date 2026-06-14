@@ -15,6 +15,9 @@ import MacroEngine from './components/MacroEngine';
 import GamepadTester from './components/GamepadTester';
 import GameSelector from './components/GameSelector';
 import AITunnelPanel from './components/AITunnelPanel';
+import { registerPlugin } from '@capacitor/core';
+const OverlayPlugin = registerPlugin('Overlay');
+
 import { 
   Terminal, Shield, Settings, Activity, Compass, Cpu, HelpCircle, 
   ChevronRight, Sparkles, BookOpen, Layers, Bot, ShieldAlert
@@ -163,6 +166,25 @@ export default function App() {
     } catch(e) { console.warn('Failed to save active profile', e); }
     syncActiveProfileIdOnServer(id);
   };
+
+  const [overlayActive, setOverlayActive] = React.useState(false);
+  
+  const handleToggleOverlay = async () => {
+    try {
+      if (overlayActive) {
+        await (OverlayPlugin as any).stopOverlay();
+        setOverlayActive(false);
+        handleLogMessage('SYSTEM: Native floating overlay deactivated.');
+      } else {
+        await (OverlayPlugin as any).startOverlay();
+        setOverlayActive(true);
+        handleLogMessage('SYSTEM: Native floating overlay activated. You can now minimize the app.');
+      }
+    } catch (e: any) {
+      handleLogMessage(`ERROR: Cannot start Native Overlay. ${e.message || e}`);
+    }
+  };
+
   const handleGlobalKillSwitch = async () => {
     setIsKilling(true);
     try {
@@ -328,6 +350,15 @@ export default function App() {
                 </div>
               )}
             </div>
+
+            <button
+               onClick={handleToggleOverlay}
+               className={`relative group px-3.5 py-1.5 text-xs font-bold font-mono uppercase border rounded-lg shadow-md transition-all flex items-center gap-2 ${overlayActive ? 'bg-indigo-950/40 hover:bg-indigo-900/40 border-indigo-500/50 hover:border-indigo-500 text-indigo-400 shadow-indigo-500/5' : 'bg-slate-900/40 hover:bg-slate-800/40 border-slate-700/50 hover:border-slate-500 text-slate-400'}`}
+               title="Toggle Native Floating Overlay"
+            >
+              <Layers className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
+              <span>{overlayActive ? 'HIDE OVERLAY' : 'SHOW OVERLAY'}</span>
+            </button>
 
             <button
               onClick={handleGlobalKillSwitch}

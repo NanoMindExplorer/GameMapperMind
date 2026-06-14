@@ -11,6 +11,7 @@ public class MainActivity extends BridgeActivity {
         super.onCreate(savedInstanceState);
         
         registerPlugin(ShizukuPlugin.class);
+        registerPlugin(OverlayPlugin.class);
         
         // Aktifkan Gamepad API di WebView
         if (bridge != null && bridge.getWebView() != null) {

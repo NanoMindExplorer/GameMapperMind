@@ -152,7 +152,7 @@ const DESKTOP_STEPS = [
 ];
 
 export default function ShizukuPanel({ shizukuState, setShizukuState, onLogMessage }: ShizukuPanelProps) {
-  const { requestShizukuPermission: nativeRequestPerm, executeShizukuCommand } = useShizuku();
+  const { requestShizukuPermission: nativeRequestPerm, executeShizukuCommand, startDaemon, stopDaemon } = useShizuku();
   const [activeTab, setActiveTab] = React.useState<'shizuku' | 'desktop'>('shizuku');
   const [isLoading, setIsLoading] = React.useState(false);
   const [shizukuPermission, setShizukuPermission] = React.useState<'GRANTED' | 'DENIED' | 'PROMPT'>('PROMPT');
@@ -169,16 +169,16 @@ export default function ShizukuPanel({ shizukuState, setShizukuState, onLogMessa
     setIsLoading(true);
     try {
       if (action === 'start') {
-        const res = await executeShizukuCommand('echo "Nexion Shuttle Daemon Starting..." && sleep 1 && echo "Daemon started successfully on port 8080."');
-        if (res && res.output) {
-           onLogMessage(`[sh] ${res.output.trim()}`);
+        const res = await startDaemon();
+        if (res) {
+           onLogMessage(`[sh] Daemon started successfully.`);
         } else {
-           onLogMessage(`[sh] Starting Daemon...`);
+           onLogMessage(`[sh ERROR] Failed to start Daemon.`);
         }
       } else if (action === 'stop') {
-        const res = await executeShizukuCommand('echo "Nexion Shuttle Daemon Terminated."');
-        if (res && res.output) {
-           onLogMessage(`[sh] ${res.output.trim()}`);
+        const res = await stopDaemon();
+        if (res) {
+           onLogMessage(`[sh] Nexion Shuttle Daemon Terminated.`);
         }
       }
 

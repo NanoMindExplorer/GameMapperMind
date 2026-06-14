@@ -9,10 +9,14 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import rikka.shizuku.Shizuku;
 
 import java.io.BufferedReader;
+import java.io.DataOutputStream;
 import java.io.InputStreamReader;
 
 @CapacitorPlugin(name = "Shizuku")
 public class ShizukuPlugin extends Plugin {
+
+    private Process persistentProcess = null;
+    private DataOutputStream processOutputStream = null;
 
     @PluginMethod
     public void checkStatus(PluginCall call) {
@@ -43,6 +47,65 @@ public class ShizukuPlugin extends Plugin {
             e.printStackTrace();
         }
         call.resolve();
+    }
+
+    @PluginMethod
+    public void startDaemon(PluginCall call) {
+        try {
+            if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
+                if (persistentProcess == null) {
+                    java.lang.reflect.Method method = Shizuku.class.getDeclaredMethod("newProcess", String[].class, String[].class, String.class);
+                    method.setAccessible(true);
+                    persistentProcess = (Process) method.invoke(null, new String[]{"sh"}, null, null);
+                    processOutputStream = new DataOutputStream(persistentProcess.getOutputStream());
+                }
+                JSObject result = new JSObject();
+                result.put("success", true);
+                call.resolve(result);
+            } else {
+                call.reject("Shizuku permission not granted");
+            }
+        } catch (Exception e) {
+            call.reject("Failed to start daemon", e);
+        }
+    }
+
+    @PluginMethod
+    public void stopDaemon(PluginCall call) {
+        if (processOutputStream != null) {
+            try {
+                processOutputStream.writeBytes("exit\n");
+                processOutputStream.flush();
+                processOutputStream.close();
+            } catch (Exception e) { e.printStackTrace(); }
+            processOutputStream = null;
+        }
+        if (persistentProcess != null) {
+            persistentProcess.destroy();
+            persistentProcess = null;
+        }
+        JSObject result = new JSObject();
+        result.put("success", true);
+        call.resolve(result);
+    }
+
+    @PluginMethod
+    public void injectInput(PluginCall call) {
+        String command = call.getString("command"); // e.g. "input tap x y"
+        if (command == null || processOutputStream == null) {
+            call.reject("No command or daemon not running");
+            return;
+        }
+
+        try {
+            processOutputStream.writeBytes(command + "\n");
+            processOutputStream.flush();
+            JSObject result = new JSObject();
+            result.put("success", true);
+            call.resolve(result);
+        } catch (Exception e) {
+            call.reject("Failed to inject", e);
+        }
     }
 
     @PluginMethod

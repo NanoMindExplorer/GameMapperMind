@@ -12,7 +12,7 @@ interface AITunnelPanelProps {
 }
 
 export default function AITunnelPanel({ onLogMessage }: AITunnelPanelProps) {
-  const { executeShizukuCommand } = useShizuku();
+  const { injectInput } = useShizuku();
   const [tunnelState, setTunnelState] = React.useState<AITunnelState>({
     isEnabled: false,
     activeAgent: "vlm_gemini",
@@ -119,7 +119,7 @@ export default function AITunnelPanel({ onLogMessage }: AITunnelPanelProps) {
          devCommand = `input tap 500 500`;
       }
 
-      const res = await executeShizukuCommand(devCommand);
+      await injectInput(devCommand);
       
       setTunnelState(prev => ({
         ...prev,

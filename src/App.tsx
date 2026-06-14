@@ -28,7 +28,7 @@ import { useGamepad } from './hooks/useGamepad';
 import { useOverlay } from './hooks/useOverlay';
 
 export default function App() {
-  const { checkShizukuStatus, executeShizukuCommand } = useShizuku();
+  const { checkShizukuStatus, executeShizukuCommand, injectInput, stopDaemon } = useShizuku();
   const { startOverlay, stopOverlay } = useOverlay();
   const [shizukuState, setShizukuState] = React.useState<ShizukuState>({
     status: 'CONNECTED_SHIZUKU',
@@ -194,12 +194,17 @@ export default function App() {
       // Simulate hardware interrupt sequence
       await new Promise(r => setTimeout(r, 600));
       window.dispatchEvent(new CustomEvent('emergency-kill'));
+      if (overlayActive) {
+        await stopOverlay();
+        setOverlayActive(false);
+      }
+      await stopDaemon();
       setShizukuState(prev => ({
         ...prev,
         status: 'DISCONNECTED',
         daemonRunning: false
       }));
-      handleLogMessage('CRITICAL: Global emergency kill-switch initiated. AI autonomous streams disconnected & macro triggers purged.');
+      handleLogMessage('CRITICAL: Global emergency kill-switch initiated. All services, Daemon, and Overlay terminated.');
     } catch (err) {
       console.error("Failed to trigger emergency kill-switch", err);
     } finally {
@@ -240,7 +245,7 @@ export default function App() {
       const y = Math.round((mapping.y / 100) * window.innerHeight);
 
       if (shizukuState.status === 'CONNECTED_SHIZUKU' && typeof window !== 'undefined' && 'Capacitor' in window) {
-         executeShizukuCommand(`input tap ${x} ${y}`);
+         injectInput(`input tap ${x} ${y}`);
          // Log but throttle it to prevent spam
       } else {
          fetch("/api/daemon/inject", {
@@ -250,7 +255,7 @@ export default function App() {
          });
       }
     }
-  }, [activeProfile, shizukuState.status, executeShizukuCommand]);
+  }, [activeProfile, shizukuState.status, injectInput]);
 
   const { connectedGamepad } = useGamepad(handleGamepadPress);
 
@@ -261,6 +266,20 @@ export default function App() {
       if (newLines.length > 50) newLines.shift();
       return { ...prev, logLines: newLines };
     });
+  };
+
+  const handleKillSwitch = async () => {
+    if (overlayActive) {
+      await stopOverlay();
+      setOverlayActive(false);
+    }
+    await stopDaemon();
+    setShizukuState(prev => ({
+        ...prev,
+        daemonRunning: false,
+        status: 'DISCONNECTED'
+    }));
+    handleLogMessage('SYSTEM: Kill-switch engaged. All services and injections terminated.');
   };
 
   return (

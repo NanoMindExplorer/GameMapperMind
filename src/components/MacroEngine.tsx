@@ -16,7 +16,7 @@ interface MacroEngineProps {
 }
 
 export default function MacroEngineComponent({ macros, onUpdateMacros, onLogMessage }: MacroEngineProps) {
-  const { executeShizukuCommand } = useShizuku();
+  const { injectInput } = useShizuku();
   const [selectedMacroId, setSelectedMacroId] = React.useState<string>(macros[0]?.id || '');
   const [isRecording, setIsRecording] = React.useState(false);
   const [isPlaying, setIsPlaying] = React.useState(false);
@@ -84,7 +84,7 @@ export default function MacroEngineComponent({ macros, onUpdateMacros, onLogMess
        
        if (devCommand) {
          try {
-           await executeShizukuCommand(devCommand);
+           await injectInput(devCommand);
          } catch (e) {
            onLogMessage(`Macro Engine Error: Native execution failed.`);
          }

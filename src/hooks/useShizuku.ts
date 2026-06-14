@@ -5,6 +5,9 @@ export interface ShizukuPluginInterface {
   checkStatus(): Promise<{ isRunning: boolean; hasPermission: boolean }>;
   requestPermission(): Promise<void>;
   executeCommand(options: { command: string }): Promise<{ output: string; error: string; exitCode: number }>;
+  startDaemon(): Promise<{ success: boolean }>;
+  stopDaemon(): Promise<{ success: boolean }>;
+  injectInput(options: { command: string }): Promise<{ success: boolean }>;
 }
 
 const ShizukuPlugin = registerPlugin<ShizukuPluginInterface>('Shizuku');
@@ -50,5 +53,44 @@ export function useShizuku() {
     return null;
   };
 
-  return { checkShizukuStatus, requestShizukuPermission, executeShizukuCommand };
+  const startDaemon = async () => {
+    if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
+      try {
+        await ShizukuPlugin.startDaemon();
+        return true;
+      } catch (err) {
+        console.error("Native start daemon error", err);
+        return false;
+      }
+    }
+    return false;
+  };
+
+  const stopDaemon = async () => {
+    if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
+      try {
+        await ShizukuPlugin.stopDaemon();
+        return true;
+      } catch (err) {
+        console.error("Native stop daemon error", err);
+        return false;
+      }
+    }
+    return false;
+  };
+
+  const injectInput = async (command: string) => {
+    if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
+      try {
+        await ShizukuPlugin.injectInput({ command });
+        return true;
+      } catch (err) {
+        console.error("Native inject input error", err);
+        return false;
+      }
+    }
+    return false;
+  };
+
+  return { checkShizukuStatus, requestShizukuPermission, executeShizukuCommand, startDaemon, stopDaemon, injectInput };
 }

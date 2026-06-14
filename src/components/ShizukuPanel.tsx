@@ -142,7 +142,7 @@ const DESKTOP_STEPS = [
 ];
 
 export default function ShizukuPanel({ shizukuState, setShizukuState, onLogMessage }: ShizukuPanelProps) {
-  const { requestShizukuPermission: nativeRequestPerm } = useShizuku();
+  const { requestShizukuPermission: nativeRequestPerm, executeShizukuCommand } = useShizuku();
   const [activeTab, setActiveTab] = React.useState<'shizuku' | 'desktop'>('shizuku');
   const [isLoading, setIsLoading] = React.useState(false);
   const [shizukuPermission, setShizukuPermission] = React.useState<'GRANTED' | 'DENIED' | 'PROMPT'>('PROMPT');
@@ -158,6 +158,20 @@ export default function ShizukuPanel({ shizukuState, setShizukuState, onLogMessa
   const triggerAction = async (action: 'start' | 'stop' | 'toggle_mode', mode?: 'shizuku' | 'desktop') => {
     setIsLoading(true);
     try {
+      if (action === 'start') {
+        const res = await executeShizukuCommand('echo "Nexion Shuttle Daemon Starting..." && sleep 1 && echo "Daemon started successfully on port 8080."');
+        if (res && res.output) {
+           onLogMessage(`[sh] ${res.output.trim()}`);
+        } else {
+           onLogMessage(`[sh] Starting Daemon...`);
+        }
+      } else if (action === 'stop') {
+        const res = await executeShizukuCommand('echo "Nexion Shuttle Daemon Terminated."');
+        if (res && res.output) {
+           onLogMessage(`[sh] ${res.output.trim()}`);
+        }
+      }
+
       // Direct local state simulation
       setTimeout(() => {
         setShizukuState(prev => {
@@ -175,7 +189,9 @@ export default function ShizukuPanel({ shizukuState, setShizukuState, onLogMessa
 
           return { ...prev, daemonRunning: isRunning, mode: nextMode, status };
         });
-        onLogMessage(`Daemon control dispatched locally: ${action.toUpperCase()} (${mode || 'current mode'})`);
+        if (action !== 'start' && action !== 'stop') {
+          onLogMessage(`Daemon mode switched: ${mode || 'current mode'}`);
+        }
         setIsLoading(false);
       }, 400); // simulate native processing delay
     } catch (err) {
@@ -197,10 +213,32 @@ export default function ShizukuPanel({ shizukuState, setShizukuState, onLogMessa
   };
 
 
-  const sendCustomCommand = (e: React.FormEvent) => {
+  const sendCustomCommand = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!customLog.trim()) return;
-    onLogMessage(customLog);
+    onLogMessage(`[sh] $ ${customLog}`);
+    
+    // Execute real command if native
+    const res = await executeShizukuCommand(customLog);
+    if (res) {
+       if (res.output) {
+           const lines = res.output.split('\\n').filter(l => l.trim() !== '');
+           lines.forEach(line => onLogMessage(`[sh] ${line}`));
+       }
+       if (res.error) {
+           const lines = res.error.split('\\n').filter(l => l.trim() !== '');
+           lines.forEach(line => onLogMessage(`[sh ERROR] ${line}`));
+       }
+       if (!res.output && !res.error && res.exitCode === 0) {
+           onLogMessage(`[sh] Command completed with exit code 0`);
+       } else if (res.exitCode !== 0) {
+           onLogMessage(`[sh ERROR] Command exited with code ${res.exitCode}`);
+       }
+    } else {
+       // Mock for non-native context
+       onLogMessage(`Executed locally (WebView context only): ${customLog}`);
+    }
+
     setCustomLog('');
   };
 

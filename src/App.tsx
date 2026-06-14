@@ -47,6 +47,70 @@ export default function App() {
   const [selectedMainView, setSelectedMainView] = React.useState<'shizuku' | 'overlay' | 'profile' | 'macro' | 'tester' | 'ai_tunnel'>('shizuku');
   const [isKilling, setIsKilling] = React.useState(false);
 
+  // Persistence
+  React.useEffect(() => {
+    import('@capacitor/preferences').then(({ Preferences }) => {
+      Preferences.get({ key: 'nexion_profiles' }).then((res) => {
+        if (res.value) {
+          try {
+            const parsed = JSON.parse(res.value);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setProfiles(parsed);
+            }
+          } catch (e) { console.error('Failed to parse profiles', e); }
+        }
+      });
+      Preferences.get({ key: 'nexion_active_profile' }).then((res) => {
+        if (res.value) {
+          setActiveProfileId(res.value);
+        }
+      });
+    });
+  }, []);
+
+  const saveProfilesToStorage = async (newProfiles: GamepadProfile[]) => {
+    const { Preferences } = await import('@capacitor/preferences');
+    await Preferences.set({ key: 'nexion_profiles', value: JSON.stringify(newProfiles) });
+  };
+
+  const handleUpdateProfile = (updatedProfile: GamepadProfile) => {
+    setProfiles(prev => {
+      const next = prev.map(p => p.id === updatedProfile.id ? updatedProfile : p);
+      saveProfilesToStorage(next);
+      return next;
+    });
+  };
+
+  const handleCreateProfile = (profile: GamepadProfile) => {
+    setProfiles(prev => {
+      const next = [profile, ...prev];
+      saveProfilesToStorage(next);
+      return next;
+    });
+    setActiveProfileId(profile.id);
+  };
+
+  const handleDeleteProfile = (profileId: string) => {
+    setProfiles(prev => {
+      const next = prev.filter(p => p.id !== profileId);
+      if (next.length === 0) {
+         // Fallback if deleting the last profile
+         next.push(INITIAL_PROFILES[0]);
+      }
+      saveProfilesToStorage(next);
+      if (profileId === activeProfileId) {
+        setActiveProfileId(next[0].id);
+      }
+      return next;
+    });
+  };
+
+  const handleProfileSelect = async (id: string) => {
+    setActiveProfileId(id);
+    const { Preferences } = await import('@capacitor/preferences');
+    await Preferences.set({ key: 'nexion_active_profile', value: id });
+    syncActiveProfileIdOnServer(id);
+  };
   const handleGlobalKillSwitch = async () => {
     setIsKilling(true);
     try {
@@ -91,10 +155,6 @@ export default function App() {
 
   const activeProfile = profiles.find(p => p.id === activeProfileId) || profiles[0];
 
-  const handleUpdateProfile = (updatedProfile: GamepadProfile) => {
-    setProfiles(prev => prev.map(p => p.id === updatedProfile.id ? updatedProfile : p));
-  };
-
   const handleLogMessage = (msg: string) => {
     setShizukuState(prev => {
       const newLine = `[${new Date().toLocaleTimeString('en-US', { hour12: false, hour: "numeric", minute: "numeric", second: "numeric" })}] ${msg}`;
@@ -102,11 +162,6 @@ export default function App() {
       if (newLines.length > 50) newLines.shift();
       return { ...prev, logLines: newLines };
     });
-  };
-
-  const handleProfileSelect = (id: string) => {
-    setActiveProfileId(id);
-    syncActiveProfileIdOnServer(id);
   };
 
   return (
@@ -286,6 +341,8 @@ export default function App() {
               activeProfileId={activeProfileId}
               onProfileSelect={handleProfileSelect}
               onUpdateProfile={handleUpdateProfile}
+              onCreateProfile={handleCreateProfile}
+              onDeleteProfile={handleDeleteProfile}
               onLogMessage={handleLogMessage}
             />
           )}

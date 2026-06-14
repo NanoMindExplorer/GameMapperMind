@@ -6,24 +6,70 @@
 
 import React from 'react';
 import { GamepadProfile } from '../types';
-import { Target, Settings, Sliders, Box, HardDrive, Cpu, AlertTriangle, Play, Flame } from 'lucide-react';
+import { Target, Settings, Sliders, Box, HardDrive, Cpu, AlertTriangle, Play, Flame, Plus, Trash2, Edit2, Check, X } from 'lucide-react';
 
 interface GameSelectorProps {
   profiles: GamepadProfile[];
   activeProfileId: string;
   onProfileSelect: (id: string) => void;
   onUpdateProfile: (updated: GamepadProfile) => void;
+  onCreateProfile: (profile: GamepadProfile) => void;
+  onDeleteProfile: (id: string) => void;
   onLogMessage: (msg: string) => void;
 }
 
-export default function GameSelector({ profiles, activeProfileId, onProfileSelect, onUpdateProfile, onLogMessage }: GameSelectorProps) {
+export default function GameSelector({ profiles, activeProfileId, onProfileSelect, onUpdateProfile, onCreateProfile, onDeleteProfile, onLogMessage }: GameSelectorProps) {
   const activeProfile = profiles.find(p => p.id === activeProfileId) || profiles[0];
   const [activeSubTab, setActiveSubTab] = React.useState<'parameters' | 'hardware'>('parameters');
+  const [isEditingMeta, setIsEditingMeta] = React.useState(false);
+  const [editMetaValues, setEditMetaValues] = React.useState({ name: '', packageName: '', description: '' });
 
   const updateProfileValue = (key: keyof GamepadProfile, value: any) => {
     const updated = { ...activeProfile, [key]: value };
     onUpdateProfile(updated);
-    onLogMessage(`Profile Engine: Modifying [${activeProfile.name}] attribute -> ${key} = ${value}`);
+    if (!isEditingMeta) {
+      onLogMessage(`Profile Engine: Modifying [${activeProfile.name}] attribute -> ${key} = ${value}`);
+    }
+  };
+
+  const handleCreateNew = () => {
+    const newId = `custom_${Date.now()}`;
+    const newProfile: GamepadProfile = {
+      id: newId,
+      name: 'New Custom Profile',
+      packageName: 'com.example.app',
+      description: 'A new user-defined layout profile.',
+      gyroSensitivity: 1.0,
+      deadzone: 0.1,
+      smoothing: 0.2,
+      isCustom: true,
+      buttons: []
+    };
+    onCreateProfile(newProfile);
+    onLogMessage(`Profile Engine: Created new blank profile [${newId}]`);
+  };
+
+  const handleDelete = () => {
+    if (confirm("Are you sure you want to delete this profile?")) {
+      onDeleteProfile(activeProfile.id);
+      onLogMessage(`Profile Engine: Deleted profile [${activeProfile.name}]`);
+    }
+  };
+
+  const startEditingMetaData = () => {
+    setEditMetaValues({ 
+      name: activeProfile.name, 
+      packageName: activeProfile.packageName, 
+      description: activeProfile.description 
+    });
+    setIsEditingMeta(true);
+  };
+
+  const saveMetaData = () => {
+    const updated = { ...activeProfile, ...editMetaValues };
+    onUpdateProfile(updated);
+    setIsEditingMeta(false);
+    onLogMessage(`Profile Engine: Updated metadata for [${updated.name}]`);
   };
 
   return (
@@ -45,27 +91,75 @@ export default function GameSelector({ profiles, activeProfileId, onProfileSelec
       <div className="p-6 grid grid-cols-1 md:grid-cols-12 gap-6">
         {/* Profiles Selector Panel */}
         <div className="md:col-span-5 space-y-4">
-          <span className="block text-[10px] font-mono font-bold text-slate-500 uppercase">CHOOSE ACTIVE PROFILE</span>
-          <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+          <div className="flex items-center justify-between">
+             <span className="block text-[10px] font-mono font-bold text-slate-500 uppercase">CHOOSE ACTIVE PROFILE</span>
+             <button
+               onClick={handleCreateNew}
+               className="flex items-center gap-1.5 px-2.5 py-1 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 rounded text-[10px] font-bold uppercase transition-colors"
+             >
+               <Plus className="w-3 h-3" />
+               New Profile
+             </button>
+          </div>
+          <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1">
             {profiles.map((p) => {
               const Selected = p.id === activeProfileId;
               return (
                 <div
                   key={p.id}
-                  onClick={() => onProfileSelect(p.id)}
-                  className={`p-3.5 rounded-lg border cursor-pointer transition-all flex items-start gap-3 ${
+                  onClick={() => !Selected && onProfileSelect(p.id)}
+                  className={`p-3.5 rounded-lg border cursor-pointer transition-all flex flex-col gap-3 ${
                     Selected 
-                      ? 'bg-gradient-to-r from-slate-900 to-indigo-950/20 border-indigo-500 text-slate-100 shadow-lg' 
+                      ? 'bg-gradient-to-r from-slate-900 to-indigo-950/20 border-indigo-500 text-slate-100 shadow-lg cursor-default' 
                       : 'bg-slate-950/45 border-slate-850 text-slate-400 hover:text-slate-200 hover:bg-slate-950/60'
                   }`}
                 >
-                  <div className="mt-1 bg-slate-950 p-1.5 rounded-lg border border-slate-800">
-                    <Target className={`w-4 h-4 ${Selected ? 'text-indigo-400 animate-spin-slow' : 'text-slate-500'}`} />
-                  </div>
-                  <div className="space-y-0.5 truncate flex-1">
-                    <div className="text-xs font-bold text-slate-200">{p.name}</div>
-                    <div className="text-[10px] font-mono text-slate-500 truncate">{p.packageName}</div>
-                    <p className="text-[9px] text-slate-400 line-clamp-1 mt-1 leading-normal">{p.description}</p>
+                  <div className="flex items-start gap-3 w-full">
+                    <div className="mt-1 bg-slate-950 p-1.5 rounded-lg border border-slate-800">
+                      <Target className={`w-4 h-4 ${Selected ? 'text-indigo-400 animate-spin-slow' : 'text-slate-500'}`} />
+                    </div>
+                    {Selected && isEditingMeta ? (
+                      <div className="flex-1 space-y-2">
+                        <input 
+                          type="text" 
+                          value={editMetaValues.name} 
+                          onChange={(e) => setEditMetaValues({...editMetaValues, name: e.target.value})} 
+                          className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-xs text-slate-200 outline-none focus:border-indigo-500"
+                          placeholder="Profile Name"
+                        />
+                        <input 
+                          type="text" 
+                          value={editMetaValues.packageName} 
+                          onChange={(e) => setEditMetaValues({...editMetaValues, packageName: e.target.value})} 
+                          className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-[10px] font-mono text-slate-300 outline-none focus:border-indigo-500"
+                          placeholder="com.package.name"
+                        />
+                        <textarea
+                          value={editMetaValues.description}
+                          onChange={(e) => setEditMetaValues({...editMetaValues, description: e.target.value})}
+                          className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-[10px] text-slate-400 outline-none focus:border-indigo-500 min-h-[40px] resize-none"
+                          placeholder="Description"
+                        />
+                        <div className="flex gap-2 justify-end">
+                          <button onClick={() => setIsEditingMeta(false)} className="px-2 py-1 text-[9px] font-bold uppercase rounded bg-slate-800 text-slate-400 hover:text-slate-200">Cancel</button>
+                          <button onClick={(e) => { e.stopPropagation(); saveMetaData(); }} className="px-2 py-1 text-[9px] font-bold uppercase rounded bg-indigo-500 text-white flex gap-1 items-center hover:bg-indigo-400"><Check className="w-3 h-3" /> Save</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-0.5 truncate flex-1">
+                        <div className="text-xs font-bold text-slate-200">{p.name}</div>
+                        <div className="text-[10px] font-mono text-slate-500 truncate">{p.packageName}</div>
+                        <p className="text-[9px] text-slate-400 line-clamp-1 mt-1 leading-normal">{p.description}</p>
+                      </div>
+                    )}
+                    {Selected && !isEditingMeta && (
+                      <div className="flex flex-col gap-1 items-end shrink-0">
+                        <button onClick={(e) => { e.stopPropagation(); startEditingMetaData(); }} className="p-1.5 text-slate-400 hover:text-indigo-400 hover:bg-slate-900 rounded"><Edit2 className="w-3.5 h-3.5" /></button>
+                        {p.isCustom && (
+                          <button onClick={(e) => { e.stopPropagation(); handleDelete(); }} className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-950/30 rounded"><Trash2 className="w-3.5 h-3.5" /></button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               );

@@ -44,6 +44,27 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
     setIsDragging(true);
   };
 
+  const handleDragEnd = () => {
+    setIsDragging(false);
+  };
+
+  const handleDragMove = (e: React.MouseEvent) => {
+    if (!isDragging || !selectedButtonId) return;
+    
+    const container = e.currentTarget.getBoundingClientRect();
+    const x = Math.max(0, Math.min(100, ((e.clientX - container.left) / container.width) * 100));
+    const y = Math.max(0, Math.min(100, ((e.clientY - container.top) / container.height) * 100));
+
+    const updatedButtons = activeProfile.buttons.map(b => {
+      if (b.id === selectedButtonId) {
+        return { ...b, x, y };
+      }
+      return b;
+    });
+    
+    onUpdateProfile({ ...activeProfile, buttons: updatedButtons });
+  };
+
   const handleContainerClick = () => {
     setSelectedButtonId(null);
   };
@@ -229,7 +250,21 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
         {/* Main absolute aspect ratio lock screen emulator */}
         <div 
           onClick={handleContainerClick}
-          className="relative w-full aspect-[16/9] bg-slate-950 rounded-lg overflow-hidden border border-slate-800 shadow-inner group select-none"
+          onMouseMove={handleDragMove}
+          onMouseUp={handleDragEnd}
+          onMouseLeave={handleDragEnd}
+          // Added touch events for mobile compatibility
+          onTouchMove={(e) => {
+            if (!isDragging || !selectedButtonId) return;
+            const touch = e.touches[0];
+            const container = e.currentTarget.getBoundingClientRect();
+            const x = Math.max(0, Math.min(100, ((touch.clientX - container.left) / container.width) * 100));
+            const y = Math.max(0, Math.min(100, ((touch.clientY - container.top) / container.height) * 100));
+            const updatedButtons = activeProfile.buttons.map(b => b.id === selectedButtonId ? { ...b, x, y } : b);
+            onUpdateProfile({ ...activeProfile, buttons: updatedButtons });
+          }}
+          onTouchEnd={handleDragEnd}
+          className="relative w-full aspect-[16/9] bg-slate-950 rounded-lg overflow-hidden border border-slate-800 shadow-inner group select-none touch-none"
           style={{
             backgroundImage: `linear-gradient(rgba(0,0,0,${bgDimLevel / 100}), rgba(0,0,0,${bgDimLevel / 100})), url(${getBackgroundUrl()})`,
             backgroundSize: 'cover',
@@ -258,6 +293,11 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
               <div
                 key={btn.id}
                 onMouseDown={(e) => handleDragStart(e, btn.id)}
+                onTouchStart={(e) => {
+                  e.stopPropagation();
+                  setSelectedButtonId(btn.id);
+                  setIsDragging(true);
+                }}
                 onClick={(e) => { e.stopPropagation(); setSelectedButtonId(btn.id); }}
                 className={`absolute rounded-full border-2 cursor-pointer flex flex-col justify-center items-center font-sans tracking-tight ${btnColor} transition-all antialiased select-none group/node`}
                 style={{
@@ -314,7 +354,7 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
                 
                 {/* Visual coordinate hover flag */}
                 <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover/node:block bg-slate-950/90 text-[8px] font-mono text-indigo-300 px-1 py-0.5 rounded border border-indigo-900 pointer-events-none whitespace-nowrap">
-                  X:{btn.x}% Y:{btn.y}%
+                  X:{Number(btn.x).toFixed(1)}% Y:{Number(btn.y).toFixed(1)}%
                 </div>
               </div>
             );
@@ -486,7 +526,7 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
                       <input
                         type="number"
                         className="w-full bg-slate-900 text-slate-100 text-xs px-2 py-1 rounded focus:outline-none focus:border-indigo-500 font-mono border border-slate-800"
-                        value={selectedButton.x}
+                        value={Number(selectedButton.x).toFixed(1)}
                         onChange={(e) => handleUpdateBtnProperty('x', Math.max(0, Math.min(100, parseFloat(e.target.value) || 0)))}
                       />
                     </div>
@@ -495,7 +535,7 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
                       <input
                         type="number"
                         className="w-full bg-slate-900 text-slate-100 text-xs px-2 py-1 rounded focus:outline-none focus:border-indigo-500 font-mono border border-slate-800"
-                        value={selectedButton.y}
+                        value={Number(selectedButton.y).toFixed(1)}
                         onChange={(e) => handleUpdateBtnProperty('y', Math.max(0, Math.min(100, parseFloat(e.target.value) || 0)))}
                       />
                     </div>

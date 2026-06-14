@@ -5,12 +5,14 @@ import {
   Target, Flag, ListTodo, Edit3
 } from 'lucide-react';
 import { AITunnelState } from '../types';
+import { useShizuku } from '../hooks/useShizuku';
 
 interface AITunnelPanelProps {
   onLogMessage: (msg: string) => void;
 }
 
 export default function AITunnelPanel({ onLogMessage }: AITunnelPanelProps) {
+  const { executeShizukuCommand } = useShizuku();
   const [tunnelState, setTunnelState] = React.useState<AITunnelState>({
     isEnabled: false,
     activeAgent: "vlm_gemini",
@@ -81,18 +83,38 @@ export default function AITunnelPanel({ onLogMessage }: AITunnelPanelProps) {
     onLogMessage(`AI Tunnel security permission updated: ${field} = ${val}`);
   };
 
-  const handleTriggerSimulation = () => {
+  const handleTriggerSimulation = async () => {
     if (!tunnelState.isEnabled) return;
     setIsLoading(true);
-    setTimeout(() => {
-      // Create local simulated response
+    
+    try {
+      setTunnelState(prev => ({ ...prev, logs: [`[SIM-VLM] Evaluating scene context for scenario: ${selectedScenario}...`, ...prev.logs] }));
+      
+      let devCommand = '';
+      if (selectedScenario === 'harian_quest') {
+         devCommand = `input swipe 500 800 500 300 500 && sleep 1 && input tap 800 200`;
+      } else if (selectedScenario === 'boss_dodge') {
+         devCommand = `input swipe 200 800 800 800 100`;
+      } else if (selectedScenario === 'farm_ore') {
+         devCommand = `input tap 200 500 && sleep 1 && input tap 800 500`;
+      } else {
+         devCommand = `input tap 500 500`;
+      }
+
+      const res = await executeShizukuCommand(devCommand);
+      
       setTunnelState(prev => ({
         ...prev,
         lastCommand: selectedScenario === 'custom_scenario' ? customPrompt : `Automated Sequence: ${selectedScenario}`,
-        aiConfidence: (Math.random() * 0.4) + 0.55 // 55% - 95%
+        aiConfidence: (Math.random() * 0.4) + 0.55,
+        totalModelCommandsExecuted: prev.totalModelCommandsExecuted + 1,
+        logs: [
+          `[COMMAND] Native executed: ${devCommand}`,
+          `[SIM-VLM] Confidence: ${((Math.random() * 0.4) + 0.55).toFixed(2)} | Target Action Executed.`,
+          ...prev.logs
+        ]
       }));
         
-      // Simbiotically update scenario success progression
       setProgressCounters(prev => {
         const maxes: Record<string, number> = { harian_quest: 4, boss_dodge: 5, farm_ore: 10, custom_scenario: 3 };
         const activeMax = maxes[selectedScenario];
@@ -106,8 +128,11 @@ export default function AITunnelPanel({ onLogMessage }: AITunnelPanelProps) {
           return prev;
         }
       });
+    } catch (err) {
+      onLogMessage(`[AI ERROR] VLM Simulation failed.`);
+    } finally {
       setIsLoading(false);
-    }, 1500);
+    }
   };
 
   const copyToClipboard = (text: string, type: 'token' | 'curl' | 'python' | 'node') => {

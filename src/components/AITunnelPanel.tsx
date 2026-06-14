@@ -58,8 +58,26 @@ export default function AITunnelPanel({ onLogMessage }: AITunnelPanelProps) {
     const interval = setInterval(() => {
         // dummy keepalive
     }, 2500);
-    return () => clearInterval(interval);
-  }, []);
+
+    const handleKill = () => {
+      setTunnelState(prev => {
+        if (!prev.isEnabled) return prev;
+        onLogMessage(`[KILL-SWITCH] AI Copilot & Tunnel forcefully disabled.`);
+        return {
+          ...prev,
+          isEnabled: false,
+          logs: ['[CRITICAL] Force shutdown via Global Kill Switch...', ...prev.logs],
+        };
+      });
+      setIsLoading(false);
+    };
+
+    window.addEventListener('emergency-kill', handleKill);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('emergency-kill', handleKill);
+    };
+  }, [onLogMessage]);
 
   const handleToggleEnable = () => {
     setIsLoading(true);

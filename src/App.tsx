@@ -47,6 +47,11 @@ export default function App() {
   const [selectedMainView, setSelectedMainView] = React.useState<'shizuku' | 'overlay' | 'profile' | 'macro' | 'tester' | 'ai_tunnel'>('shizuku');
   const [isKilling, setIsKilling] = React.useState(false);
 
+  // Settings state
+  const [socketIpcName, setSocketIpcName] = React.useState('@gamepad_mapper_ipc');
+  const [inputPolling, setInputPolling] = React.useState(250);
+  const [isEditingSettings, setIsEditingSettings] = React.useState(false);
+
   const [macros, setMacros] = React.useState<GamepadMacro[]>(INITIAL_MACROS);
 
   // Persistence
@@ -77,6 +82,15 @@ export default function App() {
           } catch (e) { console.error('Failed to parse macros', e); }
         }
       });
+      Preferences.get({ key: 'nexion_settings' }).then((res) => {
+        if (res.value) {
+           try {
+             const parsed = JSON.parse(res.value);
+             if (parsed.socketIpcName) setSocketIpcName(parsed.socketIpcName);
+             if (parsed.inputPolling) setInputPolling(parsed.inputPolling);
+           } catch(e){}
+        }
+      });
     });
   }, []);
 
@@ -88,6 +102,11 @@ export default function App() {
   const saveMacrosToStorage = async (newMacros: GamepadMacro[]) => {
     const { Preferences } = await import('@capacitor/preferences');
     await Preferences.set({ key: 'nexion_macros', value: JSON.stringify(newMacros) });
+  };
+
+  const saveSettingsToStorage = async (socket: string, polling: number) => {
+    const { Preferences } = await import('@capacitor/preferences');
+    await Preferences.set({ key: 'nexion_settings', value: JSON.stringify({ socketIpcName: socket, inputPolling: polling }) });
   };
 
   const handleUpdateMacros = (newMacros: GamepadMacro[]) => {
@@ -246,14 +265,57 @@ export default function App() {
           {/* Quick HUD State indications & Emergency Kill Switch */}
           <div className="flex items-center gap-4">
             <div className="hidden md:flex items-center gap-6 text-xs text-slate-400 font-mono pr-2">
-              <div className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                <span>Socket IPC: @gampad_mapper_ipc</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse"></span>
-                <span>Input Polling: 250Hz</span>
-              </div>
+              {isEditingSettings ? (
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                    <input 
+                      type="text" 
+                      value={socketIpcName}
+                      onChange={(e) => setSocketIpcName(e.target.value)}
+                      className="bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-xs text-slate-200 outline-none w-40"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-violet-400"></span>
+                    <select
+                      value={inputPolling}
+                      onChange={(e) => setInputPolling(Number(e.target.value))}
+                      className="bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-xs text-slate-200 outline-none"
+                    >
+                      <option value={125}>125Hz</option>
+                      <option value={250}>250Hz</option>
+                      <option value={500}>500Hz</option>
+                      <option value={1000}>1000Hz</option>
+                    </select>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      setIsEditingSettings(false);
+                      saveSettingsToStorage(socketIpcName, inputPolling);
+                      handleLogMessage(`Configuration updated: Socket=${socketIpcName}, Polling=${inputPolling}Hz`);
+                    }}
+                    className="px-2 py-1 bg-indigo-500 hover:bg-indigo-400 text-white rounded text-[10px] uppercase font-bold"
+                  >
+                    Save
+                  </button>
+                </div>
+              ) : (
+                <div 
+                  className="flex items-center gap-6 cursor-pointer hover:bg-slate-900 px-2 py-1 rounded transition-colors group/settings"
+                  onClick={() => setIsEditingSettings(true)}
+                  title="Click to configure settings"
+                >
+                  <div className="flex items-center gap-2 group-hover/settings:text-indigo-300">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                    <span>Socket IPC: {socketIpcName}</span>
+                  </div>
+                  <div className="flex items-center gap-2 group-hover/settings:text-indigo-300">
+                    <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse"></span>
+                    <span>Input Polling: {inputPolling}Hz</span>
+                  </div>
+                </div>
+              )}
             </div>
 
             <button

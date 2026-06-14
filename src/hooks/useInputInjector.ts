@@ -19,7 +19,7 @@ export function useInputInjector() {
         return true;
       } catch (e) {
         console.error("Native overlay error", e);
-        return false;
+        throw e;
       }
     }
     console.warn("Overlay is only supported on native Android");
@@ -33,7 +33,7 @@ export function useInputInjector() {
         return true;
       } catch (e) {
         console.error("Native overlay error", e);
-        return false;
+        throw e;
       }
     }
     return false;

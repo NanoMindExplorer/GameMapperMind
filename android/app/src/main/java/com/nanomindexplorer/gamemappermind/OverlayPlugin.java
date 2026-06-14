@@ -31,13 +31,18 @@ public class OverlayPlugin extends Plugin {
         Intent serviceIntent = new Intent(getContext(), FloatingOverlayService.class);
         serviceIntent.putExtra("config", config);
         
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            getContext().startForegroundService(serviceIntent);
-        } else {
-            getContext().startService(serviceIntent);
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                getContext().startForegroundService(serviceIntent);
+            } else {
+                getContext().startService(serviceIntent);
+            }
+            Log.d("GameMapper", "startOverlay service launched successfully");
+            call.resolve();
+        } catch (Exception e) {
+            Log.e("GameMapper", "Failed to start overlay service", e);
+            call.reject("Failed to start overlay service: " + e.getMessage());
         }
-        Log.d("GameMapper", "startOverlay service launched");
-        call.resolve();
     }
 
     @PluginMethod

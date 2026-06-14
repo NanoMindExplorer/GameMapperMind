@@ -46,119 +46,68 @@ export default function AITunnelPanel({ onLogMessage }: AITunnelPanelProps) {
     custom_scenario: 0
   });
 
-  // Fetch status of the AI Tunnel
-  const fetchTunnelStatus = async () => {
-    try {
-      const res = await fetch('/api/ai/tunnel-status');
-      if (res.ok) {
-        const data = await res.json();
-        setTunnelState(data);
-      }
-    } catch (err) {
-      console.error("Failed to fetch tunnel status", err);
-    }
+  // Local state operations in Capacitor mode
+  const fetchTunnelStatus = () => {
+    // Already local
   };
 
   React.useEffect(() => {
-    fetchTunnelStatus();
-    const interval = setInterval(fetchTunnelStatus, 2500);
+    // Local tunnel loop
+    const interval = setInterval(() => {
+        // dummy keepalive
+    }, 2500);
     return () => clearInterval(interval);
   }, []);
 
-  const handleToggleEnable = async () => {
+  const handleToggleEnable = () => {
     setIsLoading(true);
-    try {
-      const res = await fetch('/api/ai/tunnel-control', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ isEnabled: !tunnelState.isEnabled })
+    setTimeout(() => {
+      setTunnelState(prev => {
+        const newState = { ...prev, isEnabled: !prev.isEnabled };
+        onLogMessage(`AI Tunnel status updated: ${newState.isEnabled ? 'ENABLED' : 'DISABLED'}`);
+        return newState;
       });
-      if (res.ok) {
-        const data = await res.json();
-        setTunnelState(data);
-        onLogMessage(`AI Tunnel status updated: ${data.isEnabled ? 'ENABLED' : 'DISABLED'}`);
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
       setIsLoading(false);
-    }
+    }, 300);
   };
 
-  const handleUpdateAgent = async (agent: 'vision_agent' | 'vlm_gemini' | 'reinforcement_rl') => {
-    try {
-      const res = await fetch('/api/ai/tunnel-control', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ activeAgent: agent })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setTunnelState(data);
-        onLogMessage(`AI Agent target changed to: ${agent}`);
-      }
-    } catch (err) {
-      console.error(err);
-    }
+  const handleUpdateAgent = (agent: 'vision_agent' | 'vlm_gemini' | 'reinforcement_rl') => {
+    setTunnelState(prev => ({ ...prev, activeAgent: agent }));
+    onLogMessage(`AI Agent target changed to: ${agent}`);
   };
 
-  const handleUpdatePermission = async (field: 'allowAutonomousTap' | 'allowMacroTriggers', val: boolean) => {
-    try {
-      const res = await fetch('/api/ai/tunnel-control', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ [field]: val })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setTunnelState(data);
-        onLogMessage(`AI Tunnel security permission updated: ${field} = ${val}`);
-      }
-    } catch (err) {
-      console.error(err);
-    }
+  const handleUpdatePermission = (field: 'allowAutonomousTap' | 'allowMacroTriggers', val: boolean) => {
+    setTunnelState(prev => ({ ...prev, [field]: val }));
+    onLogMessage(`AI Tunnel security permission updated: ${field} = ${val}`);
   };
 
-  const handleTriggerSimulation = async () => {
+  const handleTriggerSimulation = () => {
     if (!tunnelState.isEnabled) return;
     setIsLoading(true);
-    try {
-      const res = await fetch('/api/ai/sim-vision', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          scenarioId: selectedScenario,
-          customPrompt: selectedScenario === 'custom_scenario' ? customPrompt : undefined,
-          customGoal: selectedScenario === 'custom_scenario' ? customGoal : undefined
-        })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setTunnelState(data);
+    setTimeout(() => {
+      // Create local simulated response
+      setTunnelState(prev => ({
+        ...prev,
+        lastCommand: selectedScenario === 'custom_scenario' ? customPrompt : `Automated Sequence: ${selectedScenario}`,
+        aiConfidence: (Math.random() * 0.4) + 0.55 // 55% - 95%
+      }));
         
-        // Simbiotically update scenario success progression
-        setProgressCounters(prev => {
-          const maxes: Record<string, number> = { harian_quest: 4, boss_dodge: 5, farm_ore: 10, custom_scenario: 3 };
-          const activeMax = maxes[selectedScenario];
-          const curr = prev[selectedScenario] || 0;
-          if (curr < activeMax) {
-            const nextVal = curr + 1;
-            onLogMessage(`[AI TASK PROGRESS] Skenario Otonom '${selectedScenario}' bertambah: ${nextVal}/${activeMax}`);
-            return {
-              ...prev,
-              [selectedScenario]: nextVal
-            };
-          } else {
-            onLogMessage(`[AI SUCCESS] Target skenario '${selectedScenario}' telah tercapai 100%! 🎉`);
-            return prev;
-          }
-        });
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
+      // Simbiotically update scenario success progression
+      setProgressCounters(prev => {
+        const maxes: Record<string, number> = { harian_quest: 4, boss_dodge: 5, farm_ore: 10, custom_scenario: 3 };
+        const activeMax = maxes[selectedScenario];
+        const curr = prev[selectedScenario] || 0;
+        if (curr < activeMax) {
+          const nextVal = curr + 1;
+          onLogMessage(`[AI TASK PROGRESS] Skenario Otonom '${selectedScenario}' bertambah: ${nextVal}/${activeMax}`);
+          return { ...prev, [selectedScenario]: nextVal };
+        } else {
+          onLogMessage(`[AI SUCCESS] Target skenario '${selectedScenario}' telah tercapai 100%! 🎉`);
+          return prev;
+        }
+      });
       setIsLoading(false);
-    }
+    }, 1500);
   };
 
   const copyToClipboard = (text: string, type: 'token' | 'curl' | 'python' | 'node') => {

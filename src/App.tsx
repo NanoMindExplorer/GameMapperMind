@@ -20,7 +20,10 @@ import {
   ChevronRight, Sparkles, BookOpen, Layers, Bot, ShieldAlert
 } from 'lucide-react';
 
+import { useShizuku } from './hooks/useShizuku';
+
 export default function App() {
+  const { checkShizukuStatus } = useShizuku();
   const [shizukuState, setShizukuState] = React.useState<ShizukuState>({
     status: 'CONNECTED_SHIZUKU',
     daemonRunning: true,
@@ -47,12 +50,15 @@ export default function App() {
   const handleGlobalKillSwitch = async () => {
     setIsKilling(true);
     try {
-      const res = await fetch('/api/ai/kill-switch', { method: 'POST' });
-      if (res.ok) {
-        window.dispatchEvent(new CustomEvent('emergency-kill'));
-        await fetchStatus();
-        handleLogMessage('CRITICAL: Global emergency kill-switch initiated. AI autonomous streams disconnected & macro triggers purged.');
-      }
+      // Simulate hardware interrupt sequence
+      await new Promise(r => setTimeout(r, 600));
+      window.dispatchEvent(new CustomEvent('emergency-kill'));
+      setShizukuState(prev => ({
+        ...prev,
+        status: 'DISCONNECTED',
+        daemonRunning: false
+      }));
+      handleLogMessage('CRITICAL: Global emergency kill-switch initiated. AI autonomous streams disconnected & macro triggers purged.');
     } catch (err) {
       console.error("Failed to trigger emergency kill-switch", err);
     } finally {
@@ -60,34 +66,26 @@ export default function App() {
     }
   };
 
-  // Query real simulation logs and stats from server
+  // Query real simulation logs and stats from server, override with Native plugin state if on device
   const fetchStatus = async () => {
     try {
-      const res = await fetch('/api/daemon/status');
-      const data = await res.json();
-      setShizukuState(data);
+      // Just re-check native dependencies directly
+      const nextState = await checkShizukuStatus(shizukuState);
+      setShizukuState(nextState);
     } catch (err) {
-      console.error('Failed to sync state from backend', err);
+      console.error('Failed to sync native state', err);
     }
   };
 
-  const syncActiveProfileIdOnServer = async (id: string) => {
-    try {
-      await fetch('/api/profile/active', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ profileId: id })
-      });
-      fetchStatus();
-    } catch (err) {
-      console.error(err);
-    }
+  const syncActiveProfileIdOnServer = (id: string) => {
+    // Only local in Capacitor
+    console.log("Profile active set to", id);
   };
 
   React.useEffect(() => {
     fetchStatus();
-    // Sync state every 3.5 seconds
-    const interval = setInterval(fetchStatus, 3500);
+    // Native background checker
+    const interval = setInterval(fetchStatus, 5000);
     return () => clearInterval(interval);
   }, []);
 
@@ -97,17 +95,13 @@ export default function App() {
     setProfiles(prev => prev.map(p => p.id === updatedProfile.id ? updatedProfile : p));
   };
 
-  const handleLogMessage = async (msg: string) => {
-    try {
-      await fetch('/api/daemon/log', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: msg })
-      });
-      fetchStatus();
-    } catch (err) {
-      console.error(err);
-    }
+  const handleLogMessage = (msg: string) => {
+    setShizukuState(prev => {
+      const newLine = `[${new Date().toLocaleTimeString('en-US', { hour12: false, hour: "numeric", minute: "numeric", second: "numeric" })}] ${msg}`;
+      const newLines = [...prev.logLines, newLine];
+      if (newLines.length > 50) newLines.shift();
+      return { ...prev, logLines: newLines };
+    });
   };
 
   const handleProfileSelect = (id: string) => {

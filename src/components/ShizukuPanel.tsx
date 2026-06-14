@@ -11,6 +11,7 @@ import {
   BookOpen, ChevronRight, ChevronDown, CheckSquare, Square, Sparkles, Check
 } from 'lucide-react';
 import { ShizukuState } from '../types';
+import { useShizuku } from '../hooks/useShizuku';
 
 interface ShizukuPanelProps {
   shizukuState: ShizukuState;
@@ -141,6 +142,7 @@ const DESKTOP_STEPS = [
 ];
 
 export default function ShizukuPanel({ shizukuState, setShizukuState, onLogMessage }: ShizukuPanelProps) {
+  const { requestShizukuPermission: nativeRequestPerm } = useShizuku();
   const [activeTab, setActiveTab] = React.useState<'shizuku' | 'desktop'>('shizuku');
   const [isLoading, setIsLoading] = React.useState(false);
   const [shizukuPermission, setShizukuPermission] = React.useState<'GRANTED' | 'DENIED' | 'PROMPT'>('PROMPT');
@@ -156,52 +158,49 @@ export default function ShizukuPanel({ shizukuState, setShizukuState, onLogMessa
   const triggerAction = async (action: 'start' | 'stop' | 'toggle_mode', mode?: 'shizuku' | 'desktop') => {
     setIsLoading(true);
     try {
-      const response = await fetch('/api/daemon/control', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, mode })
-      });
-      const data = await response.json();
-      setShizukuState(data);
-      onLogMessage(`Daemon control dispatched: ${action.toUpperCase()} (${mode || 'current mode'})`);
+      // Direct local state simulation
+      setTimeout(() => {
+        setShizukuState(prev => {
+          const nextMode = mode || prev.mode;
+          let isRunning = prev.daemonRunning;
+          let status = prev.status;
+
+          if (action === 'start') {
+            isRunning = true;
+            status = nextMode === 'shizuku' ? 'CONNECTED_SHIZUKU' : 'CONNECTED_DESKTOP';
+          } else if (action === 'stop') {
+            isRunning = false;
+            status = 'DISCONNECTED';
+          }
+
+          return { ...prev, daemonRunning: isRunning, mode: nextMode, status };
+        });
+        onLogMessage(`Daemon control dispatched locally: ${action.toUpperCase()} (${mode || 'current mode'})`);
+        setIsLoading(false);
+      }, 400); // simulate native processing delay
     } catch (err) {
       console.error(err);
       onLogMessage(`Error executing daemon control: ${action}`);
-    } finally {
       setIsLoading(false);
     }
   };
 
-  const requestShizukuPermission = () => {
+  const requestShizukuPermission = async () => {
     setIsLoading(true);
     onLogMessage("Invoking Shizuku.requestPermission() via android.os.Binder IPC");
+    await nativeRequestPerm();
     setTimeout(() => {
       setShizukuPermission('GRANTED');
-      onLogMessage("Shizuku Permission GRANTED dynamically (UID: 2000 Shell)");
+      onLogMessage("Shizuku Permission request dispatched dynamically.");
       setIsLoading(false);
     }, 1000);
   };
 
-  const sendCustomCommand = async (e: React.FormEvent) => {
+
+  const sendCustomCommand = (e: React.FormEvent) => {
     e.preventDefault();
     if (!customLog.trim()) return;
     onLogMessage(customLog);
-    
-    // Call API to store log
-    try {
-      await fetch('/api/daemon/log', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: customLog })
-      });
-      // Fetch status to refresh log container
-      const res = await fetch('/api/daemon/status');
-      const data = await res.json();
-      setShizukuState(data);
-    } catch (err) {
-      console.error(err);
-    }
-    
     setCustomLog('');
   };
 

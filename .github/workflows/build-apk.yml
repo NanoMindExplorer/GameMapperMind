@@ -83,6 +83,8 @@ jobs:
             rsvg-convert -w 192 -h 192 icon.svg -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png
 
             # Adaptive Icons
+            rm -f android/app/src/main/res/drawable/ic_launcher_background.xml
+            rm -f android/app/src/main/res/drawable-v24/ic_launcher_foreground.xml
             rsvg-convert -w 512 -h 512 icon.svg -o android/app/src/main/res/drawable/ic_launcher_background.png
             rsvg-convert -w 512 -h 512 icon.svg -o android/app/src/main/res/drawable-v24/ic_launcher_foreground.png
             

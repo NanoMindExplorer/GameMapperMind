@@ -27,8 +27,8 @@ import java.io.DataOutputStream;
 
 public class FloatingOverlayService extends Service {
     private WindowManager windowManager;
-    private static View handleContainer;
-    private static java.util.List<View> virtualButtonWindows = new java.util.ArrayList<>();
+    private View handleContainer;
+    private java.util.List<View> virtualButtonWindows = new java.util.ArrayList<>();
     private static final String CHANNEL_ID = "OverlayServiceChannel";
     private boolean isEditMode = false;
     private String currentConfigJson = "{}";
@@ -157,7 +157,6 @@ public class FloatingOverlayService extends Service {
         
         new Handler(Looper.getMainLooper()).post(() -> {
             updateOverlayViews(currentConfigJson);
-            createTestButton();
         });
 
         return START_STICKY;

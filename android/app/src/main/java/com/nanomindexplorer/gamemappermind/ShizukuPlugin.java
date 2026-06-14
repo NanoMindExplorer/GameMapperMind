@@ -62,6 +62,21 @@ public class ShizukuPlugin extends Plugin {
                     method.setAccessible(true);
                     persistentProcess = (Process) method.invoke(null, new String[]{"sh"}, null, null);
                     processOutputStream = new DataOutputStream(persistentProcess.getOutputStream());
+                    
+                    // Drain stdout to prevent blocking
+                    new Thread(() -> {
+                        try (BufferedReader reader = new BufferedReader(new InputStreamReader(persistentProcess.getInputStream()))) {
+                            while (reader.readLine() != null) {}
+                        } catch (Exception e) {}
+                    }).start();
+
+                    // Drain stderr to prevent blocking
+                    new Thread(() -> {
+                        try (BufferedReader errorReader = new BufferedReader(new InputStreamReader(persistentProcess.getErrorStream()))) {
+                            while (errorReader.readLine() != null) {}
+                        } catch (Exception e) {}
+                    }).start();
+
                     Log.d("GameMapper", "Shizuku daemon shell started from JS");
                 }
                 JSObject result = new JSObject();
@@ -133,21 +148,34 @@ public class ShizukuPlugin extends Plugin {
                     return;
                 }
                 
-                BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
                 StringBuilder output = new StringBuilder();
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    output.append(line).append("\n");
-                }
-                
-                BufferedReader errorReader = new BufferedReader(new InputStreamReader(process.getErrorStream()));
                 StringBuilder errorOutput = new StringBuilder();
-                String errorLine;
-                while ((errorLine = errorReader.readLine()) != null) {
-                    errorOutput.append(errorLine).append("\n");
-                }
+                
+                final Process p = process;
+                Thread outThread = new Thread(() -> {
+                    try (BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                        String line;
+                        while ((line = reader.readLine()) != null) {
+                            output.append(line).append("\n");
+                        }
+                    } catch (Exception e) {}
+                });
+                
+                Thread errThread = new Thread(() -> {
+                    try (BufferedReader errorReader = new BufferedReader(new InputStreamReader(p.getErrorStream()))) {
+                        String errorLine;
+                        while ((errorLine = errorReader.readLine()) != null) {
+                            errorOutput.append(errorLine).append("\n");
+                        }
+                    } catch (Exception e) {}
+                });
+                
+                outThread.start();
+                errThread.start();
 
                 int exitCode = process.waitFor();
+                outThread.join();
+                errThread.join();
                 
                 JSObject result = new JSObject();
                 result.put("output", output.toString());

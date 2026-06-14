@@ -23,6 +23,137 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
   const [stickLeft, setStickLeft] = React.useState({ x: 0, y: 0 });
   const [stickRight, setStickRight] = React.useState({ x: 0, y: 0 });
   const [triggers, setTriggers] = React.useState({ lt: 0, rt: 0 });
+
+  // Physical Gamepad connected state
+  const [connectedGamepad, setConnectedGamepad] = React.useState<Gamepad | null>(null);
+
+  // Track the previous state to avoid redundant renders on loop polling
+  const lastStateRef = React.useRef({
+    connectedId: null as string | null,
+    buttonsStr: '',
+    triggersStr: '',
+    lx: 0,
+    ly: 0,
+    rx: 0,
+    ry: 0
+  });
+
+  // Poll for physical gamepads and map inputs
+  React.useEffect(() => {
+    let animationFrameId: number;
+    
+    const pollGamepads = () => {
+      const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
+      let activeGP: Gamepad | null = null;
+      
+      for (let i = 0; i < gamepads.length; i++) {
+        if (gamepads[i]) {
+          activeGP = gamepads[i];
+          break; // pick the first active connected gamepad
+        }
+      }
+      
+      const activeId = activeGP ? activeGP.id : null;
+      if (activeId !== lastStateRef.current.connectedId) {
+        setConnectedGamepad(activeGP);
+        lastStateRef.current.connectedId = activeId;
+        if (activeGP) {
+          onLogMessage(`[HARDWARE] Terdeteksi Gamepad Terhubung: ${activeGP.id}`);
+        } else {
+          onLogMessage(`[HARDWARE] Gamepad Terputus`);
+        }
+      }
+      
+      if (activeGP) {
+        // Map physical buttons to UI state
+        const buttons = activeGP.buttons;
+        const buttonMap: Record<string, boolean> = {};
+        
+        // Standard mapping indices:
+        // 0: A/Cross, 1: B/Circle, 2: X/Square, 3: Y/Triangle
+        if (buttons[0]?.pressed) buttonMap['a'] = true;
+        if (buttons[1]?.pressed) buttonMap['b'] = true;
+        if (buttons[2]?.pressed) buttonMap['x'] = true;
+        if (buttons[3]?.pressed) buttonMap['y'] = true;
+        
+        // D-Pad buttons: 12: Up, 13: Down, 14: Left, 15: Right
+        if (buttons[12]?.pressed) buttonMap['d_up'] = true;
+        if (buttons[13]?.pressed) buttonMap['d_down'] = true;
+        if (buttons[14]?.pressed) buttonMap['d_left'] = true;
+        if (buttons[15]?.pressed) buttonMap['d_right'] = true;
+
+        if (buttons[4]?.pressed) buttonMap['l_shoulder'] = true;
+        if (buttons[5]?.pressed) buttonMap['r_shoulder'] = true;
+        
+        const buttonsStr = JSON.stringify(buttonMap);
+        if (buttonsStr !== lastStateRef.current.buttonsStr) {
+          setPressedButtons(buttonMap);
+          lastStateRef.current.buttonsStr = buttonsStr;
+        }
+        
+        // Triggers: LT (6), RT (7) - float values 0 to 1
+        const ltVal = buttons[6] ? buttons[6].value : 0;
+        const rtVal = buttons[7] ? buttons[7].value : 0;
+        const triggersStr = `${ltVal.toFixed(2)}_${rtVal.toFixed(2)}`;
+        if (triggersStr !== lastStateRef.current.triggersStr) {
+          setTriggers({ lt: ltVal, rt: rtVal });
+          lastStateRef.current.triggersStr = triggersStr;
+        }
+        
+        // Joysticks: Left X (0), Left Y (1), Right X (2), Right Y (3)
+        const axes = activeGP.axes;
+        const lx = axes[0] !== undefined ? axes[0] : 0;
+        const ly = axes[1] !== undefined ? axes[1] : 0;
+        const rx = axes[2] !== undefined ? axes[2] : 0;
+        const ry = axes[3] !== undefined ? axes[3] : 0;
+        
+        const deadzone = 0.08;
+        const filterLX = Math.abs(lx) > deadzone ? lx : 0;
+        const filterLY = Math.abs(ly) > deadzone ? ly : 0;
+        const filterRX = Math.abs(rx) > deadzone ? rx : 0;
+        const filterRY = Math.abs(ry) > deadzone ? ry : 0;
+        
+        if (
+          Math.abs(filterLX - lastStateRef.current.lx) > 0.01 ||
+          Math.abs(filterLY - lastStateRef.current.ly) > 0.01
+        ) {
+          setStickLeft({ x: filterLX, y: filterLY });
+          lastStateRef.current.lx = filterLX;
+          lastStateRef.current.ly = filterLY;
+        }
+
+        if (
+          Math.abs(filterRX - lastStateRef.current.rx) > 0.01 ||
+          Math.abs(filterRY - lastStateRef.current.ry) > 0.01
+        ) {
+          setStickRight({ x: filterRX, y: filterRY });
+          lastStateRef.current.rx = filterRX;
+          lastStateRef.current.ry = filterRY;
+        }
+      }
+      
+      animationFrameId = requestAnimationFrame(pollGamepads);
+    };
+
+    const handleConnect = (e: GamepadEvent) => {
+      onLogMessage(`[HARDWARE] Physical gamepad connected: ${e.gamepad.id} (index: ${e.gamepad.index})`);
+    };
+
+    const handleDisconnect = (e: GamepadEvent) => {
+      onLogMessage(`[HARDWARE] Physical gamepad disconnected: ${e.gamepad.id}`);
+    };
+
+    window.addEventListener("gamepadconnected", handleConnect);
+    window.addEventListener("gamepaddisconnected", handleDisconnect);
+    
+    animationFrameId = requestAnimationFrame(pollGamepads);
+
+    return () => {
+      cancelAnimationFrame(animationFrameId);
+      window.removeEventListener("gamepadconnected", handleConnect);
+      window.removeEventListener("gamepaddisconnected", handleDisconnect);
+    };
+  }, [onLogMessage]);
   
   // Gyro states
   const [gyro, setGyro] = React.useState({ x: 0.12, y: -0.05, z: 0.01 });
@@ -335,6 +466,33 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
               }`}>
                 Latency: {calculatedLatency.toFixed(2)}ms
               </span>
+            </div>
+          </div>
+
+          {/* Physical Gamepad Detection Status Banner */}
+          <div className={`p-3 rounded-lg border transition-all duration-300 ${
+            connectedGamepad 
+              ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-300 shadow-md shadow-emerald-500/5' 
+              : 'bg-slate-950/80 border-slate-850 text-slate-400'
+          }`}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="relative flex h-2 w-2">
+                  <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${connectedGamepad ? 'bg-emerald-400' : 'bg-slate-650'}`}></span>
+                  <span className={`relative inline-flex rounded-full h-2 w-2 ${connectedGamepad ? 'bg-emerald-500' : 'bg-slate-500'}`}></span>
+                </span>
+                <span className="text-[11px] font-medium font-sans">
+                  {connectedGamepad 
+                    ? `Gamepad Terdeteksi: ${connectedGamepad.id}` 
+                    : 'Tidak ada Gamepad Fisik terdeteksi (Gunakan tombol simulator di bawah atau pasang gamepad Bluetooth/OTG)'
+                  }
+                </span>
+              </div>
+              {connectedGamepad && (
+                <span className="text-[9px] font-mono bg-emerald-900/30 px-2 py-0.5 rounded border border-emerald-800 text-emerald-450 animate-pulse">
+                  KONEKSI AKTIF (Index: {connectedGamepad.index})
+                </span>
+              )}
             </div>
           </div>
 

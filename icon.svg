@@ -1,0 +1,194 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="50%" stop-color="#0a0f1d" />
+      <stop offset="100%" stop-color="#020617" />
+    </linearGradient>
+
+    <!-- Glowing Border Gradient -->
+    <linearGradient id="borderGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="35%" stop-color="#6366f1" />
+      <stop offset="70%" stop-color="#a855f7" />
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+
+    <!-- Gamepad Outer Body Gradient (Neon Cyan to Indigo) -->
+    <linearGradient id="bodyGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1e293b" />
+      <stop offset="100%" stop-color="#0f172a" />
+    </linearGradient>
+
+    <!-- Accent Highlights -->
+    <linearGradient id="highlightCyan" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#22d3ee" />
+      <stop offset="100%" stop-color="#06b6d4" />
+    </linearGradient>
+
+    <linearGradient id="highlightPurple" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#e9d5ff" />
+      <stop offset="100%" stop-color="#a855f7" />
+    </linearGradient>
+
+    <linearGradient id="dpadGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#334155" />
+      <stop offset="100%" stop-color="#1e293b" />
+    </linearGradient>
+
+    <radialGradient id="glow" cx="50%" cy="40%" r="60%">
+      <stop offset="0%" stop-color="#818cf8" stop-opacity="0.15" />
+      <stop offset="100%" stop-color="#020617" stop-opacity="0" />
+    </radialGradient>
+
+    <!-- Drop Shadow Filter for realism -->
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="16" stdDeviation="20" flood-color="#000000" flood-opacity="0.6" />
+    </filter>
+
+    <filter id="neonGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="12" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- 1. Squircle Background Panel -->
+  <rect x="32" y="32" width="960" height="960" rx="220" fill="url(#bgGrad)" />
+
+  <!-- Ambient Light Backglow -->
+  <circle cx="512" cy="512" r="400" fill="url(#glow)" />
+
+  <!-- 2. Neon Inner Ring / Border Accent -->
+  <rect x="56" y="56" width="912" height="912" rx="200" fill="none" stroke="url(#borderGrad)" stroke-width="12" opacity="0.85" />
+  <rect x="56" y="56" width="912" height="912" rx="200" fill="none" stroke="url(#borderGrad)" stroke-width="24" opacity="0.25" filter="url(#neonGlow)" />
+
+  <!-- 3. Decorative Circuit / Mapper Grid Lines -->
+  <g opacity="0.12" stroke="#38bdf8" stroke-width="4" stroke-linecap="round" fill="none">
+    <path d="M 150,300 L 300,300 L 380,380" />
+    <path d="M 874,300 L 724,300 L 644,380" />
+    <circle cx="150" cy="300" r="10" fill="#38bdf8" />
+    <circle cx="874" cy="300" r="10" fill="#38bdf8" />
+    
+    <path d="M 150,724 L 300,724 L 350,674" />
+    <path d="M 874,724 L 724,724 L 674,674" />
+    <circle cx="150" cy="724" r="10" fill="#38bdf8" />
+    <circle cx="874" cy="724" r="10" fill="#38bdf8" />
+
+    <!-- Center mapping coordinates layout -->
+    <circle cx="512" cy="512" r="320" stroke-dasharray="16, 16" />
+    <circle cx="512" cy="512" r="140" stroke-dasharray="8, 8" />
+    <line x1="512" y1="120" x2="512" y2="904" stroke-dasharray="12,12" />
+    <line x1="120" y1="512" x2="904" y2="512" stroke-dasharray="12,12" />
+  </g>
+
+  <!-- 4. Gamepad Body -->
+  <g filter="url(#shadow)">
+    <!-- Main Controller Body Shape -->
+    <path d="M 320,320 
+             C 410,310 614,310 704,320 
+             C 800,330 900,430 890,580 
+             C 880,710 750,830 700,810 
+             C 650,790 620,680 580,670 
+             C 540,660 484,660 444,670 
+             C 404,680 374,790 324,810 
+             C 274,830 144,710 134,580 
+             C 124,430 224,330 320,320 Z" 
+          fill="url(#bodyGrad)" 
+          stroke="#475569" 
+          stroke-width="8" />
+
+    <!-- Decorative Top Grip Seams -->
+    <path d="M 280,350 C 340,380 400,380 430,370" fill="none" stroke="#334155" stroke-width="6" stroke-linecap="round" />
+    <path d="M 744,350 C 684,380 624,380 594,370" fill="none" stroke="#334155" stroke-width="6" stroke-linecap="round" />
+  </g>
+
+  <!-- 5. Left Side: D-PAD (Modern Cross Design) -->
+  <g transform="translate(230, 480)" filter="url(#shadow)">
+    <!-- Base Dpad Center Plate -->
+    <rect x="-64" y="-64" width="128" height="128" rx="24" fill="#0f172a" stroke="#1e293b" stroke-width="4" />
+    <!-- Cross Pieces -->
+    <path d="M -20,-56 L 20,-56 Q 24,-56 24,-52 L 24,-24 L 52,-24 Q 56,-24 56,-20 L 56,20 Q 56,24 52,24 L 24,24 L 24,52 Q 24,56 20,56 L -20,56 Q -24,56 -24,52 L -24,24 L -52,24 Q -56,24 -56,20 L -56,-20 Q -56,-24 -52,-24 L -24,-24 L -24,-52 Q -24,-56 -20,-56 Z" 
+          fill="url(#dpadGrad)" 
+          stroke="#475569" 
+          stroke-width="5" />
+    <!-- Directions Indicator Arrows -->
+    <polygon points="0,-48 -12,-32 12,-32" fill="#64748b" />
+    <polygon points="0,48 -12,32 12,32" fill="#64748b" />
+    <polygon points="-48,0 -32,-12 -32,12" fill="#64748b" />
+    <polygon points="48,0 32,-12 32,12" fill="#64748b" />
+    <!-- Glowing D-Pad center dot -->
+    <circle cx="0" cy="0" r="12" fill="#1e293b" stroke="#334155" stroke-width="4" />
+  </g>
+
+  <!-- 6. Right Side: Premium Glossy Action Buttons (X, Y, A, B Layout) -->
+  <g transform="translate(794, 480)">
+    <!-- X Button (Left) -->
+    <circle cx="-60" cy="0" r="32" fill="#1e293b" stroke="#06b6d4" stroke-width="4" filter="url(#shadow)" />
+    <text x="-60" y="10" font-family="'Inter', sans-serif" font-weight="900" font-size="30" fill="#22d3ee" text-anchor="middle">X</text>
+
+    <!-- Y Button (Top) -->
+    <circle cx="0" cy="-60" r="32" fill="#1e293b" stroke="#a855f7" stroke-width="4" filter="url(#shadow)" />
+    <text x="0" y="-50" font-family="'Inter', sans-serif" font-weight="900" font-size="30" fill="#c084fc" text-anchor="middle">Y</text>
+
+    <!-- B Button (Right) -->
+    <circle cx="60" cy="0" r="32" fill="#1e293b" stroke="#ec4899" stroke-width="4" filter="url(#shadow)" />
+    <text x="60" y="10" font-family="'Inter', sans-serif" font-weight="900" font-size="30" fill="#f472b6" text-anchor="middle">B</text>
+
+    <!-- A Button (Bottom) -->
+    <circle cx="0" cy="60" r="32" fill="#1e293b" stroke="#22c55e" stroke-width="4" filter="url(#shadow)" />
+    <text x="0" y="70" font-family="'Inter', sans-serif" font-weight="900" font-size="30" fill="#4ade80" text-anchor="middle">A</text>
+  </g>
+
+  <!-- 7. Center: Modern Dual Analog Joysticks with Glowing Rings -->
+  <!-- Left Stick -->
+  <g transform="translate(360, 620)">
+    <!-- Base Plate Ring with Cyberpunk blue glow -->
+    <circle cx="0" cy="0" r="64" fill="#090d16" stroke="url(#highlightCyan)" stroke-width="5" opacity="0.8" />
+    <circle cx="0" cy="0" r="64" fill="none" stroke="#22d3ee" stroke-width="12" opacity="0.3" filter="url(#neonGlow)" />
+    
+    <!-- Joystick Cap (Slightly Offset dynamically to look cool) -->
+    <circle cx="-12" cy="-6" r="48" fill="url(#dpadGrad)" stroke="#475569" stroke-width="5" filter="url(#shadow)" />
+    <!-- Thumb Grips -->
+    <circle cx="-12" cy="-6" r="36" fill="none" stroke="#1e293b" stroke-width="4" stroke-dasharray="14,14" />
+    <circle cx="-12" cy="-6" r="16" fill="#0f172a" stroke="#334155" stroke-width="3" />
+  </g>
+
+  <!-- Right Stick -->
+  <g transform="translate(664, 620)">
+    <!-- Base Plate Ring with Cyberpunk purple glow -->
+    <circle cx="0" cy="0" r="64" fill="#090d16" stroke="url(#highlightPurple)" stroke-width="5" opacity="0.8" />
+    <circle cx="0" cy="0" r="64" fill="none" stroke="#a855f7" stroke-width="12" opacity="0.3" filter="url(#neonGlow)" />
+    
+    <!-- Joystick Cap (Slightly Offset) -->
+    <circle cx="10" cy="14" r="48" fill="url(#dpadGrad)" stroke="#475569" stroke-width="5" filter="url(#shadow)" />
+    <!-- Thumb Grips -->
+    <circle cx="10" cy="14" r="36" fill="none" stroke="#1e293b" stroke-width="4" stroke-dasharray="14,14" />
+    <circle cx="10" cy="14" r="16" fill="#0f172a" stroke="#334155" stroke-width="3" />
+  </g>
+
+  <!-- 8. Center Top Options Buttons (Select, Start, Home) -->
+  <g transform="translate(512, 420)">
+    <!-- Select Button -->
+    <rect x="-80" y="-12" width="50" height="20" rx="10" fill="#475569" stroke="#1e293b" stroke-width="3" transform="rotate(-15 -55 -2)" filter="url(#shadow)" />
+    <!-- Start Button -->
+    <rect x="30" y="-12" width="50" height="20" rx="10" fill="#475569" stroke="#1e293b" stroke-width="3" transform="rotate(-15 55 -2)" filter="url(#shadow)" />
+
+    <!-- Circular Home Button with map target graphic symbol -->
+    <circle cx="0" cy="30" r="36" fill="#0f172a" stroke="url(#borderGrad)" stroke-width="5" filter="url(#shadow)" />
+    <!-- Mapper symbol inside home button (Target Crosshair) -->
+    <circle cx="0" cy="30" r="14" fill="none" stroke="#a855f7" stroke-width="4" />
+    <line x1="0" y1="10" x2="0" y2="50" stroke="#22d3ee" stroke-width="4" />
+    <line x1="-20" y1="30" x2="20" y2="30" stroke="#22d3ee" stroke-width="4" />
+  </g>
+
+  <!-- 9. App Name / Brand Label (Integrated on Bottom Screen Area) -->
+  <g transform="translate(512, 880)">
+    <text x="0" y="0" font-family="'Inter', sans-serif" font-weight="900" font-size="44" fill="#ffffff" letter-spacing="12" text-anchor="middle" filter="url(#shadow)">
+      GP MAPPER
+    </text>
+    <text x="0" y="32" font-family="'JetBrains Mono', monospace" font-weight="700" font-size="18" fill="#38bdf8" letter-spacing="4" text-anchor="middle" opacity="0.8">
+      BY NEXION CORE
+    </text>
+  </g>
+</svg>

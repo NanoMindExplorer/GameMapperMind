@@ -50,8 +50,9 @@ public class FloatingOverlayService extends Service {
             NotificationChannel serviceChannel = new NotificationChannel(
                     CHANNEL_ID,
                     "Overlay Service Channel",
-                    NotificationManager.IMPORTANCE_DEFAULT
+                    NotificationManager.IMPORTANCE_LOW
             );
+            serviceChannel.setDescription("Floating Overlay for GameMapperMind");
             NotificationManager manager = getSystemService(NotificationManager.class);
             if (manager != null) {
                 manager.createNotificationChannel(serviceChannel);
@@ -140,13 +141,38 @@ public class FloatingOverlayService extends Service {
 
         try {
             JSONObject profile = new JSONObject(configJson);
+            JSONArray buttons = null;
             if (profile.has("buttons")) {
-                JSONArray buttons = profile.getJSONArray("buttons");
-                int screenWidth = getResources().getDisplayMetrics().widthPixels;
-                int screenHeight = getResources().getDisplayMetrics().heightPixels;
+                buttons = profile.getJSONArray("buttons");
+            }
+            if (buttons == null || buttons.length() == 0) {
+                // FALLBACK: Default buttons
+                buttons = new JSONArray();
+                JSONObject defaultBtn = new JSONObject();
+                defaultBtn.put("id", "btn_default");
+                defaultBtn.put("label", "A");
+                defaultBtn.put("width", 150);
+                defaultBtn.put("height", 150);
+                defaultBtn.put("x", 70);
+                defaultBtn.put("y", 70);
+                defaultBtn.put("opacity", 80);
+                buttons.put(defaultBtn);
+                
+                JSONObject defaultAnalog = new JSONObject();
+                defaultAnalog.put("id", "analog_default");
+                defaultAnalog.put("label", "ANALOG");
+                defaultAnalog.put("width", 250);
+                defaultAnalog.put("height", 250);
+                defaultAnalog.put("x", 20);
+                defaultAnalog.put("y", 60);
+                defaultAnalog.put("opacity", 50);
+                buttons.put(defaultAnalog);
+            }
+            int screenWidth = getResources().getDisplayMetrics().widthPixels;
+            int screenHeight = getResources().getDisplayMetrics().heightPixels;
 
-                for (int i = 0; i < buttons.length(); i++) {
-                    JSONObject btn = buttons.getJSONObject(i);
+            for (int i = 0; i < buttons.length(); i++) {
+                JSONObject btn = buttons.getJSONObject(i);
                     TextView btnView = new TextView(this);
                     btnView.setText(btn.optString("label", "btn"));
                     btnView.setTextColor(Color.WHITE);

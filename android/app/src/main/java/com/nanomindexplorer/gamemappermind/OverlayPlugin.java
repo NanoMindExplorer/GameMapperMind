@@ -32,6 +32,7 @@ public class OverlayPlugin extends Plugin {
         serviceIntent.putExtra("config", config);
         
         try {
+            Log.d("GameMapper", "Attempting to start context foreground service");
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 getContext().startForegroundService(serviceIntent);
             } else {

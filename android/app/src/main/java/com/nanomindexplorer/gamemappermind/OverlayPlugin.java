@@ -24,8 +24,16 @@ public class OverlayPlugin extends Plugin {
             return;
         }
 
+        String config = call.getString("config", "{}");
+
         Intent serviceIntent = new Intent(getContext(), FloatingOverlayService.class);
-        getContext().startService(serviceIntent);
+        serviceIntent.putExtra("config", config);
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            getContext().startForegroundService(serviceIntent);
+        } else {
+            getContext().startService(serviceIntent);
+        }
         call.resolve();
     }
 

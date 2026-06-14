@@ -176,7 +176,9 @@ export default function App() {
         setOverlayActive(false);
         handleLogMessage('SYSTEM: Native floating overlay deactivated.');
       } else {
-        await (OverlayPlugin as any).startOverlay();
+        await (OverlayPlugin as any).startOverlay({
+          config: JSON.stringify(activeProfile)
+        });
         setOverlayActive(true);
         handleLogMessage('SYSTEM: Native floating overlay activated. You can now minimize the app.');
       }

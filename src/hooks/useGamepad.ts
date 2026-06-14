@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 
 export function useGamepad(
-  onButtonPress?: (button: string, value?: number) => void,
+  onButtonChange?: (button: string, isPressed: boolean, value?: number) => void,
   onAxisMove?: (axes: { lx: number, ly: number, rx: number, ry: number }) => void
 ) {
   const [connectedGamepad, setConnectedGamepad] = useState<Gamepad | null>(null);
@@ -39,11 +39,12 @@ export function useGamepad(
 
         map.forEach((btnName, idx) => {
           if (buttons[idx]) {
-            currentButtons[btnName] = buttons[idx].pressed;
-            const wasPressed = previousButtons.current[btnName];
+            const isPressed = buttons[idx].pressed;
+            currentButtons[btnName] = isPressed;
+            const wasPressed = !!previousButtons.current[btnName];
             
-            if (buttons[idx].pressed && !wasPressed) {
-               if (onButtonPress) onButtonPress(btnName, buttons[idx].value);
+            if (isPressed !== wasPressed) {
+               if (onButtonChange) onButtonChange(btnName, isPressed, buttons[idx].value);
             }
           }
         });
@@ -95,7 +96,7 @@ export function useGamepad(
       cancelAnimationFrame(animationFrameId);
       clearTimeout(timeoutId);
     };
-  }, [onButtonPress, onAxisMove]);
+  }, [onButtonChange, onAxisMove]);
 
   return { connectedGamepad };
 }

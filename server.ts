@@ -119,12 +119,18 @@ app.get("/api/daemon/calibration", (req, res) => {
 });
 
 app.post("/api/daemon/inject", (req, res) => {
-  const { command, x, y, duration } = req.body;
+  const { command, id, x, y } = req.body;
   
   if (command === "tap") {
     daemonState.logLines.push(`[INJECT-SIM] Executing physical tap at [${x}, ${y}]`);
   } else if (command === "swipe") {
     daemonState.logLines.push(`[INJECT-SIM] Executing physical swipe / drag`);
+  } else if (command === "touch_down") {
+    daemonState.logLines.push(`[UINPUT-EVDEV] ABS_X|ABS_Y Touch DOWN [${id || 'virtual'}] at (${x}, ${y})`);
+  } else if (command === "touch_move") {
+    daemonState.logLines.push(`[UINPUT-EVDEV] ABS_X|ABS_Y Touch DRAG [${id || 'virtual'}] to (${x}, ${y})`);
+  } else if (command === "touch_up") {
+    daemonState.logLines.push(`[UINPUT-EVDEV] EV_KEY BTN_TOUCH UP [${id || 'virtual'}]`);
   } else if (command === "key") {
     daemonState.logLines.push(`[INJECT-SIM] Executing macro key press`);
   }

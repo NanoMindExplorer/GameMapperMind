@@ -260,7 +260,7 @@ export default function App() {
 
   const activeProfile = profiles.find(p => p.id === activeProfileId) || profiles[0];
 
-  const handleGamepadPress = React.useCallback(async (button: string) => {
+  const handleGamepadPress = React.useCallback(async (button: string, isPressed: boolean) => {
     const mapping = activeProfile.buttons.find(b => b.mappedKey && b.mappedKey.toLowerCase().includes(button.toLowerCase()));
     if (mapping) {
       // Calculate physical coordinates based on screen
@@ -268,36 +268,70 @@ export default function App() {
       const y = Math.round((mapping.y / 100) * window.innerHeight);
 
       if (shizukuState.status === 'CONNECTED_SHIZUKU' && typeof window !== 'undefined' && 'Capacitor' in window) {
-         injectInput(`input tap ${x} ${y}`);
-         // Log but throttle it to prevent spam
+         if (isPressed) {
+           injectInput(`input tap ${x} ${y}`);
+         }
       } else {
          fetch("/api/daemon/inject", {
            method: "POST",
            headers: { "Content-Type": "application/json" },
-           body: JSON.stringify({ command: "tap", x, y })
+           body: JSON.stringify({ command: isPressed ? "touch_down" : "touch_up", id: mapping.id, x, y })
          });
       }
     }
   }, [activeProfile, shizukuState.status, injectInput]);
 
+  const activeStickPointer = React.useRef<{ id: string | null; lastX: number; lastY: number }>({ id: null, lastX: 0, lastY: 0 });
+
   const handleGamepadAxis = React.useCallback(async (axes: { lx: number, ly: number, rx: number, ry: number }) => {
-    // Only target L_STICK for now for movement simulation/hold
     const stickMapping = activeProfile.buttons.find(b => b.mappedKey === 'L_STICK');
-    if (stickMapping && (Math.abs(axes.lx) > 0 || Math.abs(axes.ly) > 0)) {
+    
+    if (stickMapping) {
+      const isNeutral = Math.abs(axes.lx) < 0.1 && Math.abs(axes.ly) < 0.1;
       const baseX = Math.round((stickMapping.x / 100) * window.innerWidth);
       const baseY = Math.round((stickMapping.y / 100) * window.innerHeight);
-      
-      const targetX = Math.round(baseX + (axes.lx * 150)); // 150px drag radius
-      const targetY = Math.round(baseY + (axes.ly * 150));
-      
-      if (shizukuState.status === 'CONNECTED_SHIZUKU' && typeof window !== 'undefined' && 'Capacitor' in window) {
-         injectInput(`input swipe ${baseX} ${baseY} ${targetX} ${targetY} 100`);
+
+      if (isNeutral) {
+        if (activeStickPointer.current.id === 'L_STICK') {
+          // Release joystick
+          activeStickPointer.current.id = null;
+          if (shizukuState.status === 'CONNECTED_SHIZUKU' && typeof window !== 'undefined' && 'Capacitor' in window) {
+            injectInput(`input keyevent KEYCODE_UNKNOWN`); 
+          } else {
+            fetch("/api/daemon/inject", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ command: "touch_up", id: 'L_STICK' })
+            });
+          }
+        }
       } else {
-         fetch("/api/daemon/inject", {
-           method: "POST",
-           headers: { "Content-Type": "application/json" },
-           body: JSON.stringify({ command: "swipe", fromX: baseX, fromY: baseY, toX: targetX, toY: targetY })
-         });
+        const targetX = Math.round(baseX + (axes.lx * 150));
+        const targetY = Math.round(baseY + (axes.ly * 150));
+        
+        if (activeStickPointer.current.id !== 'L_STICK') {
+           // touch down
+           activeStickPointer.current.id = 'L_STICK';
+           if (shizukuState.status !== 'CONNECTED_SHIZUKU') {
+             fetch("/api/daemon/inject", {
+               method: "POST", headers: { "Content-Type": "application/json" },
+               body: JSON.stringify({ command: "touch_down", id: 'L_STICK', x: baseX, y: baseY })
+             });
+           }
+        }
+
+        // move
+        if (shizukuState.status === 'CONNECTED_SHIZUKU' && typeof window !== 'undefined' && 'Capacitor' in window) {
+           // In capacitor just swipe iteratively
+           // This is just a fallback for real injector, we use swift swipe logic
+           injectInput(`input swipe ${activeStickPointer.current.lastX || baseX} ${activeStickPointer.current.lastY || baseY} ${targetX} ${targetY} 10`);
+        } else {
+           fetch("/api/daemon/inject", {
+             method: "POST", headers: { "Content-Type": "application/json" },
+             body: JSON.stringify({ command: "touch_move", id: 'L_STICK', x: targetX, y: targetY })
+           });
+        }
+        activeStickPointer.current.lastX = targetX;
+        activeStickPointer.current.lastY = targetY;
       }
     }
   }, [activeProfile, shizukuState.status, injectInput]);

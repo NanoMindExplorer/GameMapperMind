@@ -96,6 +96,7 @@ public class FloatingOverlayService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        Log.d("GameMapper", "FloatingOverlayService onStartCommand");
         createNotificationChannel();
         initShizukuDaemon();
         
@@ -109,11 +110,19 @@ public class FloatingOverlayService extends Service {
                 .setContentIntent(pendingIntent)
                 .build();
         
-        startForeground(1, notification);
+        try {
+            if (Build.VERSION.SDK_INT >= 34) {
+                startForeground(1, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
+            } else {
+                startForeground(1, notification);
+            }
+        } catch (Exception e) {
+            Log.e("GameMapper", "startForeground failed", e);
+        }
 
         if (intent != null && intent.hasExtra("config")) {
             currentConfigJson = intent.getStringExtra("config");
-            updateOverlayViews(currentConfigJson);
+            new Handler(Looper.getMainLooper()).post(() -> updateOverlayViews(currentConfigJson));
         }
 
         return START_STICKY;
@@ -232,73 +241,79 @@ public class FloatingOverlayService extends Service {
         try {
             windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
 
-            // 2. Handle Container (WRAP_CONTENT)
-            handleContainer = new FrameLayout(this);
-            TextView icon = new TextView(this);
-            icon.setText("🎮");
-            icon.setTextSize(20f);
-            icon.setGravity(Gravity.CENTER);
-            
-            android.graphics.drawable.GradientDrawable gd = new android.graphics.drawable.GradientDrawable();
-            gd.setColor(Color.parseColor("#1e293b"));
-            gd.setCornerRadius(100f);
-            gd.setStroke(3, Color.parseColor("#10b981"));
-            icon.setBackground(gd);
+            new Handler(Looper.getMainLooper()).post(() -> {
+                try {
+                    // 2. Handle Container (WRAP_CONTENT)
+                    handleContainer = new FrameLayout(FloatingOverlayService.this);
+                    TextView icon = new TextView(FloatingOverlayService.this);
+                    icon.setText("🎮");
+                    icon.setTextSize(20f);
+                    icon.setGravity(Gravity.CENTER);
+                    
+                    android.graphics.drawable.GradientDrawable gd = new android.graphics.drawable.GradientDrawable();
+                    gd.setColor(Color.parseColor("#1e293b"));
+                    gd.setCornerRadius(100f);
+                    gd.setStroke(3, Color.parseColor("#10b981"));
+                    icon.setBackground(gd);
 
-            FrameLayout.LayoutParams iconParams = new FrameLayout.LayoutParams(120, 120);
-            ((FrameLayout)handleContainer).addView(icon, iconParams);
+                    FrameLayout.LayoutParams iconParams = new FrameLayout.LayoutParams(120, 120);
+                    ((FrameLayout)handleContainer).addView(icon, iconParams);
 
-            final WindowManager.LayoutParams handleWindowParams = new WindowManager.LayoutParams(
-                    WindowManager.LayoutParams.WRAP_CONTENT,
-                    WindowManager.LayoutParams.WRAP_CONTENT,
-                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ? 
-                        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : WindowManager.LayoutParams.TYPE_PHONE,
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-                    PixelFormat.TRANSLUCENT);
-            handleWindowParams.gravity = Gravity.TOP | Gravity.LEFT;
-            handleWindowParams.x = 50;
-            handleWindowParams.y = 50;
-            
-            windowManager.addView(handleContainer, handleWindowParams);
-            Log.d("GameMapper", "handleContainer added to WindowManager");
+                    final WindowManager.LayoutParams handleWindowParams = new WindowManager.LayoutParams(
+                            WindowManager.LayoutParams.WRAP_CONTENT,
+                            WindowManager.LayoutParams.WRAP_CONTENT,
+                            Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ? 
+                                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : WindowManager.LayoutParams.TYPE_PHONE,
+                            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                            PixelFormat.TRANSLUCENT);
+                    handleWindowParams.gravity = Gravity.TOP | Gravity.LEFT;
+                    handleWindowParams.x = 50;
+                    handleWindowParams.y = 50;
+                    
+                    windowManager.addView(handleContainer, handleWindowParams);
+                    Log.d("GameMapper", "handleContainer added to WindowManager");
 
-            icon.setOnTouchListener(new View.OnTouchListener() {
-                private int initialX;
-                private int initialY;
-                private float initialTouchX;
-                private float initialTouchY;
-                private boolean isClick;
+                    icon.setOnTouchListener(new View.OnTouchListener() {
+                        private int initialX;
+                        private int initialY;
+                        private float initialTouchX;
+                        private float initialTouchY;
+                        private boolean isClick;
 
-                @Override
-                public boolean onTouch(View v, MotionEvent event) {
-                    switch (event.getAction()) {
-                        case MotionEvent.ACTION_DOWN:
-                            initialX = handleWindowParams.x;
-                            initialY = handleWindowParams.y;
-                            initialTouchX = event.getRawX();
-                            initialTouchY = event.getRawY();
-                            isClick = true;
-                            return true;
-                        case MotionEvent.ACTION_UP:
-                            if (isClick) {
-                                // Toggle Edit Mode
-                                isEditMode = !isEditMode;
-                                android.graphics.drawable.GradientDrawable bg = (android.graphics.drawable.GradientDrawable) v.getBackground();
-                                bg.setStroke(3, isEditMode ? Color.parseColor("#ef4444") : Color.parseColor("#10b981"));
-                                v.setBackground(bg);
-                                updateOverlayViews(currentConfigJson);
+                        @Override
+                        public boolean onTouch(View v, MotionEvent event) {
+                            switch (event.getAction()) {
+                                case MotionEvent.ACTION_DOWN:
+                                    initialX = handleWindowParams.x;
+                                    initialY = handleWindowParams.y;
+                                    initialTouchX = event.getRawX();
+                                    initialTouchY = event.getRawY();
+                                    isClick = true;
+                                    return true;
+                                case MotionEvent.ACTION_UP:
+                                    if (isClick) {
+                                        // Toggle Edit Mode
+                                        isEditMode = !isEditMode;
+                                        android.graphics.drawable.GradientDrawable bg = (android.graphics.drawable.GradientDrawable) v.getBackground();
+                                        bg.setStroke(3, isEditMode ? Color.parseColor("#ef4444") : Color.parseColor("#10b981"));
+                                        v.setBackground(bg);
+                                        updateOverlayViews(currentConfigJson);
+                                    }
+                                    return true;
+                                case MotionEvent.ACTION_MOVE:
+                                    if (Math.abs(event.getRawX() - initialTouchX) > 10 || Math.abs(event.getRawY() - initialTouchY) > 10) {
+                                        isClick = false;
+                                    }
+                                    handleWindowParams.x = initialX + (int)(event.getRawX() - initialTouchX);
+                                    handleWindowParams.y = initialY + (int)(event.getRawY() - initialTouchY);
+                                    windowManager.updateViewLayout(handleContainer, handleWindowParams);
+                                    return true;
                             }
-                            return true;
-                        case MotionEvent.ACTION_MOVE:
-                            if (Math.abs(event.getRawX() - initialTouchX) > 10 || Math.abs(event.getRawY() - initialTouchY) > 10) {
-                                isClick = false;
-                            }
-                            handleWindowParams.x = initialX + (int)(event.getRawX() - initialTouchX);
-                            handleWindowParams.y = initialY + (int)(event.getRawY() - initialTouchY);
-                            windowManager.updateViewLayout(handleContainer, handleWindowParams);
-                            return true;
-                    }
-                    return false;
+                            return false;
+                        }
+                    });
+                } catch (Exception e) {
+                    Log.e("GameMapper", "Failed to add handle container", e);
                 }
             });
         } catch (Exception e) {

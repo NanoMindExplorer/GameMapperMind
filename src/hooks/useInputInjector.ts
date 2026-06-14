@@ -1,13 +1,19 @@
 import { registerPlugin, Capacitor } from '@capacitor/core';
 import { GamepadProfile } from '../types';
 
-const OverlayPlugin = registerPlugin('Overlay');
+export interface GameOverlayPluginInterface {
+  startOverlay(options: { config: string }): Promise<void>;
+  stopOverlay(): Promise<void>;
+  checkPermission(): Promise<{ hasPermission: boolean }>;
+}
 
-export function useOverlay() {
+const GameOverlayPlugin = registerPlugin<GameOverlayPluginInterface>('Overlay');
+
+export function useInputInjector() {
   const startOverlay = async (config: GamepadProfile) => {
     if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
       try {
-        await (OverlayPlugin as any).startOverlay({
+        await GameOverlayPlugin.startOverlay({
           config: JSON.stringify(config)
         });
         return true;
@@ -23,7 +29,7 @@ export function useOverlay() {
   const stopOverlay = async () => {
     if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
       try {
-        await (OverlayPlugin as any).stopOverlay();
+        await GameOverlayPlugin.stopOverlay();
         return true;
       } catch (e) {
         console.error("Native overlay error", e);

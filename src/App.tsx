@@ -25,11 +25,11 @@ import {
 
 import { useShizuku } from './hooks/useShizuku';
 import { useGamepad } from './hooks/useGamepad';
-import { useOverlay } from './hooks/useOverlay';
+import { useInputInjector } from './hooks/useInputInjector';
 
 export default function App() {
   const { checkShizukuStatus, executeShizukuCommand, injectInput, stopDaemon } = useShizuku();
-  const { startOverlay, stopOverlay } = useOverlay();
+  const { startOverlay, stopOverlay } = useInputInjector();
   const [shizukuState, setShizukuState] = React.useState<ShizukuState>({
     status: 'CONNECTED_SHIZUKU',
     daemonRunning: true,

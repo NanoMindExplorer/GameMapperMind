@@ -570,13 +570,13 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
             <div className="relative w-full max-w-[380px] mx-auto flex justify-between px-6 mb-3">
               <div className="flex flex-col items-center w-20">
                 <span className="text-[10px] font-mono text-slate-400 mb-1">LT {Math.round(triggers.lt * 100)}%</span>
-                <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden border border-slate-700">
+                <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden border border-slate-700 cursor-pointer pointer-events-auto touch-none" onPointerDown={(e) => { const rect = e.currentTarget.getBoundingClientRect(); const val = (e.clientX - rect.left) / rect.width; setTriggers(p => ({...p, lt: Math.max(0, Math.min(1, val))})); onLogMessage(`Gamepad Tester: LT Triger -> ${val.toFixed(2)}`); }} >
                    <div className="h-full bg-indigo-500 transition-all duration-75" style={{ width: `${triggers.lt * 100}%` }}></div>
                 </div>
               </div>
               <div className="flex flex-col items-center w-20">
                 <span className="text-[10px] font-mono text-slate-400 mb-1">RT {Math.round(triggers.rt * 100)}%</span>
-                <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden border border-slate-700">
+                <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden border border-slate-700 cursor-pointer pointer-events-auto touch-none" onPointerDown={(e) => { const rect = e.currentTarget.getBoundingClientRect(); const val = (e.clientX - rect.left) / rect.width; setTriggers(p => ({...p, rt: Math.max(0, Math.min(1, val))})); onLogMessage(`Gamepad Tester: RT Trigger -> ${val.toFixed(2)}`); }} >
                    <div className="h-full bg-indigo-500 transition-all duration-75" style={{ width: `${triggers.rt * 100}%` }}></div>
                 </div>
               </div>
@@ -589,7 +589,36 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
               <div className="relative w-1/3 h-full flex flex-col justify-between">
                 
                 {/* Left Stick (Top Left) */}
-                <div className="w-14 h-14 sm:w-16 sm:h-16 bg-slate-800 border-2 border-slate-700 rounded-full flex items-center justify-center relative shadow-inner mx-auto mt-1 sm:mt-2">
+                <div 
+                  className="w-14 h-14 sm:w-16 sm:h-16 bg-slate-800 border-2 border-slate-700 rounded-full flex items-center justify-center relative shadow-inner mx-auto mt-1 sm:mt-2 touch-none cursor-crosshair"
+                  onPointerDown={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const centerX = rect.left + rect.width / 2;
+                    const centerY = rect.top + rect.height / 2;
+                    const maxDist = rect.width / 2;
+                    
+                    const handleMove = (ev) => {
+                      let dx = ev.clientX - centerX;
+                      let dy = ev.clientY - centerY;
+                      const dist = Math.sqrt(dx * dx + dy * dy);
+                      if (dist > maxDist) {
+                        dx = (dx / dist) * maxDist;
+                        dy = (dy / dist) * maxDist;
+                      }
+                      handleStickMoveSimulate('l', dx / maxDist, dy / maxDist);
+                    };
+                    
+                    const handleUp = () => {
+                      handleStickMoveSimulate('l', 0, 0);
+                      window.removeEventListener('pointermove', handleMove);
+                      window.removeEventListener('pointerup', handleUp);
+                    };
+                    
+                    handleMove(e);
+                    window.addEventListener('pointermove', handleMove);
+                    window.addEventListener('pointerup', handleUp);
+                  }}
+                >
                   <div 
                      className={`w-9 h-9 sm:w-10 sm:h-10 bg-slate-600 rounded-full shadow-lg border-b-2 border-slate-900 transition-transform duration-75 ${pressedButtons['l3'] ? 'bg-indigo-500 scale-90' : ''}`}
                      style={{ transform: `translate(${stickLeft.x * 12}px, ${stickLeft.y * 12}px)` }}
@@ -641,17 +670,46 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
                 {/* ABXY (Top Right) */}
                 <div className="relative w-20 h-20 sm:w-24 sm:h-24 mx-auto mt-1 sm:mt-2">
                    {/* Y */}
-                   <div className={`absolute top-0 left-1/2 -translate-x-1/2 w-6 h-6 sm:w-7 sm:h-7 rounded-full shadow-lg flex items-center justify-center font-bold text-[9px] sm:text-[10px] transition-transform duration-75 ${pressedButtons['y'] ? 'bg-yellow-500 text-slate-900 scale-95' : 'bg-slate-800 border-b-2 border-slate-900 text-yellow-500'}`}>Y</div>
+                   <div onPointerDown={() => simulateInteractiveEvent("y")} onPointerUp={() => simulateInteractiveEvent("y")} onPointerLeave={() => pressedButtons["y"] && simulateInteractiveEvent("y")} className={`absolute top-0 left-1/2 -translate-x-1/2 w-6 h-6 sm:w-7 sm:h-7 rounded-full shadow-lg flex items-center justify-center font-bold text-[9px] sm:text-[10px] transition-transform duration-75 cursor-pointer select-none touch-none ${pressedButtons['y'] ? 'bg-yellow-500 text-slate-900 scale-95' : 'bg-slate-800 border-b-2 border-slate-900 text-yellow-500'}`}>Y</div>
                    {/* X */}
-                   <div className={`absolute left-0 top-1/2 -translate-y-1/2 w-6 h-6 sm:w-7 sm:h-7 rounded-full shadow-lg flex items-center justify-center font-bold text-[9px] sm:text-[10px] transition-transform duration-75 ${pressedButtons['x'] ? 'bg-blue-500 text-slate-900 scale-95' : 'bg-slate-800 border-b-2 border-slate-900 text-blue-500'}`}>X</div>
+                   <div onPointerDown={() => simulateInteractiveEvent("x")} onPointerUp={() => simulateInteractiveEvent("x")} onPointerLeave={() => pressedButtons["x"] && simulateInteractiveEvent("x")} className={`absolute left-0 top-1/2 -translate-y-1/2 w-6 h-6 sm:w-7 sm:h-7 rounded-full shadow-lg flex items-center justify-center font-bold text-[9px] sm:text-[10px] transition-transform duration-75 cursor-pointer select-none touch-none ${pressedButtons['x'] ? 'bg-blue-500 text-slate-900 scale-95' : 'bg-slate-800 border-b-2 border-slate-900 text-blue-500'}`}>X</div>
                    {/* B */}
-                   <div className={`absolute right-0 top-1/2 -translate-y-1/2 w-6 h-6 sm:w-7 sm:h-7 rounded-full shadow-lg flex items-center justify-center font-bold text-[9px] sm:text-[10px] transition-transform duration-75 ${pressedButtons['b'] ? 'bg-red-500 text-slate-900 scale-95' : 'bg-slate-800 border-b-2 border-slate-900 text-red-500'}`}>B</div>
+                   <div onPointerDown={() => simulateInteractiveEvent("b")} onPointerUp={() => simulateInteractiveEvent("b")} onPointerLeave={() => pressedButtons["b"] && simulateInteractiveEvent("b")} className={`absolute right-0 top-1/2 -translate-y-1/2 w-6 h-6 sm:w-7 sm:h-7 rounded-full shadow-lg flex items-center justify-center font-bold text-[9px] sm:text-[10px] transition-transform duration-75 cursor-pointer select-none touch-none ${pressedButtons['b'] ? 'bg-red-500 text-slate-900 scale-95' : 'bg-slate-800 border-b-2 border-slate-900 text-red-500'}`}>B</div>
                    {/* A */}
-                   <div className={`absolute bottom-0 left-1/2 -translate-x-1/2 w-6 h-6 sm:w-7 sm:h-7 rounded-full shadow-lg flex items-center justify-center font-bold text-[9px] sm:text-[10px] transition-transform duration-75 ${pressedButtons['a'] ? 'bg-emerald-500 text-slate-900 scale-95' : 'bg-slate-800 border-b-2 border-slate-900 text-emerald-500'}`}>A</div>
+                   <div onPointerDown={() => simulateInteractiveEvent("a")} onPointerUp={() => simulateInteractiveEvent("a")} onPointerLeave={() => pressedButtons["a"] && simulateInteractiveEvent("a")} className={`absolute bottom-0 left-1/2 -translate-x-1/2 w-6 h-6 sm:w-7 sm:h-7 rounded-full shadow-lg flex items-center justify-center font-bold text-[9px] sm:text-[10px] transition-transform duration-75 cursor-pointer select-none touch-none ${pressedButtons['a'] ? 'bg-emerald-500 text-slate-900 scale-95' : 'bg-slate-800 border-b-2 border-slate-900 text-emerald-500'}`}>A</div>
                 </div>
 
                 {/* Right Stick (Bottom Right) */}
-                <div className="w-14 h-14 sm:w-16 sm:h-16 bg-slate-800 border-2 border-slate-700 rounded-full flex items-center justify-center relative shadow-inner mx-auto mb-1 sm:mb-2">
+                <div 
+                  className="w-14 h-14 sm:w-16 sm:h-16 bg-slate-800 border-2 border-slate-700 rounded-full flex items-center justify-center relative shadow-inner mx-auto mb-1 sm:mb-2 touch-none cursor-crosshair"
+                  onPointerDown={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const centerX = rect.left + rect.width / 2;
+                    const centerY = rect.top + rect.height / 2;
+                    const maxDist = rect.width / 2;
+                    
+                    const handleMove = (ev) => {
+                      let dx = ev.clientX - centerX;
+                      let dy = ev.clientY - centerY;
+                      const dist = Math.sqrt(dx * dx + dy * dy);
+                      if (dist > maxDist) {
+                        dx = (dx / dist) * maxDist;
+                        dy = (dy / dist) * maxDist;
+                      }
+                      handleStickMoveSimulate('r', dx / maxDist, dy / maxDist);
+                    };
+                    
+                    const handleUp = () => {
+                      handleStickMoveSimulate('r', 0, 0);
+                      window.removeEventListener('pointermove', handleMove);
+                      window.removeEventListener('pointerup', handleUp);
+                    };
+                    
+                    handleMove(e);
+                    window.addEventListener('pointermove', handleMove);
+                    window.addEventListener('pointerup', handleUp);
+                  }}
+                >
                   <div 
                      className={`w-9 h-9 sm:w-10 sm:h-10 bg-slate-600 rounded-full shadow-lg border-b-2 border-slate-900 transition-transform duration-75 ${pressedButtons['r3'] ? 'bg-indigo-500 scale-90' : ''}`}
                      style={{ transform: `translate(${stickRight.x * 12}px, ${stickRight.y * 12}px)` }}
@@ -664,9 +722,9 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
             </div>
             
             {/* L1 / R1 Shoulders */}
-            <div className="absolute top-14 left-1/2 -translate-x-1/2 w-[280px] sm:w-[320px] flex justify-between px-2 pointer-events-none opacity-80">
-               <div className={`w-16 h-4 border border-slate-700 rounded-t-xl shadow-lg transition-colors duration-75 ${pressedButtons['l_shoulder'] ? 'bg-indigo-500' : 'bg-slate-800'}`}></div>
-               <div className={`w-16 h-4 border border-slate-700 rounded-t-xl shadow-lg transition-colors duration-75 ${pressedButtons['r_shoulder'] ? 'bg-indigo-500' : 'bg-slate-800'}`}></div>
+            <div className="absolute top-14 left-1/2 -translate-x-1/2 w-[280px] sm:w-[320px] flex justify-between px-2 opacity-80">
+               <div onPointerDown={() => simulateInteractiveEvent("l_shoulder")} onPointerUp={() => simulateInteractiveEvent("l_shoulder")} onPointerLeave={() => pressedButtons["l_shoulder"] && simulateInteractiveEvent("l_shoulder")} className={`w-16 h-4 border border-slate-700 rounded-t-xl shadow-lg pointer-events-auto cursor-pointer touch-none transition-colors duration-75 ${pressedButtons['l_shoulder'] ? 'bg-indigo-500' : 'bg-slate-800'}`}></div>
+               <div onPointerDown={() => simulateInteractiveEvent("r_shoulder")} onPointerUp={() => simulateInteractiveEvent("r_shoulder")} onPointerLeave={() => pressedButtons["r_shoulder"] && simulateInteractiveEvent("r_shoulder")} className={`w-16 h-4 border border-slate-700 rounded-t-xl shadow-lg pointer-events-auto cursor-pointer touch-none transition-colors duration-75 ${pressedButtons['r_shoulder'] ? 'bg-indigo-500' : 'bg-slate-800'}`}></div>
             </div>
             <div className="absolute top-10 left-1/2 -translate-x-1/2 w-[280px] sm:w-[320px] flex justify-between px-8 text-[8px] font-mono font-bold text-slate-500 uppercase pointer-events-none">
               <span>LB</span><span>RB</span>

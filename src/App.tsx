@@ -280,7 +280,29 @@ export default function App() {
     }
   }, [activeProfile, shizukuState.status, injectInput]);
 
-  const { connectedGamepad } = useGamepad(handleGamepadPress);
+  const handleGamepadAxis = React.useCallback(async (axes: { lx: number, ly: number, rx: number, ry: number }) => {
+    // Only target L_STICK for now for movement simulation/hold
+    const stickMapping = activeProfile.buttons.find(b => b.mappedKey === 'L_STICK');
+    if (stickMapping && (Math.abs(axes.lx) > 0 || Math.abs(axes.ly) > 0)) {
+      const baseX = Math.round((stickMapping.x / 100) * window.innerWidth);
+      const baseY = Math.round((stickMapping.y / 100) * window.innerHeight);
+      
+      const targetX = Math.round(baseX + (axes.lx * 150)); // 150px drag radius
+      const targetY = Math.round(baseY + (axes.ly * 150));
+      
+      if (shizukuState.status === 'CONNECTED_SHIZUKU' && typeof window !== 'undefined' && 'Capacitor' in window) {
+         injectInput(`input swipe ${baseX} ${baseY} ${targetX} ${targetY} 100`);
+      } else {
+         fetch("/api/daemon/inject", {
+           method: "POST",
+           headers: { "Content-Type": "application/json" },
+           body: JSON.stringify({ command: "swipe", fromX: baseX, fromY: baseY, toX: targetX, toY: targetY })
+         });
+      }
+    }
+  }, [activeProfile, shizukuState.status, injectInput]);
+
+  const { connectedGamepad } = useGamepad(handleGamepadPress, handleGamepadAxis);
 
   const handleLogMessage = (msg: string) => {
     setShizukuState(prev => {

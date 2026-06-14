@@ -7,6 +7,7 @@ export function useGamepad(
   const [connectedGamepad, setConnectedGamepad] = useState<Gamepad | null>(null);
   const previousButtons = useRef<Record<string, boolean>>({});
   const previousAxes = useRef({ lx: 0, ly: 0, rx: 0, ry: 0 });
+  const lastGamepadId = useRef<string | null>(null);
 
   useEffect(() => {
     let animationFrameId: number;
@@ -31,8 +32,13 @@ export function useGamepad(
         }
       }
 
-      if (activeGP) {
+      const currentId = activeGP ? activeGP.id : null;
+      if (currentId !== lastGamepadId.current) {
+        lastGamepadId.current = currentId;
         setConnectedGamepad(activeGP);
+      }
+
+      if (activeGP) {
         
         const buttons = activeGP.buttons;
         const currentButtons: Record<string, boolean> = {};
@@ -91,7 +97,7 @@ export function useGamepad(
         }
         
       } else {
-        setConnectedGamepad(null);
+        // No operation, handled by ID tracking
       }
       
       animationFrameId = requestAnimationFrame(poll);

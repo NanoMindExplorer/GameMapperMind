@@ -7,7 +7,7 @@
 import React from 'react';
 import { GamepadProfile, VirtualButton } from '../types';
 import { 
-  Play, Settings, RotateCcw, Save, Trash2, Eye, EyeOff, Plus, Check, ChevronDown, Move, Maximize2, Layers
+  Play, Settings, RotateCcw, Save, Trash2, Eye, EyeOff, Plus, Check, ChevronDown, Move, Maximize2, Layers, X
 } from 'lucide-react';
 
 interface OverlayWysiwygProps {
@@ -21,6 +21,7 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
   const [selectedButtonId, setSelectedButtonId] = React.useState<string | null>(null);
   const [screenshotMode, setScreenshotMode] = React.useState<'genshin' | 'pubg' | 'codm' | 'efootball'>('genshin');
   const [isDragging, setIsDragging] = React.useState(false);
+  const [showPalette, setShowPalette] = React.useState(false);
 
     // Sync opacity local state with profile if provided on load
     React.useEffect(() => {
@@ -85,6 +86,28 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
       return b;
     });
     onUpdateProfile({ ...activeProfile, buttons: updatedButtons });
+  };
+
+  const handleAddSpecificButton = (label: string, mappedKey: string, androidEventCode: number, defaultSize: number = 56, type: VirtualButton['type'] = 'button') => {
+    const freshId = `btn_${Date.now().toString().slice(-4)}`;
+    let newBtn: VirtualButton = {
+      id: freshId,
+      label,
+      type,
+      x: 50,
+      y: 50,
+      width: defaultSize,
+      height: defaultSize,
+      mappedKey,
+      androidEventCode,
+      opacity: 0.6
+    };
+    onUpdateProfile({
+      ...activeProfile,
+      buttons: [...activeProfile.buttons, newBtn]
+    });
+    setSelectedButtonId(freshId);
+    onLogMessage(`Overlay Canvas: Menambahkan ${label}`);
   };
 
   const handleAddNewButton = (
@@ -206,54 +229,9 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
         </div>
 
         {/* Dynamic Display Optimizer / Graphics Preservation Ribbon */}
-        <div className="bg-slate-900/95 border border-slate-800 rounded-lg p-3.5 mb-4 grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
-          {/* Left Block: Graphics dimming & screen protection */}
-          <div className="flex flex-wrap items-center gap-4 text-xs">
-            <div className="flex flex-col gap-1">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-indigo-400"></span>
-                Filter Redup Layar (Graphics Preserver)
-              </span>
-              <div className="flex items-center gap-2">
-                <span className="text-[9px] text-slate-500 font-mono">Pristine (0%)</span>
-                <input
-                  type="range"
-                  min="0"
-                  max="80"
-                  step="5"
-                  className="w-24 md:w-32 accent-indigo-500 h-1 bg-slate-950 rounded-lg appearance-none cursor-pointer"
-                  value={bgDimLevel}
-                  onChange={(e) => {
-                    const val = parseInt(e.target.value);
-                    setBgDimLevel(val);
-                    onLogMessage(`GRAPHICS ENGINE: Set screen dimming factor to ${val}%. ${val === 0 ? "Pristine raw game graphics rendering active (100% full-rich color fidelity)." : "Overlay editing contrast optimized."}`);
-                  }}
-                />
-                <span className="text-[10px] text-indigo-400 font-mono font-bold">-{bgDimLevel}% Dim</span>
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-1 border-l border-slate-800 pl-4">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                Transparansi Tombol Global
-              </span>
-              <div className="flex items-center gap-2">
-                  <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  step="5"
-                  className="w-24 md:w-28 accent-emerald-500 h-1 bg-slate-950 rounded-lg appearance-none cursor-pointer"
-                  value={globalNodeOpacity}
-                  onChange={(e) => {
-                    const val = parseInt(e.target.value);
-                    setGlobalNodeOpacity(val);
-                    onUpdateProfile({ ...activeProfile, globalOpacity: val });
-                  }}
-                />
-                <span className="text-[10px] text-emerald-400 font-mono font-bold">{globalNodeOpacity}% Opacity</span>
-              </div>
-            </div>
+        <div className="bg-slate-900/95 border border-slate-800 rounded-lg p-3.5 mb-4 flex justify-between items-center">
+          <div className="text-[10px] uppercase font-bold text-slate-500">
+            Tampilan Layar
           </div>
 
           {/* Right Block: Screen obstruction / Visibility Toggles */}
@@ -320,13 +298,121 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
             <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(255,255,255,0.015)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.015)_1px,transparent_1px)] bg-[size:24px_24px] opacity-100" />
           )}
 
+          {/* Floating Action Button to toggle Palette (Nexion Hub) */}
+          <div className="absolute top-8 left-1/2 -translate-x-1/2 z-50 opacity-90 shadow-[0_0_15px_rgba(99,102,241,0.5)] cursor-pointer" onClick={() => setShowPalette(!showPalette)}>
+             <div className={`w-10 h-10 ${showPalette ? 'bg-indigo-500' : 'bg-indigo-600/90'} rounded-full border-2 border-indigo-300 flex items-center justify-center backdrop-blur shadow-lg overflow-hidden hover:bg-indigo-500 transition-colors`}>
+               <Layers className="w-5 h-5 text-white" />
+             </div>
+             <div className="text-[8px] font-bold tracking-wider text-indigo-200 mt-1 drop-shadow-md text-center max-w-[50px] leading-tight">NEXION</div>
+          </div>
+
+          {/* Canvas Overlay Gamepad Palette */}
+          {showPalette && (
+            <div className="absolute top-24 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-xl p-4 shadow-2xl w-[90%] max-w-[600px] pointer-events-auto transition-all">
+              <div className="flex justify-between items-center mb-3 border-b border-slate-800 pb-2">
+                <div className="text-[11px] font-bold text-slate-300 uppercase tracking-wider">Gamepad Palette</div>
+                <button onClick={() => setShowPalette(false)} className="text-slate-400 hover:text-white transition-colors">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <button onClick={() => handleAddSpecificButton('A', 'BUTTON_A', 96)} className="w-10 h-10 rounded-full bg-slate-800 hover:bg-emerald-600 border border-slate-700 text-slate-200 font-bold shadow transition-colors flex items-center justify-center">A</button>
+                <button onClick={() => handleAddSpecificButton('B', 'BUTTON_B', 97)} className="w-10 h-10 rounded-full bg-slate-800 hover:bg-rose-600 border border-slate-700 text-slate-200 font-bold shadow transition-colors flex items-center justify-center">B</button>
+                <button onClick={() => handleAddSpecificButton('X', 'BUTTON_X', 99)} className="w-10 h-10 rounded-full bg-slate-800 hover:bg-blue-600 border border-slate-700 text-slate-200 font-bold shadow transition-colors flex items-center justify-center">X</button>
+                <button onClick={() => handleAddSpecificButton('Y', 'BUTTON_Y', 100)} className="w-10 h-10 rounded-full bg-slate-800 hover:bg-amber-500 border border-slate-700 text-slate-200 font-bold shadow transition-colors flex items-center justify-center">Y</button>
+                
+                <div className="w-px h-10 bg-slate-700/50 mx-1"></div>
+                
+                <button onClick={() => handleAddSpecificButton('L1', 'BUTTON_L1', 101, 70)} className="h-10 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 font-medium text-[11px] shadow transition-colors flex items-center justify-center">LB / L1</button>
+                <button onClick={() => handleAddSpecificButton('L2', 'BUTTON_L2', 104, 75)} className="h-10 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 font-medium text-[11px] shadow transition-colors flex items-center justify-center">LT / L2</button>
+                <button onClick={() => handleAddSpecificButton('R1', 'BUTTON_R1', 102, 70)} className="h-10 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 font-medium text-[11px] shadow transition-colors flex items-center justify-center">RB / R1</button>
+                <button onClick={() => handleAddSpecificButton('R2', 'BUTTON_R2', 105, 75)} className="h-10 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 font-medium text-[11px] shadow transition-colors flex items-center justify-center">RT / R2</button>
+                
+                <div className="w-px h-10 bg-slate-700/50 mx-1"></div>
+                
+                <div className="flex flex-col gap-0.5 border border-slate-700 p-1 rounded-lg bg-slate-900">
+                  <div className="flex justify-center">
+                    <button onClick={() => handleAddSpecificButton('UP', 'DPAD_UP', 106, 50)} className="w-6 h-6 rounded-t bg-slate-800 hover:bg-indigo-500 text-[10px] text-white flex items-center justify-center">↑</button>
+                  </div>
+                  <div className="flex gap-4">
+                    <button onClick={() => handleAddSpecificButton('LEFT', 'DPAD_LEFT', 108, 50)} className="w-6 h-6 rounded-l bg-slate-800 hover:bg-indigo-500 text-[10px] text-white flex items-center justify-center">←</button>
+                    <button onClick={() => handleAddSpecificButton('RIGHT', 'DPAD_RIGHT', 109, 50)} className="w-6 h-6 rounded-r bg-slate-800 hover:bg-indigo-500 text-[10px] text-white flex items-center justify-center">→</button>
+                  </div>
+                  <div className="flex justify-center">
+                    <button onClick={() => handleAddSpecificButton('DOWN', 'DPAD_DOWN', 107, 50)} className="w-6 h-6 rounded-b bg-slate-800 hover:bg-indigo-500 text-[10px] text-white flex items-center justify-center">↓</button>
+                  </div>
+                </div>
+
+                <div className="w-px h-10 bg-slate-700/50 mx-1"></div>
+                
+                <button onClick={() => handleAddSpecificButton('L3', 'BUTTON_L3', 103)} className="w-10 h-10 rounded-full border-2 border-dashed border-slate-600 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold shadow flex items-center justify-center">L3</button>
+                <button onClick={() => handleAddSpecificButton('R3', 'BUTTON_R3', 106)} className="w-10 h-10 rounded-full border-2 border-dashed border-slate-600 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold shadow flex items-center justify-center">R3</button>
+
+                <div className="w-px h-10 bg-slate-700/50 mx-1"></div>
+
+                <button onClick={() => handleAddSpecificButton('L-Stick', 'L_STICK', 0, 100, 'analog_stick')} className="h-10 px-3 rounded-lg bg-blue-900/60 hover:bg-blue-600 border border-blue-700 text-blue-200 font-medium text-[11px] shadow transition-colors flex items-center gap-1">
+                  <Move className="w-3.5 h-3.5" /> L-Stick
+                </button>
+                <button onClick={() => handleAddSpecificButton('R-Stick', 'R_STICK', 0, 100, 'analog_stick')} className="h-10 px-3 rounded-lg bg-pink-900/60 hover:bg-pink-600 border border-pink-700 text-pink-200 font-medium text-[11px] shadow transition-colors flex items-center gap-1">
+                  <Move className="w-3.5 h-3.5" /> R-Stick
+                </button>
+              </div>
+
+              <div className="flex flex-col gap-3 mt-4 pt-3 border-t border-slate-800/80">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5"><Eye className="w-3.5 h-3.5" /> Transparansi Tombol Global</span>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      step="5"
+                      className="w-32 accent-emerald-500 h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer"
+                      value={globalNodeOpacity}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value);
+                        setGlobalNodeOpacity(val);
+                        onUpdateProfile({ ...activeProfile, globalOpacity: val });
+                      }}
+                    />
+                    <span className="text-[10px] text-emerald-400 font-mono font-bold min-w-[50px] text-right">{globalNodeOpacity}%</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5"><EyeOff className="w-3.5 h-3.5" /> Filter Redup Layar (Background)</span>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="range"
+                      min="0"
+                      max="80"
+                      step="5"
+                      className="w-32 accent-indigo-500 h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer"
+                      value={bgDimLevel}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value);
+                        setBgDimLevel(val);
+                        onLogMessage(`GRAPHICS ENGINE: Set screen dimming factor to ${val}%.`);
+                      }}
+                    />
+                    <span className="text-[10px] text-indigo-400 font-mono font-bold min-w-[50px] text-right">-{bgDimLevel}%</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Real simulated active mapping nodes mapped across bounds */}
           {activeProfile.buttons.map((btn) => {
             const isSelected = btn.id === selectedButtonId;
             const isSwipe = btn.type === 'swipe' || (btn.androidEventCode >= 201 && btn.androidEventCode <= 204);
             let btnColor = 'border-emerald-500 bg-emerald-500/15';
             if (btn.type === 'analog_stick') {
-              btnColor = 'border-blue-500 bg-blue-500/10';
+              if (btn.mappedKey === 'R_STICK') {
+                btnColor = 'border-pink-500 bg-pink-500/10';
+              } else {
+                btnColor = 'border-blue-500 bg-blue-500/10';
+              }
             } else if (btn.type === 'gyro_area') {
               btnColor = 'border-pink-500 bg-pink-500/10';
             } else if (isSwipe) {
@@ -411,61 +497,7 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
           </div>
         </div>
 
-        {/* Append controls underneath visual viewport */}
-        <div className="mt-4 flex flex-wrap gap-2.5">
-          <button
-            onClick={() => handleAddNewButton('button')}
-            className="flex items-center gap-1.5 px-3 py-2 bg-emerald-950 text-emerald-400 hover:bg-emerald-900/60 border border-emerald-900/40 text-xs font-semibold rounded-lg transition-colors"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            Add Virtual Tap Button
-          </button>
-          <button
-            onClick={() => handleAddNewButton('analog_stick')}
-            className="flex items-center gap-1.5 px-3 py-2 bg-blue-950 text-blue-400 hover:bg-blue-900/60 border border-blue-900/40 text-xs font-semibold rounded-lg transition-colors"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            Add Axis Joystick
-          </button>
-          <button
-            onClick={() => handleAddNewButton('gyro_area')}
-            className="flex items-center gap-1.5 px-3 py-2 bg-pink-950 text-pink-400 hover:bg-pink-900/60 border border-pink-900/40 text-xs font-semibold rounded-lg transition-colors"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            Add Gyroscopic Control Zone
-          </button>
-          
-          <div className="flex gap-1">
-            <button
-              onClick={() => handleAddNewButton('swipe', 'UP')}
-              className="flex items-center gap-1.5 px-3 py-2 bg-purple-950 text-purple-300 hover:bg-purple-900/60 border border-purple-900/40 text-[10px] font-semibold rounded-l-lg transition-colors"
-              title="Swipe Atas (UP)"
-            >
-              UP ↑
-            </button>
-            <button
-              onClick={() => handleAddNewButton('swipe', 'DOWN')}
-              className="flex items-center gap-1.5 px-3 py-2 bg-purple-950 text-purple-300 hover:bg-purple-900/60 border-y border-purple-900/40 text-[10px] font-semibold transition-colors"
-              title="Swipe Bawah (DOWN)"
-            >
-              DOWN ↓
-            </button>
-            <button
-              onClick={() => handleAddNewButton('swipe', 'LEFT')}
-              className="flex items-center gap-1.5 px-3 py-2 bg-purple-950 text-purple-300 hover:bg-purple-900/60 border-y border-l border-purple-900/40 text-[10px] font-semibold transition-colors"
-              title="Swipe Kiri (LEFT)"
-            >
-              LEFT ←
-            </button>
-            <button
-              onClick={() => handleAddNewButton('swipe', 'RIGHT')}
-              className="flex items-center gap-1.5 px-3 py-2 bg-purple-950 text-purple-300 hover:bg-purple-900/60 border border-purple-900/40 text-[10px] font-semibold rounded-r-lg transition-colors"
-              title="Swipe Kanan (RIGHT)"
-            >
-              RIGHT →
-            </button>
-          </div>
-        </div>
+
       </div>
 
       {/* Controller Parameters (Col 4) */}

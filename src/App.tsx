@@ -281,20 +281,24 @@ export default function App() {
     }
   }, [activeProfile, shizukuState.status, injectInput]);
 
-  const activeStickPointer = React.useRef<{ id: string | null; lastX: number; lastY: number }>({ id: null, lastX: 0, lastY: 0 });
+  const activeStickPointer = React.useRef<{
+    l_id: string | null; l_lastX: number; l_lastY: number;
+    r_id: string | null; r_lastX: number; r_lastY: number;
+  }>({ l_id: null, l_lastX: 0, l_lastY: 0, r_id: null, r_lastX: 0, r_lastY: 0 });
 
   const handleGamepadAxis = React.useCallback(async (axes: { lx: number, ly: number, rx: number, ry: number }) => {
-    const stickMapping = activeProfile.buttons.find(b => b.mappedKey === 'L_STICK');
+    const lStickMapping = activeProfile.buttons.find(b => b.mappedKey === 'L_STICK');
+    const rStickMapping = activeProfile.buttons.find(b => b.mappedKey === 'R_STICK');
     
-    if (stickMapping) {
+    // Process Left Stick
+    if (lStickMapping) {
       const isNeutral = Math.abs(axes.lx) < 0.1 && Math.abs(axes.ly) < 0.1;
-      const baseX = Math.round((stickMapping.x / 100) * window.innerWidth);
-      const baseY = Math.round((stickMapping.y / 100) * window.innerHeight);
+      const baseX = Math.round((lStickMapping.x / 100) * window.innerWidth);
+      const baseY = Math.round((lStickMapping.y / 100) * window.innerHeight);
 
       if (isNeutral) {
-        if (activeStickPointer.current.id === 'L_STICK') {
-          // Release joystick
-          activeStickPointer.current.id = null;
+        if (activeStickPointer.current.l_id === 'L_STICK') {
+          activeStickPointer.current.l_id = null;
           if (shizukuState.status === 'CONNECTED_SHIZUKU' && typeof window !== 'undefined' && 'Capacitor' in window) {
             injectInput(`input keyevent KEYCODE_UNKNOWN`); 
           } else {
@@ -307,12 +311,12 @@ export default function App() {
       } else {
         const targetX = Math.round(baseX + (axes.lx * 150));
         const targetY = Math.round(baseY + (axes.ly * 150));
+        const isSameAsLast = activeStickPointer.current.l_lastX === targetX && activeStickPointer.current.l_lastY === targetY;
         
-        const isSameAsLast = activeStickPointer.current.lastX === targetX && activeStickPointer.current.lastY === targetY;
-        
-        if (activeStickPointer.current.id !== 'L_STICK') {
-           // touch down
-           activeStickPointer.current.id = 'L_STICK';
+        if (activeStickPointer.current.l_id !== 'L_STICK') {
+           activeStickPointer.current.l_id = 'L_STICK';
+           activeStickPointer.current.l_lastX = baseX;
+           activeStickPointer.current.l_lastY = baseY;
            if (shizukuState.status !== 'CONNECTED_SHIZUKU') {
              fetch("/api/daemon/inject", {
                method: "POST", headers: { "Content-Type": "application/json" },
@@ -321,20 +325,67 @@ export default function App() {
            }
         }
 
-        // move
         if (!isSameAsLast) {
           if (shizukuState.status === 'CONNECTED_SHIZUKU' && typeof window !== 'undefined' && 'Capacitor' in window) {
-             // In capacitor just swipe iteratively
-             // This is just a fallback for real injector, we use swift swipe logic
-             injectInput(`input swipe ${activeStickPointer.current.lastX || baseX} ${activeStickPointer.current.lastY || baseY} ${targetX} ${targetY} 10`);
+             injectInput(`input swipe ${activeStickPointer.current.l_lastX} ${activeStickPointer.current.l_lastY} ${targetX} ${targetY} 10`);
           } else {
              fetch("/api/daemon/inject", {
                method: "POST", headers: { "Content-Type": "application/json" },
                body: JSON.stringify({ command: "touch_move", id: 'L_STICK', x: targetX, y: targetY })
              });
           }
-          activeStickPointer.current.lastX = targetX;
-          activeStickPointer.current.lastY = targetY;
+          activeStickPointer.current.l_lastX = targetX;
+          activeStickPointer.current.l_lastY = targetY;
+        }
+      }
+    }
+
+    // Process Right Stick
+    if (rStickMapping) {
+      const isNeutral = Math.abs(axes.rx) < 0.1 && Math.abs(axes.ry) < 0.1;
+      const baseX = Math.round((rStickMapping.x / 100) * window.innerWidth);
+      const baseY = Math.round((rStickMapping.y / 100) * window.innerHeight);
+
+      if (isNeutral) {
+        if (activeStickPointer.current.r_id === 'R_STICK') {
+          activeStickPointer.current.r_id = null;
+          if (shizukuState.status === 'CONNECTED_SHIZUKU' && typeof window !== 'undefined' && 'Capacitor' in window) {
+            injectInput(`input keyevent KEYCODE_UNKNOWN`); 
+          } else {
+            fetch("/api/daemon/inject", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ command: "touch_up", id: 'R_STICK' })
+            });
+          }
+        }
+      } else {
+        const targetX = Math.round(baseX + (axes.rx * 150));
+        const targetY = Math.round(baseY + (axes.ry * 150));
+        const isSameAsLast = activeStickPointer.current.r_lastX === targetX && activeStickPointer.current.r_lastY === targetY;
+        
+        if (activeStickPointer.current.r_id !== 'R_STICK') {
+           activeStickPointer.current.r_id = 'R_STICK';
+           activeStickPointer.current.r_lastX = baseX;
+           activeStickPointer.current.r_lastY = baseY;
+           if (shizukuState.status !== 'CONNECTED_SHIZUKU') {
+             fetch("/api/daemon/inject", {
+               method: "POST", headers: { "Content-Type": "application/json" },
+               body: JSON.stringify({ command: "touch_down", id: 'R_STICK', x: baseX, y: baseY })
+             });
+           }
+        }
+
+        if (!isSameAsLast) {
+          if (shizukuState.status === 'CONNECTED_SHIZUKU' && typeof window !== 'undefined' && 'Capacitor' in window) {
+             injectInput(`input swipe ${activeStickPointer.current.r_lastX} ${activeStickPointer.current.r_lastY} ${targetX} ${targetY} 10`);
+          } else {
+             fetch("/api/daemon/inject", {
+               method: "POST", headers: { "Content-Type": "application/json" },
+               body: JSON.stringify({ command: "touch_move", id: 'R_STICK', x: targetX, y: targetY })
+             });
+          }
+          activeStickPointer.current.r_lastX = targetX;
+          activeStickPointer.current.r_lastY = targetY;
         }
       }
     }
@@ -342,14 +393,14 @@ export default function App() {
 
   const { connectedGamepad } = useGamepad(handleGamepadPress, handleGamepadAxis);
 
-  const handleLogMessage = (msg: string) => {
+  const handleLogMessage = React.useCallback((msg: string) => {
     setShizukuState(prev => {
       const newLine = `[${new Date().toLocaleTimeString('en-US', { hour12: false, hour: "numeric", minute: "numeric", second: "numeric" })}] ${msg}`;
       const newLines = [...prev.logLines, newLine];
       if (newLines.length > 50) newLines.shift();
       return { ...prev, logLines: newLines };
     });
-  };
+  }, []);
 
   const handleKillSwitch = async () => {
     if (overlayActive) {

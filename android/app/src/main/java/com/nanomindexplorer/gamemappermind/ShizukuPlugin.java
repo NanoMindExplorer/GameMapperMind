@@ -63,6 +63,11 @@ public class ShizukuPlugin extends Plugin {
                     persistentProcess = (Process) method.invoke(null, new Object[]{new String[]{"sh"}, null, null});
                     processOutputStream = new DataOutputStream(persistentProcess.getOutputStream());
                     
+                    String apkPath = getContext().getApplicationInfo().sourceDir;
+                    processOutputStream.writeBytes("export CLASSPATH=" + apkPath + "\n");
+                    processOutputStream.writeBytes("exec app_process /system/bin com.nanomindexplorer.gamemappermind.TouchDaemon\n");
+                    processOutputStream.flush();
+
                     // Drain stdout to prevent blocking
                     new Thread(() -> {
                         try (BufferedReader reader = new BufferedReader(new InputStreamReader(persistentProcess.getInputStream()))) {
@@ -118,7 +123,28 @@ public class ShizukuPlugin extends Plugin {
         }
 
         try {
-            processOutputStream.writeBytes(command + "\n");
+            if (command.startsWith("input tap ")) {
+                String[] parts = command.split(" ");
+                if (parts.length >= 4) {
+                    String x = parts[2];
+                    String y = parts[3];
+                    processOutputStream.writeBytes("down " + x + " " + y + "\n");
+                    processOutputStream.writeBytes("up " + x + " " + y + "\n");
+                }
+            } else if (command.startsWith("input swipe ")) {
+                 String[] parts = command.split(" ");
+                 if (parts.length >= 6) {
+                    String x1 = parts[2];
+                    String y1 = parts[3];
+                    String x2 = parts[4];
+                    String y2 = parts[5];
+                    processOutputStream.writeBytes("down " + x1 + " " + y1 + "\n");
+                    processOutputStream.writeBytes("move " + x2 + " " + y2 + "\n");
+                    processOutputStream.writeBytes("up " + x2 + " " + y2 + "\n");
+                 }
+            } else {
+                processOutputStream.writeBytes(command + "\n");
+            }
             processOutputStream.flush();
             JSObject result = new JSObject();
             result.put("success", true);

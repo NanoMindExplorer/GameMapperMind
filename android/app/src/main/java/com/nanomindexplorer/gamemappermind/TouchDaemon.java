@@ -35,26 +35,33 @@ public class TouchDaemon {
             while ((line = reader.readLine()) != null) {
                 try {
                     String[] parts = line.trim().split(" ");
-                    if (parts.length >= 3) {
+                    if (parts.length > 0) {
                         String action = parts[0];
-                        float x = Float.parseFloat(parts[1]);
-                        float y = Float.parseFloat(parts[2]);
-                        long now = SystemClock.uptimeMillis();
-                        int actionCode = -1;
-
-                        if (action.equals("down")) {
-                            actionCode = MotionEvent.ACTION_DOWN;
-                        } else if (action.equals("up")) {
-                            actionCode = MotionEvent.ACTION_UP;
-                        } else if (action.equals("move")) {
-                            actionCode = MotionEvent.ACTION_MOVE;
+                        if (action.equals("exit")) {
+                            Log.i("GameMapper", "TouchDaemon received exit command. Shutting down.");
+                            break;
                         }
+                        
+                        if (parts.length >= 3) {
+                            float x = Float.parseFloat(parts[1]);
+                            float y = Float.parseFloat(parts[2]);
+                            long now = SystemClock.uptimeMillis();
+                            int actionCode = -1;
 
-                        if (actionCode != -1) {
-                            MotionEvent ev = MotionEvent.obtain(now, now, actionCode, x, y, 0);
-                            ev.setSource(InputDevice.SOURCE_TOUCHSCREEN);
-                            injectMethod.invoke(im, ev, 0 /* INJECT_INPUT_EVENT_MODE_ASYNC */);
-                            ev.recycle();
+                            if (action.equals("down")) {
+                                actionCode = MotionEvent.ACTION_DOWN;
+                            } else if (action.equals("up")) {
+                                actionCode = MotionEvent.ACTION_UP;
+                            } else if (action.equals("move")) {
+                                actionCode = MotionEvent.ACTION_MOVE;
+                            }
+
+                            if (actionCode != -1) {
+                                MotionEvent ev = MotionEvent.obtain(now, now, actionCode, x, y, 0);
+                                ev.setSource(InputDevice.SOURCE_TOUCHSCREEN);
+                                injectMethod.invoke(im, ev, 0 /* INJECT_INPUT_EVENT_MODE_ASYNC */);
+                                ev.recycle();
+                            }
                         }
                     }
                 } catch (Exception parseEx) {

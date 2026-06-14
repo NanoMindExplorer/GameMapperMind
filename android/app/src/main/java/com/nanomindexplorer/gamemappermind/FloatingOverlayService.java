@@ -70,6 +70,12 @@ public class FloatingOverlayService extends Service {
                     shizukuProcess = (Process) method.invoke(null, new String[]{"sh"}, null, null);
                     shizukuOut = new DataOutputStream(shizukuProcess.getOutputStream());
                     
+                    // Boot up the TouchDaemon inside the shell using app_process
+                    String apkPath = getApplicationInfo().sourceDir;
+                    shizukuOut.writeBytes("export CLASSPATH=" + apkPath + "\n");
+                    shizukuOut.writeBytes("exec app_process /system/bin com.nanomindexplorer.gamemappermind.TouchDaemon\n");
+                    shizukuOut.flush();
+                    
                     // Create Background Threads to act as "Drainers" for stdout and stderr to prevent ANRs due to full OS buffer block
                     new Thread(() -> {
                         try (java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(shizukuProcess.getInputStream()))) {
@@ -300,11 +306,15 @@ public class FloatingOverlayService extends Service {
                             switch (event.getAction()) {
                                 case MotionEvent.ACTION_DOWN:
                                     Log.d("GameMapper", "Virtual button clicked: " + btnId + " at " + injectX + ", " + injectY);
-                                    injectCommand("input swipe " + injectX + " " + injectY + " " + injectX + " " + injectY + " 30");
+                                    injectCommand("down " + injectX + " " + injectY);
                                     v.setAlpha(0.5f); // feedback
+                                    break;
+                                case MotionEvent.ACTION_MOVE:
+                                    injectCommand("move " + injectX + " " + injectY);
                                     break;
                                 case MotionEvent.ACTION_UP:
                                 case MotionEvent.ACTION_CANCEL:
+                                    injectCommand("up " + injectX + " " + injectY);
                                     v.setAlpha((float)(btn.optDouble("opacity", 100) / 100.0));
                                     break;
                             }

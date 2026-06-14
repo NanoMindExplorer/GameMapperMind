@@ -66,12 +66,14 @@ export default function App() {
             }
           } catch (e) { console.error('Failed to parse profiles', e); }
         }
-      });
+      }).catch(e => console.warn('capacitor get profiles error', e));
+
       Preferences.get({ key: 'nexion_active_profile' }).then((res) => {
         if (res.value) {
           setActiveProfileId(res.value);
         }
-      });
+      }).catch(e => console.warn('capacitor get active profile error', e));
+
       Preferences.get({ key: 'nexion_macros' }).then((res) => {
         if (res.value) {
           try {
@@ -81,7 +83,8 @@ export default function App() {
             }
           } catch (e) { console.error('Failed to parse macros', e); }
         }
-      });
+      }).catch(e => console.warn('capacitor get macros error', e));
+
       Preferences.get({ key: 'nexion_settings' }).then((res) => {
         if (res.value) {
            try {
@@ -90,23 +93,29 @@ export default function App() {
              if (parsed.inputPolling) setInputPolling(parsed.inputPolling);
            } catch(e){}
         }
-      });
-    });
+      }).catch(e => console.warn('capacitor get settings error', e));
+    }).catch(e => console.warn('capacitor preferences import error', e));
   }, []);
 
   const saveProfilesToStorage = async (newProfiles: GamepadProfile[]) => {
-    const { Preferences } = await import('@capacitor/preferences');
-    await Preferences.set({ key: 'nexion_profiles', value: JSON.stringify(newProfiles) });
+    try {
+      const { Preferences } = await import('@capacitor/preferences');
+      await Preferences.set({ key: 'nexion_profiles', value: JSON.stringify(newProfiles) });
+    } catch(e) { console.warn('Failed to save profiles', e); }
   };
 
   const saveMacrosToStorage = async (newMacros: GamepadMacro[]) => {
-    const { Preferences } = await import('@capacitor/preferences');
-    await Preferences.set({ key: 'nexion_macros', value: JSON.stringify(newMacros) });
+    try {
+      const { Preferences } = await import('@capacitor/preferences');
+      await Preferences.set({ key: 'nexion_macros', value: JSON.stringify(newMacros) });
+    } catch(e) { console.warn('Failed to save macros', e); }
   };
 
   const saveSettingsToStorage = async (socket: string, polling: number) => {
-    const { Preferences } = await import('@capacitor/preferences');
-    await Preferences.set({ key: 'nexion_settings', value: JSON.stringify({ socketIpcName: socket, inputPolling: polling }) });
+    try {
+      const { Preferences } = await import('@capacitor/preferences');
+      await Preferences.set({ key: 'nexion_settings', value: JSON.stringify({ socketIpcName: socket, inputPolling: polling }) });
+    } catch(e) { console.warn('Failed to save settings', e); }
   };
 
   const handleUpdateMacros = (newMacros: GamepadMacro[]) => {
@@ -148,8 +157,10 @@ export default function App() {
 
   const handleProfileSelect = async (id: string) => {
     setActiveProfileId(id);
-    const { Preferences } = await import('@capacitor/preferences');
-    await Preferences.set({ key: 'nexion_active_profile', value: id });
+    try {
+      const { Preferences } = await import('@capacitor/preferences');
+      await Preferences.set({ key: 'nexion_active_profile', value: id });
+    } catch(e) { console.warn('Failed to save active profile', e); }
     syncActiveProfileIdOnServer(id);
   };
   const handleGlobalKillSwitch = async () => {

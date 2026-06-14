@@ -39,7 +39,10 @@ public class OverlayPlugin extends Plugin {
                 getContext().startService(serviceIntent);
             }
             Log.d("GameMapper", "startOverlay service launched successfully");
-            call.resolve();
+            JSObject ret = new JSObject();
+            ret.put("success", true);
+            ret.put("message", "Service started");
+            call.resolve(ret);
         } catch (Exception e) {
             Log.e("GameMapper", "Failed to start overlay service", e);
             call.reject("Failed to start overlay service: " + e.getMessage());

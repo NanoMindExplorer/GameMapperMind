@@ -205,6 +205,7 @@ public class FloatingOverlayService extends Service {
                     virtualButtonWindows.add(btnView);
                     
                     final String btnId = btn.optString("id");
+                    Log.d("GameMapper", "WindowManager addView executed for button ID: " + btnId);
                     
                     // Setup touch listeners
                     btnView.setOnTouchListener(new View.OnTouchListener() {
@@ -264,6 +265,7 @@ public class FloatingOverlayService extends Service {
     public void onCreate() {
         super.onCreate();
         Log.d("GameMapper", "FloatingOverlayService onCreate() called");
+        createNotificationChannel();
         try {
             windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
 

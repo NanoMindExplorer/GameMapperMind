@@ -271,13 +271,15 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
 
         {/* Main absolute aspect ratio lock screen emulator */}
         <div 
-          onClick={handleContainerClick}
+          onClick={(e) => {
+            if (showPalette) handleContainerClick();
+          }}
           onMouseMove={handleDragMove}
           onMouseUp={handleDragEnd}
           onMouseLeave={handleDragEnd}
           // Added touch events for mobile compatibility
           onTouchMove={(e) => {
-            if (!isDragging || !selectedButtonId) return;
+            if (!isDragging || !selectedButtonId || !showPalette) return;
             const touch = e.touches[0];
             const container = e.currentTarget.getBoundingClientRect();
             const x = Math.max(0, Math.min(100, ((touch.clientX - container.left) / container.width) * 100));
@@ -294,16 +296,25 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
           }}
         >
           {/* Snap overlay grid when adjusting mapping nodes */}
-          {!hideGrid && (
+          {!hideGrid && showPalette && (
             <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(255,255,255,0.015)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.015)_1px,transparent_1px)] bg-[size:24px_24px] opacity-100" />
           )}
 
           {/* Floating Action Button to toggle Palette (Nexion Hub) */}
-          <div className="absolute top-8 left-1/2 -translate-x-1/2 z-50 opacity-90 shadow-[0_0_15px_rgba(99,102,241,0.5)] cursor-pointer" onClick={() => setShowPalette(!showPalette)}>
-             <div className={`w-10 h-10 ${showPalette ? 'bg-indigo-500' : 'bg-indigo-600/90'} rounded-full border-2 border-indigo-300 flex items-center justify-center backdrop-blur shadow-lg overflow-hidden hover:bg-indigo-500 transition-colors`}>
-               <Layers className="w-5 h-5 text-white" />
+          <div 
+            className={`absolute z-50 transition-all duration-300 shadow-[0_0_15px_rgba(99,102,241,0.6)] cursor-pointer pointer-events-auto flex flex-col items-center ${showPalette ? 'top-6 left-1/2 -translate-x-1/2 scale-110' : 'top-6 left-1/2 -translate-x-1/2 opacity-70 hover:opacity-100'}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (showPalette) {
+                setSelectedButtonId(null);
+              }
+              setShowPalette(!showPalette);
+            }}
+          >
+             <div className={`w-12 h-12 ${showPalette ? 'bg-indigo-600' : 'bg-slate-900/80'} rounded-full border-2 ${showPalette ? 'border-indigo-300' : 'border-indigo-500'} flex items-center justify-center backdrop-blur shadow-xl overflow-hidden hover:bg-indigo-500 transition-colors`}>
+               <Layers className={`w-6 h-6 ${showPalette ? 'text-white' : 'text-indigo-400'}`} />
              </div>
-             <div className="text-[8px] font-bold tracking-wider text-indigo-200 mt-1 drop-shadow-md text-center max-w-[50px] leading-tight">NEXION</div>
+             {!showPalette && <div className="text-[9px] font-bold tracking-widest text-indigo-300 mt-2 drop-shadow-md text-center bg-slate-900/80 px-2.5 py-0.5 rounded-full border border-indigo-500/40">NEXION</div>}
           </div>
 
           {/* Canvas Overlay Gamepad Palette */}
@@ -406,30 +417,49 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
           {activeProfile.buttons.map((btn) => {
             const isSelected = btn.id === selectedButtonId;
             const isSwipe = btn.type === 'swipe' || (btn.androidEventCode >= 201 && btn.androidEventCode <= 204);
-            let btnColor = 'border-emerald-500 bg-emerald-500/15';
+            
+            // Base colors mimicking the user's screenshot (minimalist blue/white rings)
+            let btnColor = 'border-indigo-400 bg-slate-950/40 text-white';
+            
             if (btn.type === 'analog_stick') {
               if (btn.mappedKey === 'R_STICK') {
-                btnColor = 'border-pink-500 bg-pink-500/10';
+                btnColor = 'border-pink-400 bg-slate-950/40 text-white';
               } else {
-                btnColor = 'border-blue-500 bg-blue-500/10';
+                btnColor = 'border-indigo-400 bg-slate-950/40 text-white';
               }
             } else if (btn.type === 'gyro_area') {
-              btnColor = 'border-pink-500 bg-pink-500/10';
+              btnColor = 'border-pink-500 bg-pink-500/10 text-white';
             } else if (isSwipe) {
-              btnColor = 'border-purple-550 bg-purple-500/20 shadow-[0_0_12px_rgba(168,85,247,0.35)]';
+              btnColor = 'border-purple-400 bg-purple-500/10 text-white shadow-[0_0_12px_rgba(168,85,247,0.35)]';
             }
             
+            // When editing, make them a bit more prominent
+            if (showPalette && !isSelected) {
+              btnColor += ' opacity-80 backdrop-blur-sm';
+            } else if (!showPalette) {
+              // When not editing, remove background inside so it just looks like wireframe UI overlay
+              btnColor = btnColor.replace('bg-slate-950/40', 'bg-transparent backdrop-blur-[1px]').replace('bg-pink-500/10', 'bg-transparent').replace('bg-purple-500/10', 'bg-transparent');
+            }
+
             return (
               <div
                 key={btn.id}
-                onMouseDown={(e) => handleDragStart(e, btn.id)}
+                onMouseDown={(e) => {
+                  if (!showPalette) return;
+                  handleDragStart(e, btn.id);
+                }}
                 onTouchStart={(e) => {
+                  if (!showPalette) return;
                   e.stopPropagation();
                   setSelectedButtonId(btn.id);
                   setIsDragging(true);
                 }}
-                onClick={(e) => { e.stopPropagation(); setSelectedButtonId(btn.id); }}
-                className={`absolute rounded-full border-2 cursor-pointer flex flex-col justify-center items-center font-sans tracking-tight ${btnColor} transition-all antialiased select-none group/node`}
+                onClick={(e) => { 
+                  if (!showPalette) return;
+                  e.stopPropagation(); 
+                  setSelectedButtonId(btn.id); 
+                }}
+                className={`absolute ${btn.width > 80 ? 'rounded-[40%]' : 'rounded-[50%]'} border-[2.5px] flex flex-col justify-center items-center font-sans tracking-tight ${btnColor} transition-all antialiased select-none group/node ${showPalette ? 'cursor-pointer pointer-events-auto' : 'pointer-events-none'}`}
                 style={{
                   left: `${btn.x}%`,
                   top: `${btn.y}%`,
@@ -437,8 +467,8 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
                   height: `${btn.height}px`,
                   transform: 'translate(-50%, -50%)',
                   opacity: hideAllNodes ? 0 : btn.opacity * (globalNodeOpacity / 100),
-                  boxShadow: isSelected ? '0 0 16px rgba(139, 92, 246, 0.8), inset 0 0 8px rgba(139, 92, 246, 0.4)' : 'none',
-                  borderColor: isSelected ? '#8B5CF6' : undefined
+                  boxShadow: isSelected && showPalette ? '0 0 16px rgba(139, 92, 246, 0.8), inset 0 0 8px rgba(139, 92, 246, 0.4)' : 'none',
+                  borderColor: isSelected && showPalette ? '#8B5CF6' : undefined
                 }}
               >
                 {/* Node details */}
@@ -482,6 +512,37 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
                   </div>
                 )}
                 
+                {/* Quick Resize Controls when selected */}
+                {isSelected && (
+                  <div className="absolute -top-10 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-slate-900/90 backdrop-blur p-1 rounded-lg border border-slate-700 shadow-xl pointer-events-auto z-50">
+                    <button 
+                      onClick={(e) => { 
+                        e.stopPropagation(); 
+                        const val = Math.max(20, btn.width - 5); 
+                        const updated = activeProfile.buttons.map(b => b.id === btn.id ? { ...b, width: val, height: val } : b);
+                        onUpdateProfile({ ...activeProfile, buttons: updated });
+                      }} 
+                      className="w-6 h-6 flex items-center justify-center bg-slate-800 hover:bg-slate-700 rounded text-slate-200 text-xs font-bold transition-colors"
+                      title="Perkecil Tombol"
+                    >
+                      -
+                    </button>
+                    <span className="text-[10px] text-slate-300 font-mono font-bold w-7 text-center">{btn.width}</span>
+                    <button 
+                      onClick={(e) => { 
+                        e.stopPropagation(); 
+                        const val = Math.min(400, btn.width + 5); 
+                        const updated = activeProfile.buttons.map(b => b.id === btn.id ? { ...b, width: val, height: val } : b);
+                        onUpdateProfile({ ...activeProfile, buttons: updated });
+                      }} 
+                      className="w-6 h-6 flex items-center justify-center bg-slate-800 hover:bg-slate-700 rounded text-slate-200 text-xs font-bold transition-colors"
+                      title="Perbesar Tombol"
+                    >
+                      +
+                    </button>
+                  </div>
+                )}
+
                 {/* Visual coordinate hover flag */}
                 <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover/node:block bg-slate-950/90 text-[8px] font-mono text-indigo-300 px-1 py-0.5 rounded border border-indigo-900 pointer-events-none whitespace-nowrap">
                   X:{Number(btn.x).toFixed(1)}% Y:{Number(btn.y).toFixed(1)}%

@@ -171,6 +171,12 @@ export default function App() {
   };
 
   const [overlayActive, setOverlayActive] = React.useState(false);
+  const [toastMessage, setToastMessage] = React.useState<{text: string, type: 'success' | 'error'} | null>(null);
+
+  const showToast = (text: string, type: 'success' | 'error') => {
+    setToastMessage({text, type});
+    setTimeout(() => setToastMessage(null), 3000);
+  };
   
   const handleToggleOverlay = async () => {
     try {
@@ -178,13 +184,16 @@ export default function App() {
         await stopOverlay();
         setOverlayActive(false);
         handleLogMessage('SYSTEM: Native floating overlay deactivated.');
+        showToast('Overlay Deactivated', 'success');
       } else {
         await startOverlay(activeProfile);
         setOverlayActive(true);
         handleLogMessage('SYSTEM: Native floating overlay activated. You can now minimize the app.');
+        showToast('Overlay Service Started Successfully!', 'success');
       }
     } catch (e: any) {
       handleLogMessage(`ERROR: Cannot start Native Overlay. ${e.message || e}`);
+      showToast(`Failed to start overlay: ${e.message || e}`, 'error');
     }
   };
 
@@ -596,6 +605,15 @@ export default function App() {
           <span>© 2026 NanoMind Systems Inc.</span>
         </div>
       </footer>
+
+      {toastMessage && (
+        <div className="fixed bottom-10 left-1/2 transform -translate-x-1/2 z-50 animate-in fade-in slide-in-from-bottom-4 duration-300">
+          <div className={`px-6 py-3 rounded-full flex items-center gap-3 shadow-2xl backdrop-blur-md border ${toastMessage.type === 'success' ? 'bg-emerald-950/80 border-emerald-500/50 text-emerald-50' : 'bg-red-950/80 border-red-500/50 text-red-50'}`}>
+            {toastMessage.type === 'success' ? <Compass className="w-5 h-5 text-emerald-400" /> : <ShieldAlert className="w-5 h-5 text-red-400" />}
+            <span className="font-mono text-sm font-bold tracking-wide">{toastMessage.text}</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

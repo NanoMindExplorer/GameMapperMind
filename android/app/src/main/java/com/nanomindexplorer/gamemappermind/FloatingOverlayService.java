@@ -123,10 +123,50 @@ public class FloatingOverlayService extends Service {
 
         if (intent != null && intent.hasExtra("config")) {
             currentConfigJson = intent.getStringExtra("config");
-            new Handler(Looper.getMainLooper()).post(() -> updateOverlayViews(currentConfigJson));
+            new Handler(Looper.getMainLooper()).post(() -> {
+                updateOverlayViews(currentConfigJson);
+                createTestButton();
+            });
+        } else {
+            new Handler(Looper.getMainLooper()).post(() -> {
+                updateOverlayViews(currentConfigJson);
+                createTestButton();
+            });
         }
 
         return START_STICKY;
+    }
+
+    public void createTestButton() {
+        try {
+            TextView testBtn = new TextView(this);
+            testBtn.setText("TEST");
+            testBtn.setTextColor(Color.WHITE);
+            testBtn.setGravity(Gravity.CENTER);
+            
+            android.graphics.drawable.GradientDrawable gd = new android.graphics.drawable.GradientDrawable();
+            gd.setColor(Color.parseColor("#ef4444"));
+            gd.setCornerRadius(100f);
+            gd.setStroke(4, Color.WHITE);
+            testBtn.setBackground(gd);
+
+            final WindowManager.LayoutParams params = new WindowManager.LayoutParams(
+                    150,
+                    150,
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ? 
+                        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : WindowManager.LayoutParams.TYPE_PHONE,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                    PixelFormat.TRANSLUCENT);
+            params.gravity = Gravity.TOP | Gravity.RIGHT;
+            params.x = 50;
+            params.y = 200;
+
+            windowManager.addView(testBtn, params);
+            virtualButtonWindows.add(testBtn);
+            Log.d("GameMapper", "createTestButton() added successfully!");
+        } catch (Exception e) {
+            Log.e("GameMapper", "createTestButton() failed!", e);
+        }
     }
 
     private void updateOverlayViews(String configJson) {

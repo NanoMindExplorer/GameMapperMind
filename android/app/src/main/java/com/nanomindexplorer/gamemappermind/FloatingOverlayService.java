@@ -23,8 +23,8 @@ import java.io.DataOutputStream;
 
 public class FloatingOverlayService extends Service {
     private WindowManager windowManager;
-    private View buttonContainer;
     private View handleContainer;
+    private java.util.List<View> virtualButtonWindows = new java.util.ArrayList<>();
     private static final String CHANNEL_ID = "OverlayServiceChannel";
     private boolean isEditMode = false;
     private String currentConfigJson = "{}";
@@ -107,10 +107,14 @@ public class FloatingOverlayService extends Service {
     }
 
     private void updateOverlayViews(String configJson) {
-        if (buttonContainer == null || windowManager == null) return;
+        if (windowManager == null) return;
         
-        FrameLayout container = (FrameLayout) buttonContainer;
-        container.removeAllViews();
+        for (View v : virtualButtonWindows) {
+            try {
+                windowManager.removeView(v);
+            } catch (Exception e) {}
+        }
+        virtualButtonWindows.clear();
 
         try {
             JSONObject profile = new JSONObject(configJson);
@@ -127,9 +131,9 @@ public class FloatingOverlayService extends Service {
                     btnView.setGravity(Gravity.CENTER);
                     
                     android.graphics.drawable.GradientDrawable gd = new android.graphics.drawable.GradientDrawable();
-                    gd.setColor(isEditMode ? Color.parseColor("#901e293b") : Color.TRANSPARENT);
+                    gd.setColor(isEditMode ? Color.parseColor("#901e293b") : Color.parseColor("#401e293b")); // semi transparent in play mode visible
                     gd.setCornerRadius(100f);
-                    gd.setStroke(isEditMode ? 4 : 0, Color.parseColor("#818cf8"));
+                    gd.setStroke(isEditMode ? 4 : 2, Color.parseColor("#818cf8"));
                     btnView.setBackground(gd);
                     
                     int w = btn.optInt("width", 100);
@@ -137,12 +141,20 @@ public class FloatingOverlayService extends Service {
                     double xPct = btn.optDouble("x", 50) / 100.0;
                     double yPct = btn.optDouble("y", 50) / 100.0;
                     
-                    FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(w, h);
-                    lp.leftMargin = (int)(screenWidth * xPct) - w/2;
-                    lp.topMargin = (int)(screenHeight * yPct) - h/2;
+                    final WindowManager.LayoutParams params = new WindowManager.LayoutParams(
+                            w,
+                            h,
+                            Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ? 
+                                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : WindowManager.LayoutParams.TYPE_PHONE,
+                            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                            PixelFormat.TRANSLUCENT);
+                    params.gravity = Gravity.TOP | Gravity.LEFT;
+                    params.x = (int)(screenWidth * xPct) - w/2;
+                    params.y = (int)(screenHeight * yPct) - h/2;
                     
                     btnView.setAlpha(isEditMode ? 1.0f : (float)(btn.optDouble("opacity", 100) / 100.0));
-                    container.addView(btnView, lp);
+                    windowManager.addView(btnView, params);
+                    virtualButtonWindows.add(btnView);
                     
                     final String btnId = btn.optString("id");
                     
@@ -158,18 +170,15 @@ public class FloatingOverlayService extends Service {
                             if (isEditMode) {
                                 switch (event.getAction()) {
                                     case MotionEvent.ACTION_DOWN:
-                                        initialX = ((FrameLayout.LayoutParams) v.getLayoutParams()).leftMargin;
-                                        initialY = ((FrameLayout.LayoutParams) v.getLayoutParams()).topMargin;
+                                        initialX = params.x;
+                                        initialY = params.y;
                                         initialTouchX = event.getRawX();
                                         initialTouchY = event.getRawY();
                                         return true;
                                     case MotionEvent.ACTION_MOVE:
-                                        int dx = (int)(event.getRawX() - initialTouchX);
-                                        int dy = (int)(event.getRawY() - initialTouchY);
-                                        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) v.getLayoutParams();
-                                        lp.leftMargin = initialX + dx;
-                                        lp.topMargin = initialY + dy;
-                                        container.updateViewLayout(v, lp);
+                                        params.x = initialX + (int)(event.getRawX() - initialTouchX);
+                                        params.y = initialY + (int)(event.getRawY() - initialTouchY);
+                                        windowManager.updateViewLayout(v, params);
                                         return true;
                                 }
                             } else {
@@ -182,10 +191,11 @@ public class FloatingOverlayService extends Service {
                                 switch (event.getAction()) {
                                     case MotionEvent.ACTION_DOWN:
                                         injectCommand("input tap " + injectX + " " + injectY);
-                                        break;
-                                    case MotionEvent.ACTION_MOVE:
+                                        v.setAlpha(0.5f); // feedback
                                         break;
                                     case MotionEvent.ACTION_UP:
+                                    case MotionEvent.ACTION_CANCEL:
+                                        v.setAlpha((float)(btn.optDouble("opacity", 100) / 100.0));
                                         break;
                                 }
                                 return true;
@@ -196,27 +206,6 @@ public class FloatingOverlayService extends Service {
                 }
             }
 
-            // Update window flags based on edit mode
-            WindowManager.LayoutParams params = (WindowManager.LayoutParams) buttonContainer.getLayoutParams();
-            if (isEditMode) {
-                // In edit mode we need to intercept drags, so we clear FLAG_NOT_TOUCHABLE
-                params.flags &= ~WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
-            } else {
-                // In play mode, we either let buttons be clicked (but block game touches) OR we make whole layer untouchable
-                // Since the user wants "clickable virtual buttons", we use FLAG_NOT_TOUCH_MODAL which passes outside touches, 
-                // but since container is MATCH_PARENT it still eats all touches.
-                // For a true floating gamepad, we must use separate windows per button, OR rely on a custom layout constraint.
-                // Given the constraints, if "tombol virtual di overlay harus klikable" is prioritized over "playing with screen simultaneously",
-                // we keep it NOT_TOUCH_MODAL. If they use it with an actual gamepad, we MUST set FLAG_NOT_TOUCHABLE.
-                // Let's set it to FLAG_NOT_TOUCH_MODAL to allow clickable virtual buttons, 
-                // but we dynamically adjust the container? 
-                // Actually, if we clear NOT_TOUCHABLE, they can click our buttons. But they can't touch the game!
-                // Best standard practice: Play Mode = NOT_TOUCHABLE. The mapping is triggered by physical gamepad. 
-                // Because on-screen visual buttons are just visuals. We already inject via React hook.
-                params.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
-            }
-            windowManager.updateViewLayout(buttonContainer, params);
-
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -226,22 +215,6 @@ public class FloatingOverlayService extends Service {
     public void onCreate() {
         super.onCreate();
         windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
-
-        // 1. Button Container (MATCH_PARENT)
-        buttonContainer = new InterceptFrameLayout(this);
-        
-        final WindowManager.LayoutParams buttonParams = new WindowManager.LayoutParams(
-                WindowManager.LayoutParams.MATCH_PARENT,
-                WindowManager.LayoutParams.MATCH_PARENT,
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ? 
-                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : WindowManager.LayoutParams.TYPE_PHONE,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
-                PixelFormat.TRANSLUCENT);
-
-        buttonParams.gravity = Gravity.TOP | Gravity.LEFT;
-        buttonParams.x = 0;
-        buttonParams.y = 0;
-        windowManager.addView(buttonContainer, buttonParams);
 
         // 2. Handle Container (WRAP_CONTENT)
         handleContainer = new FrameLayout(this);
@@ -316,7 +289,13 @@ public class FloatingOverlayService extends Service {
     @Override
     public void onDestroy() {
         super.onDestroy();
-        if (buttonContainer != null) windowManager.removeView(buttonContainer);
+        for (View v : virtualButtonWindows) {
+            try {
+                windowManager.removeView(v);
+            } catch (Exception e) {}
+        }
+        virtualButtonWindows.clear();
+
         if (handleContainer != null) windowManager.removeView(handleContainer);
         if (shizukuOut != null) {
             try {

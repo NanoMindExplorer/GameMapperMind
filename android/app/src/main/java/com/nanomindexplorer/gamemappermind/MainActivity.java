@@ -14,9 +14,9 @@ import com.getcapacitor.BridgeActivity;
 public class MainActivity extends BridgeActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
         registerPlugin(ShizukuPlugin.class);
         registerPlugin(OverlayPlugin.class);
+        super.onCreate(savedInstanceState);
         
         // Aktifkan Gamepad API & properti WebView
         if (bridge != null && bridge.getWebView() != null) {

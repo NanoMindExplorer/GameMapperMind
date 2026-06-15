@@ -631,14 +631,14 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
                   top: `${btn.y}%`,
                   width: `${btn.width}px`,
                   height: `${btn.height}px`,
-                  transform: isButtonActive && !showPalette ? 'translate(-50%, -50%) scale(0.92)' : 'translate(-50%, -50%) scale(1)',
+                  transform: isButtonActive ? 'translate(-50%, -50%) scale(0.92)' : 'translate(-50%, -50%) scale(1)',
                   opacity: hideAllNodes ? 0 : btn.opacity * (globalNodeOpacity / 100),
                   boxShadow: isSelected && showPalette ? '0 0 16px rgba(139, 92, 246, 0.8), inset 0 0 8px rgba(139, 92, 246, 0.4)' : undefined,
                   borderColor: isSelected && showPalette ? '#8B5CF6' : undefined
                 }}
               >
                 {/* Node details */}
-                <span className={`text-[10px] font-bold text-white tracking-wide truncate max-w-full px-1 z-10 text-center ${isButtonActive && !showPalette ? 'drop-shadow-[0_0_8px_rgba(255,255,255,1)] text-indigo-100 scale-110 transition-transform' : ''}`}>
+                <span className={`text-[10px] font-bold text-white tracking-wide truncate max-w-full px-1 z-10 text-center ${isButtonActive ? 'drop-shadow-[0_0_8px_rgba(255,255,255,1)] text-indigo-100 scale-110 transition-transform' : ''}`}>
                   {btn.label}
                 </span>
 

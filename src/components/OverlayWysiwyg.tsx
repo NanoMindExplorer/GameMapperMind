@@ -413,6 +413,19 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
 
                 <div className="w-px h-10 bg-slate-700/50 mx-1"></div>
 
+                <div className="flex flex-col gap-1">
+                  <div className="flex gap-1">
+                    <button onClick={() => handleAddSpecificButton('SELECT', 'BUTTON_SELECT', 109, 45)} className="w-12 h-6 rounded-full bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 font-bold text-[9px] shadow transition-colors flex items-center justify-center">SELECT</button>
+                    <button onClick={() => handleAddSpecificButton('START', 'BUTTON_START', 108, 45)} className="w-12 h-6 rounded-full bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 font-bold text-[9px] shadow transition-colors flex items-center justify-center">START</button>
+                  </div>
+                  <div className="flex gap-1">
+                    <button onClick={() => handleAddSpecificButton('M1', 'BUTTON_M1', 0, 45)} className="w-12 h-6 rounded bg-indigo-900/40 hover:bg-indigo-600 border border-indigo-700/50 text-indigo-300 font-bold text-[9px] shadow transition-colors flex items-center justify-center">M1</button>
+                    <button onClick={() => handleAddSpecificButton('M2', 'BUTTON_M2', 0, 45)} className="w-12 h-6 rounded bg-indigo-900/40 hover:bg-indigo-600 border border-indigo-700/50 text-indigo-300 font-bold text-[9px] shadow transition-colors flex items-center justify-center">M2</button>
+                  </div>
+                </div>
+
+                <div className="w-px h-10 bg-slate-700/50 mx-1"></div>
+
                 <button onClick={() => handleAddSpecificButton('L-Stick', 'L_STICK', 0, 100, 'analog_stick')} className="h-10 px-3 rounded-lg bg-blue-900/60 hover:bg-blue-600 border border-blue-700 text-blue-200 font-medium text-[11px] shadow transition-colors flex items-center gap-1">
                   <Move className="w-3.5 h-3.5" /> L-Stick
                 </button>
@@ -517,6 +530,16 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
                           else if (val === 'BUTTON_R1') newCode = 102;
                           else if (val === 'BUTTON_L2') newCode = 104;
                           else if (val === 'BUTTON_R2') newCode = 105;
+                          else if (val === 'BUTTON_L3') newCode = 103;
+                          else if (val === 'BUTTON_R3') newCode = 106;
+                          else if (val === 'BUTTON_START') newCode = 108;
+                          else if (val === 'BUTTON_SELECT') newCode = 109;
+                          else if (val === 'BUTTON_M1') newCode = 0;
+                          else if (val === 'BUTTON_M2') newCode = 0;
+                          else if (val === 'DPAD_UP') newCode = 106;
+                          else if (val === 'DPAD_DOWN') newCode = 107;
+                          else if (val === 'DPAD_LEFT') newCode = 108;
+                          else if (val === 'DPAD_RIGHT') newCode = 109;
                           
                           const updated = activeProfile.buttons.map(b => b.id === selectedButton.id ? { ...b, mappedKey: val, type: newType, androidEventCode: newCode, label: newLabel } : b);
                           onUpdateProfile({ ...activeProfile, buttons: updated });
@@ -532,6 +555,10 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
                          <option value="BUTTON_R2">BUTTON_R2</option>
                          <option value="BUTTON_L3">BUTTON_L3</option>
                          <option value="BUTTON_R3">BUTTON_R3</option>
+                         <option value="BUTTON_START">BUTTON_START</option>
+                         <option value="BUTTON_SELECT">BUTTON_SELECT</option>
+                         <option value="BUTTON_M1">BUTTON_M1</option>
+                         <option value="BUTTON_M2">BUTTON_M2</option>
                          <option value="DPAD_UP">DPAD_UP</option>
                          <option value="DPAD_DOWN">DPAD_DOWN</option>
                          <option value="DPAD_LEFT">DPAD_LEFT</option>
@@ -884,6 +911,12 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
                           <option value="BUTTON_R2">BUTTON_R2 (RT Trigger)</option>
                           <option value="BUTTON_L3">BUTTON_L3 (L3 Thumb)</option>
                           <option value="BUTTON_R3">BUTTON_R3 (R3 Thumb)</option>
+                        </optgroup>
+                        <optgroup label="Sistem & Macro">
+                          <option value="BUTTON_START">BUTTON_START (Start / Menu)</option>
+                          <option value="BUTTON_SELECT">BUTTON_SELECT (Select / View)</option>
+                          <option value="BUTTON_M1">BUTTON_M1 (Macro 1)</option>
+                          <option value="BUTTON_M2">BUTTON_M2 (Macro 2)</option>
                         </optgroup>
                         <optgroup label="Gamepad D-pad Navigation">
                           <option value="DPAD_UP">DPAD_UP (Dpad Atas)</option>

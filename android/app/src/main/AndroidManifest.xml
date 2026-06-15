@@ -31,8 +31,6 @@
         <!-- Shizuku v3 Support -->
         <meta-data android:name="moe.shizuku.client.V3_SUPPORT" android:value="true" />
 
-
-
         <service
             android:name=".FloatingOverlayService"
             android:exported="false"

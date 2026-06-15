@@ -23,6 +23,9 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
   const [selectedButtonId, setSelectedButtonId] = React.useState<string | null>(null);
   const [screenshotMode, setScreenshotMode] = React.useState<'genshin' | 'pubg' | 'codm' | 'efootball'>('genshin');
   const [isDragging, setIsDragging] = React.useState(false);
+  const [nexionPos, setNexionPos] = React.useState({ x: 50, y: 10 });
+  const [isDraggingNexion, setIsDraggingNexion] = React.useState(false);
+  const nexionDragHasMoved = React.useRef(false);
   const [showPalette, setShowPalette] = React.useState(false);
 
     // Sync opacity local state with profile if provided on load
@@ -56,9 +59,19 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
 
   const handleDragEnd = () => {
     setIsDragging(false);
+    setIsDraggingNexion(false);
   };
 
   const handleDragMove = (e: React.MouseEvent) => {
+    if (isDraggingNexion) {
+      nexionDragHasMoved.current = true;
+      const container = e.currentTarget.getBoundingClientRect();
+      const x = Math.max(0, Math.min(100, ((e.clientX - container.left) / container.width) * 100));
+      const y = Math.max(0, Math.min(100, ((e.clientY - container.top) / container.height) * 100));
+      setNexionPos({ x, y });
+      return;
+    }
+
     if (!isDragging || !selectedButtonId) return;
     
     const container = e.currentTarget.getBoundingClientRect();
@@ -279,6 +292,15 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
           onMouseLeave={handleDragEnd}
           // Added touch events for mobile compatibility
           onTouchMove={(e) => {
+            if (isDraggingNexion) {
+              nexionDragHasMoved.current = true;
+              const touch = e.touches[0];
+              const container = e.currentTarget.getBoundingClientRect();
+              const x = Math.max(0, Math.min(100, ((touch.clientX - container.left) / container.width) * 100));
+              const y = Math.max(0, Math.min(100, ((touch.clientY - container.top) / container.height) * 100));
+              setNexionPos({ x, y });
+              return;
+            }
             if (!isDragging || !selectedButtonId) return;
             const touch = e.touches[0];
             const container = e.currentTarget.getBoundingClientRect();
@@ -302,9 +324,24 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
 
           {/* Floating Action Button to toggle Palette (Nexion Hub) */}
           <div 
-            className={`absolute z-50 transition-all duration-300 shadow-[0_0_15px_rgba(99,102,241,0.6)] cursor-pointer pointer-events-auto flex flex-col items-center ${showPalette ? 'top-6 left-1/2 -translate-x-1/2 scale-110' : 'top-6 left-1/2 -translate-x-1/2 opacity-70 hover:opacity-100'}`}
+            className={`absolute z-50 shadow-[0_0_15px_rgba(99,102,241,0.6)] cursor-pointer pointer-events-auto flex flex-col items-center select-none touch-none ${showPalette ? 'scale-110' : 'opacity-70 flex hover:opacity-100'}`}
+            style={{ left: `${nexionPos.x}%`, top: `${nexionPos.y}%`, transform: 'translate(-50%, -50%)', transition: isDraggingNexion ? 'none' : 'opacity 0.3s' }}
+            onMouseDown={(e) => {
+              e.stopPropagation();
+              nexionDragHasMoved.current = false;
+              setIsDraggingNexion(true);
+            }}
+            onTouchStart={(e) => {
+              e.stopPropagation();
+              nexionDragHasMoved.current = false;
+              setIsDraggingNexion(true);
+            }}
             onClick={(e) => {
               e.stopPropagation();
+              if (nexionDragHasMoved.current) {
+                nexionDragHasMoved.current = false;
+                return;
+              }
               if (showPalette) {
                 setSelectedButtonId(null);
               }

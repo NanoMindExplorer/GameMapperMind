@@ -33,14 +33,17 @@ export function useShizuku() {
     return currentState;
   };
 
-  const requestShizukuPermission = async () => {
+  const requestShizukuPermission = async (): Promise<{ success: boolean; error?: string }> => {
     if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
       try {
         await ShizukuPlugin.requestPermission();
-      } catch (err) {
+        return { success: true };
+      } catch (err: any) {
         console.error("Native request permission error", err);
+        return { success: false, error: err?.message || String(err) };
       }
     }
+    return { success: false, error: "Not running natively" };
   };
 
   const executeShizukuCommand = async (command: string): Promise<{ output: string; error: string; exitCode: number } | null> => {

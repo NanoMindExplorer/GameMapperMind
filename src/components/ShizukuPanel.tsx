@@ -204,7 +204,12 @@ export default function ShizukuPanel({ shizukuState, setShizukuState, onLogMessa
   const requestShizukuPermission = async () => {
     setIsLoading(true);
     onLogMessage("Invoking Shizuku.requestPermission() via android.os.Binder IPC");
-    await nativeRequestPerm();
+    const result = await nativeRequestPerm();
+    if (result && !result.success) {
+      onLogMessage(`[sh ERROR] Gagal meminta izin: ${result.error}`);
+    } else {
+      onLogMessage(`[sh] Permintaan Izin berhasil dikirim ke Shizuku.`);
+    }
     setIsLoading(false);
   };
 

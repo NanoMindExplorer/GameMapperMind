@@ -258,9 +258,10 @@ export default function App() {
 
     const mapping = activeProfile.buttons.find(b => b.mappedKey === button);
     if (mapping) {
-      // Calculate physical coordinates based on screen
-      const x = Math.round((mapping.x / 100) * window.innerWidth);
-      const y = Math.round((mapping.y / 100) * window.innerHeight);
+      const screenW = Math.max(window.screen.width, window.screen.height);
+      const screenH = Math.min(window.screen.width, window.screen.height);
+      const x = Math.round((mapping.x / 100) * screenW);
+      const y = Math.round((mapping.y / 100) * screenH);
 
       if (shizukuState.status === 'CONNECTED_SHIZUKU' && typeof window !== 'undefined' && 'Capacitor' in window) {
          if (isPressed) {
@@ -289,8 +290,10 @@ export default function App() {
     // Process Left Stick
     if (lStickMapping) {
       const isNeutral = Math.abs(axes.lx) < 0.1 && Math.abs(axes.ly) < 0.1;
-      const baseX = Math.round((lStickMapping.x / 100) * window.innerWidth);
-      const baseY = Math.round((lStickMapping.y / 100) * window.innerHeight);
+      const screenW = Math.max(window.screen.width, window.screen.height);
+      const screenH = Math.min(window.screen.width, window.screen.height);
+      const baseX = Math.round((lStickMapping.x / 100) * screenW);
+      const baseY = Math.round((lStickMapping.y / 100) * screenH);
 
       if (isNeutral) {
         if (activeStickPointer.current.l_id === 'L_STICK') {
@@ -339,8 +342,10 @@ export default function App() {
     // Process Right Stick
     if (rStickMapping) {
       const isNeutral = Math.abs(axes.rx) < 0.1 && Math.abs(axes.ry) < 0.1;
-      const baseX = Math.round((rStickMapping.x / 100) * window.innerWidth);
-      const baseY = Math.round((rStickMapping.y / 100) * window.innerHeight);
+      const screenW = Math.max(window.screen.width, window.screen.height);
+      const screenH = Math.min(window.screen.width, window.screen.height);
+      const baseX = Math.round((rStickMapping.x / 100) * screenW);
+      const baseY = Math.round((rStickMapping.y / 100) * screenH);
 
       if (isNeutral) {
         if (activeStickPointer.current.r_id === 'R_STICK') {

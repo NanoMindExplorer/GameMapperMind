@@ -607,16 +607,20 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
                     handleDragStart(e, btn.id);
                   } else {
                     const ratio = window.devicePixelRatio || 1;
-                    const injectX = Math.round((btn.x / 100) * window.innerWidth * ratio);
-                    const injectY = Math.round((btn.y / 100) * window.innerHeight * ratio);
+                    const screenW = Math.max(window.screen.width, window.screen.height);
+                    const screenH = Math.min(window.screen.width, window.screen.height);
+                    const injectX = Math.round((btn.x / 100) * screenW * ratio);
+                    const injectY = Math.round((btn.y / 100) * screenH * ratio);
                     if (window.AndroidOverlay) window.AndroidOverlay.onCommand(`down ${injectX} ${injectY}`);
                   }
                 }}
                 onMouseUp={(e) => {
                   if (isNativeOverlay && !showPalette) {
                     const ratio = window.devicePixelRatio || 1;
-                    const injectX = Math.round((btn.x / 100) * window.innerWidth * ratio);
-                    const injectY = Math.round((btn.y / 100) * window.innerHeight * ratio);
+                    const screenW = Math.max(window.screen.width, window.screen.height);
+                    const screenH = Math.min(window.screen.width, window.screen.height);
+                    const injectX = Math.round((btn.x / 100) * screenW * ratio);
+                    const injectY = Math.round((btn.y / 100) * screenH * ratio);
                     if (window.AndroidOverlay) window.AndroidOverlay.onCommand(`up ${injectX} ${injectY}`);
                   }
                 }}
@@ -627,24 +631,30 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
                     setIsDragging(true);
                   } else {
                     const ratio = window.devicePixelRatio || 1;
-                    const injectX = Math.round((btn.x / 100) * window.innerWidth * ratio);
-                    const injectY = Math.round((btn.y / 100) * window.innerHeight * ratio);
+                    const screenW = Math.max(window.screen.width, window.screen.height);
+                    const screenH = Math.min(window.screen.width, window.screen.height);
+                    const injectX = Math.round((btn.x / 100) * screenW * ratio);
+                    const injectY = Math.round((btn.y / 100) * screenH * ratio);
                     if (window.AndroidOverlay) window.AndroidOverlay.onCommand(`down ${injectX} ${injectY}`);
                   }
                 }}
                 onTouchMove={(e) => {
                   if (isNativeOverlay && !showPalette) {
                     const ratio = window.devicePixelRatio || 1;
-                    const injectX = Math.round((btn.x / 100) * window.innerWidth * ratio);
-                    const injectY = Math.round((btn.y / 100) * window.innerHeight * ratio);
+                    const screenW = Math.max(window.screen.width, window.screen.height);
+                    const screenH = Math.min(window.screen.width, window.screen.height);
+                    const injectX = Math.round((btn.x / 100) * screenW * ratio);
+                    const injectY = Math.round((btn.y / 100) * screenH * ratio);
                     if (window.AndroidOverlay) window.AndroidOverlay.onCommand(`move ${injectX} ${injectY}`);
                   }
                 }}
                 onTouchEnd={(e) => {
                   if (isNativeOverlay && !showPalette) {
                     const ratio = window.devicePixelRatio || 1;
-                    const injectX = Math.round((btn.x / 100) * window.innerWidth * ratio);
-                    const injectY = Math.round((btn.y / 100) * window.innerHeight * ratio);
+                    const screenW = Math.max(window.screen.width, window.screen.height);
+                    const screenH = Math.min(window.screen.width, window.screen.height);
+                    const injectX = Math.round((btn.x / 100) * screenW * ratio);
+                    const injectY = Math.round((btn.y / 100) * screenH * ratio);
                     if (window.AndroidOverlay) window.AndroidOverlay.onCommand(`up ${injectX} ${injectY}`);
                   }
                 }}

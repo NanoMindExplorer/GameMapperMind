@@ -32,20 +32,11 @@ export default function App() {
   const { checkShizukuStatus, executeShizukuCommand, injectInput, stopDaemon } = useShizuku();
   const { startOverlay, stopOverlay } = useInputInjector();
   const [shizukuState, setShizukuState] = React.useState<ShizukuState>({
-    status: 'CONNECTED_SHIZUKU',
-    daemonRunning: true,
-    daemonVersion: 'v2.8.4-Nexion',
+    status: 'DISCONNECTED',
+    daemonRunning: false,
+    daemonVersion: '',
     logLines: [
-      "[INFO] TouchDaemon v2.8.4-Nexion started of process 9815 (shelld)",
-      "[INFO] Hooked into backend socket namespace: @gampad_mapper_ipc",
-      "[INFO] Initializing uinput driver injection device...",
-      "[SUCCESS] Allocated /dev/uinput: Touch virtual device descriptor created (10 touch slots)",
-      "[INFO] Native raw reading listening on /dev/input/event1 (Vortex XP107 DualMode Gamepad)",
-      "[INFO] Native raw reading listening on /dev/input/event5 (Vortex Gyroscopic Motion Sensor Unit)",
-      "[INFO] Shizuku user process bound securely via AIDL ITouchDaemonControl",
-      "[SUCCESS] Client listening loop operational at sub-8ms frequency",
-      "[GYRO] Madgwick Sensor Fusion active. 250Hz sample acquisition running...",
-      "[INFO] Default profile for Genshin Impact loaded successfully"
+      "[INFO] Application started."
     ]
   });
 
@@ -271,7 +262,9 @@ export default function App() {
 
       if (shizukuState.status === 'CONNECTED_SHIZUKU' && typeof window !== 'undefined' && 'Capacitor' in window) {
          if (isPressed) {
-           injectInput(`input tap ${x} ${y}`);
+           injectInput(`down ${x} ${y}`);
+         } else {
+           injectInput(`up ${x} ${y}`);
          }
       } else {
          fetch("/api/daemon/inject", {
@@ -305,7 +298,7 @@ export default function App() {
         if (activeStickPointer.current.l_id === 'L_STICK') {
           activeStickPointer.current.l_id = null;
           if (shizukuState.status === 'CONNECTED_SHIZUKU' && typeof window !== 'undefined' && 'Capacitor' in window) {
-            injectInput(`input keyevent KEYCODE_UNKNOWN`); 
+            injectInput(`up ${activeStickPointer.current.l_lastX} ${activeStickPointer.current.l_lastY}`); 
           } else {
             fetch("/api/daemon/inject", {
               method: "POST", headers: { "Content-Type": "application/json" },
@@ -329,13 +322,13 @@ export default function App() {
              }).catch(() => {});
            } else if (typeof window !== 'undefined' && 'Capacitor' in window) {
              // Analog stick initial touch
-             injectInput(`input tap ${baseX} ${baseY}`);
+             injectInput(`down ${baseX} ${baseY}`);
            }
         }
 
         if (!isSameAsLast) {
           if (shizukuState.status === 'CONNECTED_SHIZUKU' && typeof window !== 'undefined' && 'Capacitor' in window) {
-             injectInput(`input swipe ${activeStickPointer.current.l_lastX} ${activeStickPointer.current.l_lastY} ${targetX} ${targetY} 10`);
+             injectInput(`move ${targetX} ${targetY}`);
           } else {
              fetch("/api/daemon/inject", {
                method: "POST", headers: { "Content-Type": "application/json" },
@@ -360,7 +353,7 @@ export default function App() {
         if (activeStickPointer.current.r_id === 'R_STICK') {
           activeStickPointer.current.r_id = null;
           if (shizukuState.status === 'CONNECTED_SHIZUKU' && typeof window !== 'undefined' && 'Capacitor' in window) {
-            injectInput(`input keyevent KEYCODE_UNKNOWN`); 
+            injectInput(`up ${activeStickPointer.current.r_lastX} ${activeStickPointer.current.r_lastY}`); 
           } else {
             fetch("/api/daemon/inject", {
               method: "POST", headers: { "Content-Type": "application/json" },
@@ -384,13 +377,13 @@ export default function App() {
              }).catch(() => {});
            } else if (typeof window !== 'undefined' && 'Capacitor' in window) {
              // Analog stick initial touch
-             injectInput(`input tap ${baseX} ${baseY}`);
+             injectInput(`down ${baseX} ${baseY}`);
            }
         }
 
         if (!isSameAsLast) {
           if (shizukuState.status === 'CONNECTED_SHIZUKU' && typeof window !== 'undefined' && 'Capacitor' in window) {
-             injectInput(`input swipe ${activeStickPointer.current.r_lastX} ${activeStickPointer.current.r_lastY} ${targetX} ${targetY} 10`);
+             injectInput(`move ${targetX} ${targetY}`);
           } else {
              fetch("/api/daemon/inject", {
                method: "POST", headers: { "Content-Type": "application/json" },

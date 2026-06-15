@@ -123,7 +123,9 @@ public class ShizukuPlugin extends Plugin {
         }
 
         try {
-            if (command.startsWith("input tap ")) {
+            if (command.startsWith("down ") || command.startsWith("up ") || command.startsWith("move ")) {
+                processOutputStream.writeBytes(command + "\n");
+            } else if (command.startsWith("input tap ")) {
                 String[] parts = command.split(" ");
                 if (parts.length >= 4) {
                     String x = parts[2];

@@ -26,9 +26,19 @@ import androidx.webkit.WebViewAssetLoader;
 
 import java.io.DataOutputStream;
 
+import android.widget.ImageView;
+import android.graphics.Color;
+import android.view.MotionEvent;
+import android.view.View;
+import android.widget.FrameLayout;
+
 public class FloatingOverlayService extends Service {
     private WindowManager windowManager;
     private WebView webView;
+    private ImageView floatingButton;
+    private WindowManager.LayoutParams webViewParams;
+    private WindowManager.LayoutParams floatButtonParams;
+    private boolean isEditMode = false;
     private static final String CHANNEL_ID = "OverlayServiceChannel";
     private String currentConfigJson = "{}";
     
@@ -188,7 +198,7 @@ public class FloatingOverlayService extends Service {
                 // Add JavaScript Interface
                 webView.addJavascriptInterface(new WebAppInterface(), "AndroidOverlay");
                 
-                final WindowManager.LayoutParams params = new WindowManager.LayoutParams(
+                webViewParams = new WindowManager.LayoutParams(
                         WindowManager.LayoutParams.MATCH_PARENT,
                         WindowManager.LayoutParams.MATCH_PARENT,
                         Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ? 
@@ -196,11 +206,78 @@ public class FloatingOverlayService extends Service {
                         WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | 
                         WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED |
                         WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL | 
-                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN | 
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE, // Start in play mode (not touchable)
                         PixelFormat.TRANSLUCENT);
-                params.gravity = Gravity.FILL;
+                webViewParams.gravity = Gravity.FILL;
                 
-                windowManager.addView(webView, params);
+                windowManager.addView(webView, webViewParams);
+                
+                // Create Floating Button for Toggling Mode
+                floatingButton = new ImageView(FloatingOverlayService.this);
+                // Try to load our icon.png if possible, or use default android icon
+                floatingButton.setImageResource(android.R.drawable.ic_menu_edit);
+                floatingButton.setBackgroundColor(Color.parseColor("#80000000"));
+                floatingButton.setPadding(20, 20, 20, 20);
+                
+                floatButtonParams = new WindowManager.LayoutParams(
+                        WindowManager.LayoutParams.WRAP_CONTENT,
+                        WindowManager.LayoutParams.WRAP_CONTENT,
+                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ? 
+                            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : WindowManager.LayoutParams.TYPE_PHONE,
+                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                        PixelFormat.TRANSLUCENT);
+                
+                floatButtonParams.gravity = Gravity.TOP | Gravity.LEFT;
+                floatButtonParams.x = 100;
+                floatButtonParams.y = 100;
+                
+                floatingButton.setOnTouchListener(new View.OnTouchListener() {
+                    private int initialX;
+                    private int initialY;
+                    private float initialTouchX;
+                    private float initialTouchY;
+                    private boolean isMoved = false;
+
+                    @Override
+                    public boolean onTouch(View v, MotionEvent event) {
+                        switch (event.getAction()) {
+                            case MotionEvent.ACTION_DOWN:
+                                initialX = floatButtonParams.x;
+                                initialY = floatButtonParams.y;
+                                initialTouchX = event.getRawX();
+                                initialTouchY = event.getRawY();
+                                isMoved = false;
+                                return true;
+                            case MotionEvent.ACTION_MOVE:
+                                int dx = (int) (event.getRawX() - initialTouchX);
+                                int dy = (int) (event.getRawY() - initialTouchY);
+                                if (Math.abs(dx) > 10 || Math.abs(dy) > 10) isMoved = true;
+                                floatButtonParams.x = initialX + dx;
+                                floatButtonParams.y = initialY + dy;
+                                windowManager.updateViewLayout(floatingButton, floatButtonParams);
+                                return true;
+                            case MotionEvent.ACTION_UP:
+                                if (!isMoved) {
+                                    isEditMode = !isEditMode;
+                                    if (isEditMode) {
+                                        webViewParams.flags &= ~WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+                                        floatingButton.setImageResource(android.R.drawable.ic_menu_close_clear_cancel);
+                                        webView.evaluateJavascript("if(window.togglePalette) window.togglePalette(true);", null);
+                                    } else {
+                                        webViewParams.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+                                        floatingButton.setImageResource(android.R.drawable.ic_menu_edit);
+                                        webView.evaluateJavascript("if(window.togglePalette) window.togglePalette(false);", null);
+                                    }
+                                    windowManager.updateViewLayout(webView, webViewParams);
+                                }
+                                return true;
+                        }
+                        return false;
+                    }
+                });
+                
+                windowManager.addView(floatingButton, floatButtonParams);
                 
                 // Load URL (WebViewAssetLoader uses https://appassets.androidplatform.net/)
                 Log.d("GameMapper", "Loading index.html into Overlay WebView");
@@ -242,6 +319,10 @@ public class FloatingOverlayService extends Service {
             windowManager.removeView(webView);
             webView.destroy();
             webView = null;
+        }
+        if (floatingButton != null) {
+            windowManager.removeView(floatingButton);
+            floatingButton = null;
         }
         if (shizukuOut != null) {
             try {

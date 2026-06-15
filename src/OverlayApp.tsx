@@ -15,8 +15,10 @@ declare global {
     injectConfig: (configJson: string) => void;
     injectActiveKeys: (keysJson: string) => void;
     injectActiveAxes: (axesJson: string) => void;
+    togglePalette?: (isOpen: boolean) => void;
   }
 }
+
 
 export default function OverlayApp() {
   const [profile, setProfile] = useState<GamepadProfile | null>(null);
@@ -77,7 +79,7 @@ export default function OverlayApp() {
 
   // We are in play mode inside the service - background transparent
   return (
-    <div className="w-screen h-screen bg-transparent pointer-events-auto overflow-hidden">
+    <div className="w-screen h-screen bg-transparent pointer-events-none overflow-hidden">
       <OverlayWysiwyg 
         activeProfile={profile}
         onUpdateProfile={(updated) => setProfile(updated)}

@@ -6,6 +6,10 @@ import './index.css';
 
 const isOverlay = window.location.search.includes('overlay=true');
 
+if (isOverlay) {
+  document.body.style.backgroundColor = 'transparent';
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     {isOverlay ? <OverlayApp /> : <App />}

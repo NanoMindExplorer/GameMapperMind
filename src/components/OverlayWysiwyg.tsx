@@ -214,6 +214,19 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
     return 'https://images.unsplash.com/photo-1511512578047-dfb367046420?auto=format&fit=crop&q=80&w=1200';
   };
 
+  // Register togglePalette globally for Android
+  React.useEffect(() => {
+    window.togglePalette = (isOpen: boolean) => {
+      setShowPalette(isOpen);
+      if (!isOpen) {
+        setSelectedButtonId(null);
+      }
+    };
+    return () => {
+      delete window.togglePalette;
+    };
+  }, []);
+
   const forcePointerEvents = showPalette || isDragging || isDraggingNexion;
 
   const containerClass = isNativeOverlay 
@@ -339,36 +352,38 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
           )}
 
           {/* Floating Action Button to toggle Palette (Nexion Hub) */}
-          <div 
-            className={`absolute z-50 shadow-[0_0_15px_rgba(99,102,241,0.6)] cursor-pointer pointer-events-auto flex flex-col items-center select-none touch-none ${showPalette ? 'scale-110' : 'opacity-70 flex hover:opacity-100'}`}
-            style={{ left: `${nexionPos.x}%`, top: `${nexionPos.y}%`, transform: 'translate(-50%, -50%)', transition: isDraggingNexion ? 'none' : 'opacity 0.3s' }}
-            onMouseDown={(e) => {
-              e.stopPropagation();
-              nexionDragHasMoved.current = false;
-              setIsDraggingNexion(true);
-            }}
-            onTouchStart={(e) => {
-              e.stopPropagation();
-              nexionDragHasMoved.current = false;
-              setIsDraggingNexion(true);
-            }}
-            onClick={(e) => {
-              e.stopPropagation();
-              if (nexionDragHasMoved.current) {
+          {!isNativeOverlay && (
+            <div 
+              className={`absolute z-50 shadow-[0_0_15px_rgba(99,102,241,0.6)] cursor-pointer pointer-events-auto flex flex-col items-center select-none touch-none ${showPalette ? 'scale-110' : 'opacity-70 flex hover:opacity-100'}`}
+              style={{ left: `${nexionPos.x}%`, top: `${nexionPos.y}%`, transform: 'translate(-50%, -50%)', transition: isDraggingNexion ? 'none' : 'opacity 0.3s' }}
+              onMouseDown={(e) => {
+                e.stopPropagation();
                 nexionDragHasMoved.current = false;
-                return;
-              }
-              if (showPalette) {
-                setSelectedButtonId(null);
-              }
-              setShowPalette(!showPalette);
-            }}
-          >
-             <div className={`w-12 h-12 ${showPalette ? 'bg-indigo-600' : 'bg-slate-900/80'} rounded-full border-2 ${showPalette ? 'border-indigo-300' : 'border-indigo-500'} flex items-center justify-center backdrop-blur shadow-xl overflow-hidden hover:bg-indigo-500 transition-colors`}>
-               <img src={AppIcon} alt="Nexion" className={`w-7 h-7 ${showPalette ? 'opacity-100' : 'opacity-80'}`} />
-             </div>
-             {!showPalette && <div className="text-[9px] font-bold tracking-widest text-indigo-300 mt-2 drop-shadow-md text-center bg-slate-900/80 px-2.5 py-0.5 rounded-full border border-indigo-500/40">NEXION</div>}
-          </div>
+                setIsDraggingNexion(true);
+              }}
+              onTouchStart={(e) => {
+                e.stopPropagation();
+                nexionDragHasMoved.current = false;
+                setIsDraggingNexion(true);
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (nexionDragHasMoved.current) {
+                  nexionDragHasMoved.current = false;
+                  return;
+                }
+                if (showPalette) {
+                  setSelectedButtonId(null);
+                }
+                setShowPalette(!showPalette);
+              }}
+            >
+               <div className={`w-12 h-12 ${showPalette ? 'bg-indigo-600' : 'bg-slate-900/80'} rounded-full border-2 ${showPalette ? 'border-indigo-300' : 'border-indigo-500'} flex items-center justify-center backdrop-blur shadow-xl overflow-hidden hover:bg-indigo-500 transition-colors`}>
+                 <img src={AppIcon} alt="Nexion" className={`w-7 h-7 ${showPalette ? 'opacity-100' : 'opacity-80'}`} />
+               </div>
+               {!showPalette && <div className="text-[9px] font-bold tracking-widest text-indigo-300 mt-2 drop-shadow-md text-center bg-slate-900/80 px-2.5 py-0.5 rounded-full border border-indigo-500/40">NEXION</div>}
+            </div>
+          )}
 
           {/* Canvas Overlay Gamepad Palette */}
           {showPalette && (

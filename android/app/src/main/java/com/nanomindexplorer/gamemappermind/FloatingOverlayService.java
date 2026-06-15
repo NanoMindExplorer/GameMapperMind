@@ -35,10 +35,7 @@ import android.widget.FrameLayout;
 public class FloatingOverlayService extends Service {
     private WindowManager windowManager;
     private WebView webView;
-    private android.view.View floatingButton;
     private WindowManager.LayoutParams webViewParams;
-    private WindowManager.LayoutParams floatButtonParams;
-    private boolean isEditMode = false;
     private static final String CHANNEL_ID = "OverlayServiceChannel";
     private String currentConfigJson = "{}";
     
@@ -217,78 +214,9 @@ public class FloatingOverlayService extends Service {
                 windowManager.addView(webView, webViewParams);
                 webView.requestFocus();
                 
-                // Create Floating Button for Toggling Mode
-                android.widget.TextView floatingButtonTxt = new android.widget.TextView(FloatingOverlayService.this);
-                floatingButtonTxt.setText("☰ NEX");
-                floatingButtonTxt.setTextColor(Color.WHITE);
-                floatingButtonTxt.setTextSize(16);
-                floatingButtonTxt.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-                floatingButtonTxt.setBackgroundColor(Color.parseColor("#80000000"));
-                floatingButtonTxt.setPadding(30, 30, 30, 30);
-                
-                floatingButton = floatingButtonTxt;
-                
-                floatButtonParams = new WindowManager.LayoutParams(
-                        WindowManager.LayoutParams.WRAP_CONTENT,
-                        WindowManager.LayoutParams.WRAP_CONTENT,
-                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ? 
-                            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : WindowManager.LayoutParams.TYPE_PHONE,
-                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-                        PixelFormat.TRANSLUCENT);
-                
-                floatButtonParams.gravity = Gravity.TOP | Gravity.LEFT;
-                floatButtonParams.x = 100;
-                floatButtonParams.y = 100;
-                
-                floatingButton.setOnTouchListener(new View.OnTouchListener() {
-                    private int initialX;
-                    private int initialY;
-                    private float initialTouchX;
-                    private float initialTouchY;
-                    private boolean isMoved = false;
+                // floating disabled based on user preference to avoid screen freezing.
+                // Setup and load the overlay transparent view solely for macro injection
 
-                    @Override
-                    public boolean onTouch(View v, MotionEvent event) {
-                        switch (event.getAction()) {
-                            case MotionEvent.ACTION_DOWN:
-                                initialX = floatButtonParams.x;
-                                initialY = floatButtonParams.y;
-                                initialTouchX = event.getRawX();
-                                initialTouchY = event.getRawY();
-                                isMoved = false;
-                                return true;
-                            case MotionEvent.ACTION_MOVE:
-                                int dx = (int) (event.getRawX() - initialTouchX);
-                                int dy = (int) (event.getRawY() - initialTouchY);
-                                if (Math.abs(dx) > 10 || Math.abs(dy) > 10) isMoved = true;
-                                floatButtonParams.x = initialX + dx;
-                                floatButtonParams.y = initialY + dy;
-                                windowManager.updateViewLayout(floatingButton, floatButtonParams);
-                                return true;
-                            case MotionEvent.ACTION_UP:
-                                if (!isMoved) {
-                                    isEditMode = !isEditMode;
-                                    if (isEditMode) {
-                                        webViewParams.flags &= ~WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
-                                        webViewParams.flags &= ~WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
-                                        ((android.widget.TextView)floatingButton).setTextColor(Color.GREEN);
-                                        webView.evaluateJavascript("if(window.togglePalette) window.togglePalette(true);", null);
-                                    } else {
-                                        webViewParams.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
-                                        webViewParams.flags |= WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
-                                        ((android.widget.TextView)floatingButton).setTextColor(Color.WHITE);
-                                        webView.evaluateJavascript("if(window.togglePalette) window.togglePalette(false);", null);
-                                    }
-                                    windowManager.updateViewLayout(webView, webViewParams);
-                                }
-                                return true;
-                        }
-                        return false;
-                    }
-                });
-                
-                windowManager.addView(floatingButton, floatButtonParams);
-                
                 // Load URL (WebViewAssetLoader uses https://appassets.androidplatform.net/)
                 Log.d("GameMapper", "Loading index.html into Overlay WebView");
                 webView.loadUrl("https://appassets.androidplatform.net/public/index.html?overlay=true");
@@ -329,10 +257,6 @@ public class FloatingOverlayService extends Service {
             windowManager.removeView(webView);
             webView.destroy();
             webView = null;
-        }
-        if (floatingButton != null) {
-            windowManager.removeView(floatingButton);
-            floatingButton = null;
         }
         if (shizukuOut != null) {
             try {

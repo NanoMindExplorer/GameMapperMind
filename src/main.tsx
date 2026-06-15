@@ -7,11 +7,12 @@ import './index.css';
 const isOverlay = window.location.search.includes('overlay=true');
 
 if (isOverlay) {
-  document.body.style.backgroundColor = 'transparent';
+  document.documentElement.classList.add('is-overlay');
 }
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
+
     {isOverlay ? <OverlayApp /> : <App />}
   </StrictMode>,
 );

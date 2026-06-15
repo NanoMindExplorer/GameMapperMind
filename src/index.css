@@ -143,4 +143,8 @@
   html {
     @apply font-sans;
   }
+  html.is-overlay, html.is-overlay body, html.is-overlay #root {
+    background: transparent !important;
+    background-color: transparent !important;
+  }
 }

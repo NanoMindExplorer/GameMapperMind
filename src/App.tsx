@@ -22,6 +22,7 @@ import {
   Terminal, Shield, Settings, Activity, Compass, Cpu, HelpCircle, 
   ChevronRight, Sparkles, BookOpen, Layers, Bot, ShieldAlert
 } from 'lucide-react';
+import AppIcon from '../icon.svg';
 
 import { useShizuku } from './hooks/useShizuku';
 import { useGamepad } from './hooks/useGamepad';
@@ -443,20 +444,8 @@ export default function App() {
               <div className="absolute inset-0 opacity-[0.06] bg-[radial-gradient(#ffffff_1px,transparent_1px)] [background-size:16px_16px] pointer-events-none" />
               
               {/* Real Game Controller + Crosshair Laser sight Vector */}
-              <svg className="w-8 h-8 text-indigo-400 group-hover:text-pink-400 group-hover:scale-110 group-hover:rotate-[15deg] transition-all duration-500 relative z-10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                {/* Controller Chassis Shield */}
-                <path d="M6 12c-2.5 0-4-1.5-4-3.5S3.5 5 6 5c1 0 2 0.5 3 1.5 1-1 2-1.5 3-1.5 2.5 0 4 1.5 4 3.5s-1.5 3.5-4 3.5" className="opacity-40" />
-                {/* Modern Controller Wing Silhouette */}
-                <path d="M2 10.5C2 7.5 4 5 7 5h10c3 0 5 2.5 5 5.5 0 3.5-2 6.5-4 6.5s-2.5-1.5-4-1.5-2 1.5-4 1.5-4-3-4-6.5Z" strokeLinecap="round" strokeLinejoin="round" />
-                {/* Joystick points with electric orbits */}
-                <circle cx="7.5" cy="11.5" r="1.5" fill="currentColor" className="animate-pulse" />
-                <circle cx="16.5" cy="11.5" r="1.5" fill="currentColor" className="animate-pulse delay-100" />
-                {/* Action buttons (X/Y/A/B) simulated clusters */}
-                <path d="M15.5 10h2M16.5 9v2" strokeWidth="1" />
-                <path d="M6.5 10h2M7.5 9v2" strokeWidth="1" />
-                {/* Epic central power diamond */}
-                <polygon points="12,9.5 13.5,11.5 12,13.5 10.5,11.5" fill="currentColor" className="opacity-90 animate-ping duration-1000" />
-              </svg>
+              <img src={AppIcon} alt="Gamepad Mind Logo" className="w-8 h-8 group-hover:scale-110 group-hover:rotate-[15deg] transition-all duration-500 relative z-10" />
+
               
               {/* Outer corner cyber brackets detailing */}
               <div className="absolute top-1 left-1 w-2 h-2 border-t-2 border-l-2 border-indigo-500/60 rounded-tl" />

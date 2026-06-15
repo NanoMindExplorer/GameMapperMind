@@ -213,6 +213,18 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
     return 'https://images.unsplash.com/photo-1511512578047-dfb367046420?auto=format&fit=crop&q=80&w=1200';
   };
 
+  const containerClass = isNativeOverlay 
+    ? "relative w-screen h-screen overflow-hidden group select-none touch-none pointer-events-none" 
+    : "relative w-full aspect-[16/9] bg-slate-950 rounded-lg overflow-hidden border border-slate-800 shadow-inner group select-none touch-none";
+
+  const containerStyle = isNativeOverlay 
+    ? {} 
+    : {
+        backgroundImage: `linear-gradient(rgba(0,0,0,${bgDimLevel / 100}), rgba(0,0,0,${bgDimLevel / 100})), url(${getBackgroundUrl()})`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center'
+      };
+
   return (
     <div className={isNativeOverlay ? "w-screen h-screen overflow-hidden" : "bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xl grid grid-cols-1 lg:grid-cols-12"}>
       

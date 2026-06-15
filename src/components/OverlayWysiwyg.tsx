@@ -177,7 +177,8 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
       height: type === 'button' ? 56 : type === 'analog_stick' ? 120 : type === 'swipe' ? 68 : 120,
       mappedKey,
       androidEventCode,
-      opacity: 0.6
+      opacity: 0.6,
+      swipeDirection
     };
     onUpdateProfile({
       ...activeProfile,
@@ -486,6 +487,19 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
                 <button onClick={() => handleAddSpecificButton('R-Stick', 'R_STICK', 0, 100, 'analog_stick')} className="h-10 px-3 rounded-lg bg-pink-900/60 hover:bg-pink-600 border border-pink-700 text-pink-200 font-medium text-[11px] shadow transition-colors flex items-center gap-1">
                   <Move className="w-3.5 h-3.5" /> R-Stick
                 </button>
+
+                <div className="w-px h-10 bg-slate-700/50 mx-1"></div>
+
+                <div className="flex flex-col gap-1">
+                  <div className="flex gap-1 justify-center">
+                    <button onClick={() => handleAddNewButton('swipe', 'UP')} className="h-5 px-2 rounded bg-indigo-900/60 hover:bg-indigo-600 border border-indigo-700 text-indigo-200 text-[9px] shadow transition-colors">Swipe ↑</button>
+                    <button onClick={() => handleAddNewButton('swipe', 'DOWN')} className="h-5 px-2 rounded bg-indigo-900/60 hover:bg-indigo-600 border border-indigo-700 text-indigo-200 text-[9px] shadow transition-colors">Swipe ↓</button>
+                  </div>
+                  <div className="flex gap-1 justify-center">
+                    <button onClick={() => handleAddNewButton('swipe', 'LEFT')} className="h-5 px-2 rounded bg-indigo-900/60 hover:bg-indigo-600 border border-indigo-700 text-indigo-200 text-[9px] shadow transition-colors">Swipe ←</button>
+                    <button onClick={() => handleAddNewButton('swipe', 'RIGHT')} className="h-5 px-2 rounded bg-indigo-900/60 hover:bg-indigo-600 border border-indigo-700 text-indigo-200 text-[9px] shadow transition-colors">Swipe →</button>
+                  </div>
+                </div>
               </div>
 
               <div className="flex flex-col gap-3 mt-4 pt-3 border-t border-slate-800/80">
@@ -617,6 +631,12 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
                          <option value="DPAD_DOWN">DPAD_DOWN</option>
                          <option value="DPAD_LEFT">DPAD_LEFT</option>
                          <option value="DPAD_RIGHT">DPAD_RIGHT</option>
+                         <optgroup label="Right Stick / Swipes">
+                           <option value="R_STICK_UP">R_STICK_UP (Swipe UP)</option>
+                           <option value="R_STICK_DOWN">R_STICK_DOWN (Swipe DOWN)</option>
+                           <option value="R_STICK_LEFT">R_STICK_LEFT (Swipe LEFT)</option>
+                           <option value="R_STICK_RIGHT">R_STICK_RIGHT (Swipe RIGHT)</option>
+                         </optgroup>
                       </select>
                     </div>
                   </div>

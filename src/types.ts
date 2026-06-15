@@ -18,6 +18,8 @@ export interface VirtualButton {
   macroId?: string;
   deadzone?: number;
   sensitivity?: number;
+  swipeDirection?: 'UP' | 'DOWN' | 'LEFT' | 'RIGHT';
+  swipeDuration?: number;
 }
 
 export interface GamepadProfile {

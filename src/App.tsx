@@ -272,6 +272,26 @@ export default function App() {
       const x = Math.round((mapping.x / 100) * screenW);
       const y = Math.round((mapping.y / 100) * screenH);
 
+      if (mapping.type === 'swipe') {
+        if (!isPressed) return; // Only trigger on press, ignore release
+
+        let targetX = x;
+        let targetY = y;
+        const distance = 250; // Fast swipe distance in pixels
+        
+        if (mapping.swipeDirection === 'UP') targetY = Math.max(0, y - distance);
+        else if (mapping.swipeDirection === 'DOWN') targetY = Math.min(screenH, y + distance);
+        else if (mapping.swipeDirection === 'LEFT') targetX = Math.max(0, x - distance);
+        else if (mapping.swipeDirection === 'RIGHT') targetX = Math.min(screenW, x + distance);
+
+        // Execute fast swipe sequence
+        handleInjectionCommand(`down ${x} ${y}`);
+        setTimeout(() => handleInjectionCommand(`move ${Math.round((x + targetX) / 2)} ${Math.round((y + targetY) / 2)}`), 30);
+        setTimeout(() => handleInjectionCommand(`move ${targetX} ${targetY}`), 60);
+        setTimeout(() => handleInjectionCommand(`up ${targetX} ${targetY}`), 90);
+        return;
+      }
+
       if (isPressed) {
         handleInjectionCommand(`down ${x} ${y}`);
       } else {

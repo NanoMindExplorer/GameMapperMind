@@ -8,7 +8,7 @@ import React from 'react';
 import { 
   Cpu, Zap, RefreshCw, Layers, ShieldCheck, CheckCircle2, XCircle, 
   Settings, Play, Terminal, HelpCircle, Laptop, Smartphone, AlertTriangle,
-  BookOpen, ChevronRight, ChevronDown, CheckSquare, Square, Sparkles, Check
+  BookOpen, ChevronRight, ChevronDown, CheckSquare, Square, Sparkles, Check, Battery
 } from 'lucide-react';
 import { ShizukuState } from '../types';
 import { useShizuku } from '../hooks/useShizuku';
@@ -152,10 +152,11 @@ const DESKTOP_STEPS = [
 ];
 
 export default function ShizukuPanel({ shizukuState, setShizukuState, onLogMessage }: ShizukuPanelProps) {
-  const { requestShizukuPermission: nativeRequestPerm, executeShizukuCommand, startDaemon, stopDaemon } = useShizuku();
+  const { requestShizukuPermission: nativeRequestPerm, executeShizukuCommand, startDaemon, stopDaemon, checkBattery, requestBatteryIgnore } = useShizuku();
   const [activeTab, setActiveTab] = React.useState<'shizuku' | 'desktop'>('shizuku');
   const [isLoading, setIsLoading] = React.useState(false);
   const [shizukuPermission, setShizukuPermission] = React.useState<'GRANTED' | 'DENIED' | 'PROMPT'>('PROMPT');
+  const [isBatteryIgnored, setIsBatteryIgnored] = React.useState(true);
   const [customLog, setCustomLog] = React.useState('');
 
   // Interactive guide states
@@ -164,6 +165,12 @@ export default function ShizukuPanel({ shizukuState, setShizukuState, onLogMessa
   
   const [shizukuChecklist, setShizukuChecklist] = React.useState<boolean[]>([false, false, false, false, false, false]);
   const [desktopChecklist, setDesktopChecklist] = React.useState<boolean[]>([false, false, false, false, false]);
+
+  React.useEffect(() => {
+    checkBattery().then(ignored => {
+      if (ignored !== undefined) setIsBatteryIgnored(ignored);
+    });
+  }, []);
 
   const triggerAction = async (action: 'start' | 'stop' | 'toggle_mode', mode?: 'shizuku' | 'desktop') => {
     setIsLoading(true);
@@ -329,6 +336,33 @@ export default function ShizukuPanel({ shizukuState, setShizukuState, onLogMessa
                   >
                     <ShieldCheck className="w-4 h-4" />
                     Authorize Shizuku AIDL Bindings
+                  </button>
+                )}
+              </div>
+
+              {/* Battery Optimization Exempted */}
+              <div className="p-4 bg-slate-950/60 rounded-lg border border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Battery Optimization</span>
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-mono ${
+                    isBatteryIgnored ? 'bg-emerald-950 text-emerald-400 border border-emerald-900' : 'bg-red-950 text-red-400 border border-red-900'
+                  }`}>
+                    {isBatteryIgnored ? 'EXEMPTED' : 'RESTRICTED'}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-300 leading-relaxed text-justify">
+                  Game Mapper relies on a background execution process to intercept key inputs and render touch overlays. If the Android system restricts battery usage, your mapping tool might be forcefully terminated by the OS.
+                </p>
+                {!isBatteryIgnored && (
+                  <button
+                    onClick={async () => {
+                      const result = await requestBatteryIgnore();
+                      if (result) onLogMessage('SYSTEM: Redirected to battery settings.');
+                    }}
+                    className="w-full flex items-center justify-center gap-2 py-2 bg-red-600 hover:bg-red-500 text-white font-medium text-xs rounded-lg shadow-lg active:scale-[0.98] transition-all"
+                  >
+                    <Battery className="w-4 h-4 z-10" />
+                    Ignore Battery Optimizations
                   </button>
                 )}
               </div>

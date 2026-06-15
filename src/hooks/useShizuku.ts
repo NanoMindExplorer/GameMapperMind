@@ -9,6 +9,8 @@ export interface ShizukuPluginInterface {
   startDaemon(): Promise<{ success: boolean }>;
   stopDaemon(): Promise<{ success: boolean }>;
   injectInput(options: { command: string }): Promise<{ success: boolean }>;
+  checkBatteryOptimization(): Promise<{ isIgnoring: boolean }>;
+  requestIgnoreBatteryOptimization(): Promise<{ success: boolean }>;
 }
 
 const ShizukuPlugin = registerPlugin<ShizukuPluginInterface>('Shizuku');
@@ -93,5 +95,29 @@ export function useShizuku() {
     return false;
   }, []);
 
-  return { checkShizukuStatus, requestShizukuPermission, executeShizukuCommand, startDaemon, stopDaemon, injectInput };
+  const checkBattery = async () => {
+    if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
+      try {
+        const result = await ShizukuPlugin.checkBatteryOptimization();
+        return result.isIgnoring;
+      } catch (err) {
+        console.error("Native check battery error", err);
+      }
+    }
+    return true; // Assume true on non-android
+  };
+
+  const requestBatteryIgnore = async () => {
+    if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
+      try {
+        const result = await ShizukuPlugin.requestIgnoreBatteryOptimization();
+        return result.success;
+      } catch (err) {
+        console.error("Native request battery drop error", err);
+      }
+    }
+    return false;
+  };
+
+  return { checkShizukuStatus, requestShizukuPermission, executeShizukuCommand, startDaemon, stopDaemon, injectInput, checkBattery, requestBatteryIgnore };
 }

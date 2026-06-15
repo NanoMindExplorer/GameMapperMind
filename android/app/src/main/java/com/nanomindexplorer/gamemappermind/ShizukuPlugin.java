@@ -241,5 +241,39 @@ public class ShizukuPlugin extends Plugin {
             call.reject("Error executing command", e);
         }
     }
+
+    @PluginMethod
+    public void checkBatteryOptimization(PluginCall call) {
+        boolean isIgnoring = false;
+        try {
+            android.os.PowerManager pm = (android.os.PowerManager) getContext().getSystemService(android.content.Context.POWER_SERVICE);
+            if (pm != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                isIgnoring = pm.isIgnoringBatteryOptimizations(getContext().getPackageName());
+            }
+        } catch (Exception e) {
+            Log.e("GameMapper", "checkBatteryOptimization error", e);
+        }
+        JSObject result = new JSObject();
+        result.put("isIgnoring", isIgnoring);
+        call.resolve(result);
+    }
+
+    @PluginMethod
+    public void requestIgnoreBatteryOptimization(PluginCall call) {
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                android.content.Intent intent = new android.content.Intent();
+                intent.setAction(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+                intent.setData(android.net.Uri.parse("package:" + getContext().getPackageName()));
+                intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                getContext().startActivity(intent);
+            }
+            JSObject result = new JSObject();
+            result.put("success", true);
+            call.resolve(result);
+        } catch (Exception e) {
+            call.reject("Failed to request battery optimization override", e);
+        }
+    }
 }
 

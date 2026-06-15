@@ -35,9 +35,14 @@ public class ShizukuPlugin extends Plugin {
                     method.setAccessible(true);
                     method.invoke(null, getContext());
                     
-                    // Small delay to allow binder to process
-                    Thread.sleep(200);
-                    isRunning = Shizuku.pingBinder();
+                    // Poll for binder
+                    for (int i = 0; i < 15; i++) {
+                        Thread.sleep(100);
+                        if (Shizuku.pingBinder()) {
+                            isRunning = true;
+                            break;
+                        }
+                    }
                 } catch (Throwable t) {
                     Log.e("GameMapper", "Manual bind failed", t);
                     errorMsg = "Manual bind failed: " + t.toString();
@@ -84,7 +89,11 @@ public class ShizukuPlugin extends Plugin {
                 java.lang.reflect.Method method = shizukuProviderClass.getDeclaredMethod("requestBinderForNonProviderProcess", android.content.Context.class);
                 method.setAccessible(true);
                 method.invoke(null, getContext());
-                Thread.sleep(200);
+                
+                for (int i = 0; i < 15; i++) {
+                    Thread.sleep(100);
+                    if (Shizuku.pingBinder()) break;
+                }
             }
 
             if (Shizuku.pingBinder()) {

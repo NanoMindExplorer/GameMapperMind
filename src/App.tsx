@@ -117,6 +117,9 @@ export default function App() {
     } catch(e) { console.warn('Failed to save macros', e); }
   };
 
+  const [activeKeys, setActiveKeys] = React.useState<string[]>([]);
+  const [activeAxes, setActiveAxes] = React.useState<{lx: number, ly: number, rx: number, ry: number}>({lx: 0, ly: 0, rx: 0, ry: 0});
+
   const saveSettingsToStorage = async (socket: string, polling: number) => {
     try {
       const { Preferences } = await import('@capacitor/preferences');
@@ -261,6 +264,12 @@ export default function App() {
   const activeProfile = profiles.find(p => p.id === activeProfileId) || profiles[0];
 
   const handleGamepadPress = React.useCallback(async (button: string, isPressed: boolean) => {
+    setActiveKeys(prev => {
+      if (isPressed && !prev.includes(button)) return [...prev, button];
+      if (!isPressed && prev.includes(button)) return prev.filter(k => k !== button);
+      return prev;
+    });
+
     const mapping = activeProfile.buttons.find(b => b.mappedKey === button);
     if (mapping) {
       // Calculate physical coordinates based on screen
@@ -287,6 +296,7 @@ export default function App() {
   }>({ l_id: null, l_lastX: 0, l_lastY: 0, r_id: null, r_lastX: 0, r_lastY: 0 });
 
   const handleGamepadAxis = React.useCallback(async (axes: { lx: number, ly: number, rx: number, ry: number }) => {
+    setActiveAxes(axes);
     const lStickMapping = activeProfile.buttons.find(b => b.mappedKey === 'L_STICK');
     const rStickMapping = activeProfile.buttons.find(b => b.mappedKey === 'R_STICK');
     
@@ -665,6 +675,8 @@ export default function App() {
               activeProfile={activeProfile}
               onUpdateProfile={handleUpdateProfile}
               onLogMessage={handleLogMessage}
+              activeKeys={activeKeys}
+              activeAxes={activeAxes}
             />
           )}
 

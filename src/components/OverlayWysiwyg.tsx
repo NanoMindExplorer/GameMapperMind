@@ -14,9 +14,11 @@ interface OverlayWysiwygProps {
   activeProfile: GamepadProfile;
   onUpdateProfile: (updated: GamepadProfile) => void;
   onLogMessage: (msg: string) => void;
+  activeKeys?: string[];
+  activeAxes?: {lx: number, ly: number, rx: number, ry: number};
 }
 
-export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMessage }: OverlayWysiwygProps) {
+export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMessage, activeKeys = [], activeAxes = {lx:0, ly:0, rx:0, ry:0} }: OverlayWysiwygProps) {
   const [showConfig, setShowConfig] = React.useState(true);
   const [selectedButtonId, setSelectedButtonId] = React.useState<string | null>(null);
   const [screenshotMode, setScreenshotMode] = React.useState<'genshin' | 'pubg' | 'codm' | 'efootball'>('genshin');
@@ -271,15 +273,13 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
 
         {/* Main absolute aspect ratio lock screen emulator */}
         <div 
-          onClick={(e) => {
-            if (showPalette) handleContainerClick();
-          }}
+          onClick={handleContainerClick}
           onMouseMove={handleDragMove}
           onMouseUp={handleDragEnd}
           onMouseLeave={handleDragEnd}
           // Added touch events for mobile compatibility
           onTouchMove={(e) => {
-            if (!isDragging || !selectedButtonId || !showPalette) return;
+            if (!isDragging || !selectedButtonId) return;
             const touch = e.touches[0];
             const container = e.currentTarget.getBoundingClientRect();
             const x = Math.max(0, Math.min(100, ((touch.clientX - container.left) / container.width) * 100));
@@ -417,68 +417,82 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
           {activeProfile.buttons.map((btn) => {
             const isSelected = btn.id === selectedButtonId;
             const isSwipe = btn.type === 'swipe' || (btn.androidEventCode >= 201 && btn.androidEventCode <= 204);
+            const isButtonActive = btn.mappedKey ? activeKeys.includes(btn.mappedKey) : false;
             
-            // Base colors mimicking the user's screenshot (minimalist blue/white rings)
-            let btnColor = 'border-indigo-400 bg-slate-950/40 text-white';
+            let btnColor = 'border-indigo-400 text-white';
             
-            if (btn.type === 'analog_stick') {
-              if (btn.mappedKey === 'R_STICK') {
-                btnColor = 'border-pink-400 bg-slate-950/40 text-white';
-              } else {
-                btnColor = 'border-indigo-400 bg-slate-950/40 text-white';
-              }
+            if (btn.type === 'analog_stick' && btn.mappedKey === 'R_STICK') {
+              btnColor = 'border-pink-400 text-white';
             } else if (btn.type === 'gyro_area') {
-              btnColor = 'border-pink-500 bg-pink-500/10 text-white';
+              btnColor = 'border-pink-500 text-white';
             } else if (isSwipe) {
-              btnColor = 'border-purple-400 bg-purple-500/10 text-white shadow-[0_0_12px_rgba(168,85,247,0.35)]';
+              btnColor = 'border-purple-400 text-white shadow-[0_0_12px_rgba(168,85,247,0.35)]';
             }
             
-            // When editing, make them a bit more prominent
-            if (showPalette && !isSelected) {
-              btnColor += ' opacity-80 backdrop-blur-sm';
-            } else if (!showPalette) {
-              // When not editing, remove background inside so it just looks like wireframe UI overlay
-              btnColor = btnColor.replace('bg-slate-950/40', 'bg-transparent backdrop-blur-[1px]').replace('bg-pink-500/10', 'bg-transparent').replace('bg-purple-500/10', 'bg-transparent');
+            if (showPalette) {
+               btnColor += isSwipe ? ' bg-purple-500/10' : btn.type.includes('gyro') ? ' bg-pink-500/10' : ' bg-slate-950/40 backdrop-blur-sm';
+               if (!isSelected) btnColor += ' opacity-80';
+            } else {
+               btnColor += ' bg-transparent';
+            }
+            
+            // Pressed state visual feedback
+            if (isButtonActive) {
+               btnColor = btnColor.replace('bg-transparent', 'bg-white/20').replace('bg-slate-950/40', 'bg-indigo-500/40').replace('border-', 'shadow-[0_0_15px_rgba(255,255,255,0.4)] border-');
             }
 
             return (
               <div
                 key={btn.id}
                 onMouseDown={(e) => {
-                  if (!showPalette) return;
                   handleDragStart(e, btn.id);
                 }}
                 onTouchStart={(e) => {
-                  if (!showPalette) return;
                   e.stopPropagation();
                   setSelectedButtonId(btn.id);
                   setIsDragging(true);
                 }}
                 onClick={(e) => { 
-                  if (!showPalette) return;
                   e.stopPropagation(); 
                   setSelectedButtonId(btn.id); 
                 }}
-                className={`absolute ${btn.width > 80 ? 'rounded-[40%]' : 'rounded-[50%]'} border-[2.5px] flex flex-col justify-center items-center font-sans tracking-tight ${btnColor} transition-all antialiased select-none group/node ${showPalette ? 'cursor-pointer pointer-events-auto' : 'pointer-events-none'}`}
+                className={`absolute ${btn.width > 80 ? 'rounded-[40%]' : 'rounded-[50%]'} border-[2.5px] flex flex-col justify-center items-center font-sans tracking-tight ${btnColor} transition-all antialiased select-none group/node outline-none cursor-pointer pointer-events-auto`}
                 style={{
                   left: `${btn.x}%`,
                   top: `${btn.y}%`,
                   width: `${btn.width}px`,
                   height: `${btn.height}px`,
-                  transform: 'translate(-50%, -50%)',
+                  transform: isButtonActive && !showPalette ? 'translate(-50%, -50%) scale(0.92)' : 'translate(-50%, -50%) scale(1)',
                   opacity: hideAllNodes ? 0 : btn.opacity * (globalNodeOpacity / 100),
-                  boxShadow: isSelected && showPalette ? '0 0 16px rgba(139, 92, 246, 0.8), inset 0 0 8px rgba(139, 92, 246, 0.4)' : 'none',
+                  boxShadow: isSelected && showPalette ? '0 0 16px rgba(139, 92, 246, 0.8), inset 0 0 8px rgba(139, 92, 246, 0.4)' : undefined,
                   borderColor: isSelected && showPalette ? '#8B5CF6' : undefined
                 }}
               >
                 {/* Node details */}
-                <span className="text-[10px] font-bold text-white tracking-wide truncate max-w-full px-1 z-10 text-center">
+                <span className={`text-[10px] font-bold text-white tracking-wide truncate max-w-full px-1 z-10 text-center ${isButtonActive && !showPalette ? 'drop-shadow-[0_0_8px_rgba(255,255,255,1)] text-indigo-100 scale-110 transition-transform' : ''}`}>
                   {btn.label}
                 </span>
                 
-                {btn.type === 'analog_stick' && (
-                  <div className="absolute w-1/3 h-1/3 bg-blue-400/40 rounded-full border border-blue-400"></div>
-                )}
+                {btn.type === 'analog_stick' && (() => {
+                  let stickX = 0;
+                  let stickY = 0;
+                  if (btn.mappedKey === 'L_STICK') {
+                    stickX = activeAxes.lx * (btn.width / 3.5);
+                    stickY = activeAxes.ly * (btn.height / 3.5);
+                  } else if (btn.mappedKey === 'R_STICK') {
+                    stickX = activeAxes.rx * (btn.width / 3.5);
+                    stickY = activeAxes.ry * (btn.height / 3.5);
+                  }
+                  return (
+                    <div 
+                      className="absolute w-1/3 h-1/3 bg-blue-400/50 rounded-full border border-blue-300 drop-shadow-md"
+                      style={{
+                        transform: `translate(${stickX}px, ${stickY}px)`,
+                        transition: 'transform 0.05s linear'
+                      }}
+                    ></div>
+                  );
+                })()}
                 {btn.type === 'gyro_area' && (
                   <div className="border border-dashed border-pink-400/40 absolute inset-2 rounded-full animate-spin" style={{ animationDuration: '20s' }}></div>
                 )}

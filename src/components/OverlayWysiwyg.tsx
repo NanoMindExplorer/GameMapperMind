@@ -462,6 +462,85 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
                   </div>
                 </div>
               </div>
+
+              {/* Selected Node Config / Delete Action */}
+              {selectedButton && (
+                <div className="mt-4 pt-3 border-t border-slate-800/80">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-[10px] font-mono font-bold text-indigo-400">NODE ID: {selectedButton.id}</span>
+                    <button
+                      onClick={() => handleRemoveButton(selectedButton.id)}
+                      className="px-2 py-1 bg-rose-950/60 text-rose-400 hover:bg-rose-900/80 hover:text-white rounded text-[10px] font-bold flex items-center gap-1.5 transition-colors border border-rose-900/50 pointer-events-auto"
+                      title="Remove virtual node mapping"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" /> Hapus Tombol
+                    </button>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-3 mb-2 flex-wrap">
+                    <div>
+                      <label className="block text-[10px] font-semibold text-slate-400 mb-1 font-sans uppercase">Display Label</label>
+                      <input
+                        type="text"
+                        className="w-full bg-slate-900 text-slate-100 text-[11px] px-2 py-1.5 rounded focus:outline-none focus:border-indigo-500 font-sans border border-slate-700 pointer-events-auto"
+                        value={selectedButton.label}
+                        onChange={(e) => {
+                          const updated = activeProfile.buttons.map(b => b.id === selectedButton.id ? { ...b, label: e.target.value } : b);
+                          onUpdateProfile({ ...activeProfile, buttons: updated });
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-slate-400 mb-1 font-sans uppercase">Tactile Target Key</label>
+                      <select
+                        className="w-full bg-slate-900 text-slate-100 text-[11px] px-1.5 py-1.5 rounded focus:outline-none focus:border-indigo-500 font-mono border border-slate-700 cursor-pointer pointer-events-auto"
+                        value={selectedButton.mappedKey}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          let newType = selectedButton.type;
+                          let newCode = selectedButton.androidEventCode;
+                          let newLabel = selectedButton.label;
+                          
+                          if (val === 'R_STICK_UP' || val === 'SWIPE_UP') {
+                            newType = 'swipe'; newCode = 201; newLabel = 'Swipe Atas (UP)';
+                          } else if (val === 'R_STICK_DOWN' || val === 'SWIPE_DOWN') {
+                            newType = 'swipe'; newCode = 202; newLabel = 'Swipe Bawah (DOWN)';
+                          } else if (val === 'R_STICK_LEFT' || val === 'SWIPE_LEFT') {
+                            newType = 'swipe'; newCode = 203; newLabel = 'Swipe Kiri (LEFT)';
+                          } else if (val === 'R_STICK_RIGHT' || val === 'SWIPE_RIGHT') {
+                            newType = 'swipe'; newCode = 204; newLabel = 'Swipe Kanan (RIGHT)';
+                          } else if (val === 'BUTTON_A') newCode = 96;
+                          else if (val === 'BUTTON_B') newCode = 97;
+                          else if (val === 'BUTTON_X') newCode = 99;
+                          else if (val === 'BUTTON_Y') newCode = 100;
+                          else if (val === 'BUTTON_L1') newCode = 101;
+                          else if (val === 'BUTTON_R1') newCode = 102;
+                          else if (val === 'BUTTON_L2') newCode = 104;
+                          else if (val === 'BUTTON_R2') newCode = 105;
+                          
+                          const updated = activeProfile.buttons.map(b => b.id === selectedButton.id ? { ...b, mappedKey: val, type: newType, androidEventCode: newCode, label: newLabel } : b);
+                          onUpdateProfile({ ...activeProfile, buttons: updated });
+                        }}
+                      >
+                         <option value="BUTTON_A">BUTTON_A</option>
+                         <option value="BUTTON_B">BUTTON_B</option>
+                         <option value="BUTTON_X">BUTTON_X</option>
+                         <option value="BUTTON_Y">BUTTON_Y</option>
+                         <option value="BUTTON_L1">BUTTON_L1</option>
+                         <option value="BUTTON_R1">BUTTON_R1</option>
+                         <option value="BUTTON_L2">BUTTON_L2</option>
+                         <option value="BUTTON_R2">BUTTON_R2</option>
+                         <option value="BUTTON_L3">BUTTON_L3</option>
+                         <option value="BUTTON_R3">BUTTON_R3</option>
+                         <option value="DPAD_UP">DPAD_UP</option>
+                         <option value="DPAD_DOWN">DPAD_DOWN</option>
+                         <option value="DPAD_LEFT">DPAD_LEFT</option>
+                         <option value="DPAD_RIGHT">DPAD_RIGHT</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -562,6 +641,24 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
                 <span className={`text-[10px] font-bold text-white tracking-wide truncate max-w-full px-1 z-10 text-center ${isButtonActive && !showPalette ? 'drop-shadow-[0_0_8px_rgba(255,255,255,1)] text-indigo-100 scale-110 transition-transform' : ''}`}>
                   {btn.label}
                 </span>
+
+                {/* Visual indicator when palette is open and node is selected */}
+                {isSelected && showPalette && (
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleRemoveButton(btn.id);
+                    }}
+                    onTouchEnd={(e) => {
+                      e.stopPropagation();
+                      handleRemoveButton(btn.id);
+                    }}
+                    className="absolute -top-3 -right-3 w-6 h-6 bg-rose-600 rounded-full flex items-center justify-center border-2 border-slate-900 shadow-xl z-50 hover:bg-rose-500 scale-125 transition-transform"
+                    title="Remove button"
+                  >
+                    <X className="w-4 h-4 text-white" />
+                  </button>
+                )}
                 
                 {btn.type === 'analog_stick' && (() => {
                   let stickX = 0;

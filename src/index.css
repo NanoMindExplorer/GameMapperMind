@@ -139,12 +139,8 @@
   }
   body {
     @apply bg-background text-foreground;
-    overflow: hidden;
-    overscroll-behavior: none;
-    touch-action: none;
   }
   html {
     @apply font-sans;
-    overflow: hidden;
   }
 }

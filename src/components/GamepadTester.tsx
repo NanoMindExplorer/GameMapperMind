@@ -31,6 +31,7 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
   const lastStateRef = React.useRef({
     connectedId: null as string | null,
     buttonsStr: '',
+    rawBtnStr: '',
     triggersStr: '',
     lx: 0,
     ly: 0,

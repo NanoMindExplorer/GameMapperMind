@@ -33,6 +33,14 @@ export default function MacroEngineComponent({ macros, onUpdateMacros, onLogMess
 
   const playbackIntervalRef = React.useRef<NodeJS.Timeout | null>(null);
 
+  const macrosRef = React.useRef(macros);
+  const onUpdateMacrosRef = React.useRef(onUpdateMacros);
+
+  React.useEffect(() => {
+    macrosRef.current = macros;
+    onUpdateMacrosRef.current = onUpdateMacros;
+  }, [macros, onUpdateMacros]);
+
   React.useEffect(() => {
     const handleKill = () => {
       if (playbackIntervalRef.current) {
@@ -41,7 +49,7 @@ export default function MacroEngineComponent({ macros, onUpdateMacros, onLogMess
       }
       setIsPlaying(false);
       setIsRecording(false);
-      onUpdateMacros(macros.map(m => ({ ...m, actions: [] })));
+      onUpdateMacrosRef.current(macrosRef.current.map(m => ({ ...m, actions: [] })));
       onLogMessage(`[KILL-SWITCH] Macro playback terminated and macro buffers cleared.`);
     };
 

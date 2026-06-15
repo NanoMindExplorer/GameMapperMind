@@ -31,15 +31,7 @@
         <!-- Shizuku v3 Support -->
         <meta-data android:name="moe.shizuku.client.V3_SUPPORT" android:value="true" />
 
-        <!-- Shizuku Provider (Auto-discovery) -->
-        <provider
-            android:name="rikka.shizuku.ShizukuProvider"
-            android:authorities="${applicationId}.shizuku"
-            android:multiprocess="false"
-            android:enabled="true"
-            android:exported="true"
-            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL"
-        />
+
 
         <service
             android:name=".FloatingOverlayService"

@@ -35,7 +35,7 @@ import android.widget.FrameLayout;
 public class FloatingOverlayService extends Service {
     private WindowManager windowManager;
     private WebView webView;
-    private ImageView floatingButton;
+    private android.view.View floatingButton;
     private WindowManager.LayoutParams webViewParams;
     private WindowManager.LayoutParams floatButtonParams;
     private boolean isEditMode = false;
@@ -183,6 +183,9 @@ public class FloatingOverlayService extends Service {
                 settings.setDomStorageEnabled(true);
                 settings.setMediaPlaybackRequiresUserGesture(false);
                 
+                webView.setFocusable(true);
+                webView.setFocusableInTouchMode(true);
+                
                 // WebView Asset Loader (intercept appassets.androidplatform.net to /public/ and /assets/)
                 final WebViewAssetLoader assetLoader = new WebViewAssetLoader.Builder()
                         .addPathHandler("/", new WebViewAssetLoader.AssetsPathHandler(FloatingOverlayService.this))
@@ -203,7 +206,7 @@ public class FloatingOverlayService extends Service {
                         WindowManager.LayoutParams.MATCH_PARENT,
                         Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ? 
                             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : WindowManager.LayoutParams.TYPE_PHONE,
-                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | 
+                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
                         WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED |
                         WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL | 
                         WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN | 
@@ -212,17 +215,22 @@ public class FloatingOverlayService extends Service {
                 webViewParams.gravity = Gravity.FILL;
                 
                 windowManager.addView(webView, webViewParams);
+                webView.requestFocus();
                 
                 // Create Floating Button for Toggling Mode
-                floatingButton = new ImageView(FloatingOverlayService.this);
-                // Try to load our icon.png if possible, or use default android icon
-                floatingButton.setImageResource(R.mipmap.ic_launcher_round);
-                floatingButton.setBackgroundColor(Color.parseColor("#40000000"));
-                floatingButton.setPadding(10, 10, 10, 10);
+                android.widget.TextView floatingButtonTxt = new android.widget.TextView(FloatingOverlayService.this);
+                floatingButtonTxt.setText("☰ NEX");
+                floatingButtonTxt.setTextColor(Color.WHITE);
+                floatingButtonTxt.setTextSize(16);
+                floatingButtonTxt.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+                floatingButtonTxt.setBackgroundColor(Color.parseColor("#80000000"));
+                floatingButtonTxt.setPadding(30, 30, 30, 30);
+                
+                floatingButton = floatingButtonTxt;
                 
                 floatButtonParams = new WindowManager.LayoutParams(
-                        WindowManager.LayoutParams.WRAP_CONTENT,
-                        WindowManager.LayoutParams.WRAP_CONTENT,
+                        150,
+                        150,
                         Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ? 
                             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : WindowManager.LayoutParams.TYPE_PHONE,
                         WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
@@ -262,11 +270,13 @@ public class FloatingOverlayService extends Service {
                                     isEditMode = !isEditMode;
                                     if (isEditMode) {
                                         webViewParams.flags &= ~WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
-                                        floatingButton.setColorFilter(Color.GREEN);
+                                        webViewParams.flags &= ~WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
+                                        ((android.widget.TextView)floatingButton).setTextColor(Color.GREEN);
                                         webView.evaluateJavascript("if(window.togglePalette) window.togglePalette(true);", null);
                                     } else {
                                         webViewParams.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
-                                        floatingButton.clearColorFilter();
+                                        webViewParams.flags |= WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
+                                        ((android.widget.TextView)floatingButton).setTextColor(Color.WHITE);
                                         webView.evaluateJavascript("if(window.togglePalette) window.togglePalette(false);", null);
                                     }
                                     windowManager.updateViewLayout(webView, webViewParams);

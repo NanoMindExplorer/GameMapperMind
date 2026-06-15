@@ -83,10 +83,38 @@ jobs:
             rsvg-convert -w 192 -h 192 icon.svg -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png
 
             # Adaptive Icons
+            mkdir -p android/app/src/main/res/mipmap-anydpi-v26
+            
             rm -f android/app/src/main/res/drawable/ic_launcher_background.xml
             rm -f android/app/src/main/res/drawable-v24/ic_launcher_foreground.xml
-            rsvg-convert -w 512 -h 512 icon.svg -o android/app/src/main/res/drawable/ic_launcher_background.png
-            rsvg-convert -w 512 -h 512 icon.svg -o android/app/src/main/res/drawable-v24/ic_launcher_foreground.png
+            rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_background.xml
+            rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_foreground.xml
+            rm -f android/app/src/main/res/mipmap-mdpi/ic_launcher_foreground.png
+            rm -f android/app/src/main/res/mipmap-mdpi/ic_launcher_background.png
+            rm -f android/app/src/main/res/mipmap-hdpi/ic_launcher_foreground.png
+            rm -f android/app/src/main/res/mipmap-hdpi/ic_launcher_background.png
+            rm -f android/app/src/main/res/mipmap-xhdpi/ic_launcher_foreground.png
+            rm -f android/app/src/main/res/mipmap-xhdpi/ic_launcher_background.png
+            rm -f android/app/src/main/res/mipmap-xxhdpi/ic_launcher_foreground.png
+            rm -f android/app/src/main/res/mipmap-xxhdpi/ic_launcher_background.png
+            rm -f android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png
+            rm -f android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_background.png
+
+            # Generate foreground and background for all densities
+            rsvg-convert -w 108 -h 108 icon.svg -o android/app/src/main/res/mipmap-mdpi/ic_launcher_foreground.png
+            rsvg-convert -w 108 -h 108 icon.svg -o android/app/src/main/res/mipmap-mdpi/ic_launcher_background.png
+            rsvg-convert -w 162 -h 162 icon.svg -o android/app/src/main/res/mipmap-hdpi/ic_launcher_foreground.png
+            rsvg-convert -w 162 -h 162 icon.svg -o android/app/src/main/res/mipmap-hdpi/ic_launcher_background.png
+            rsvg-convert -w 216 -h 216 icon.svg -o android/app/src/main/res/mipmap-xhdpi/ic_launcher_foreground.png
+            rsvg-convert -w 216 -h 216 icon.svg -o android/app/src/main/res/mipmap-xhdpi/ic_launcher_background.png
+            rsvg-convert -w 324 -h 324 icon.svg -o android/app/src/main/res/mipmap-xxhdpi/ic_launcher_foreground.png
+            rsvg-convert -w 324 -h 324 icon.svg -o android/app/src/main/res/mipmap-xxhdpi/ic_launcher_background.png
+            rsvg-convert -w 432 -h 432 icon.svg -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png
+            rsvg-convert -w 432 -h 432 icon.svg -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_background.png
+
+            rsvg-convert -w 512 -h 512 icon.svg -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground_512.png
+            rsvg-convert -w 512 -h 512 icon.svg -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_background_512.png
+
             
             echo "Custom launcher icons successfully generated and populated!"
           fi

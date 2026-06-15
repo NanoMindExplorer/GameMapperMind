@@ -51,4 +51,10 @@
 
     <!-- Shizuku Permission -->
     <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
+    
+    <!-- Allows the app to see Shizuku on Android 11+ -->
+    <queries>
+        <provider android:authorities="moe.shizuku.manager.shizuku.provider" />
+        <package android:name="moe.shizuku.privileged.api" />
+    </queries>
 </manifest>

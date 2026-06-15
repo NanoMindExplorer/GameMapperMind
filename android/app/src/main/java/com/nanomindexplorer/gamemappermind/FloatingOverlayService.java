@@ -175,7 +175,7 @@ public class FloatingOverlayService extends Service {
                 
                 // WebView Asset Loader (intercept appassets.androidplatform.net to /public/ and /assets/)
                 final WebViewAssetLoader assetLoader = new WebViewAssetLoader.Builder()
-                        .addPathHandler("/", new WebViewAssetLoader.AssetsPathHandler(FloatingOverlayService.this, "public"))
+                        .addPathHandler("/", new WebViewAssetLoader.AssetsPathHandler(FloatingOverlayService.this))
                         .build();
 
                 webView.setWebViewClient(new WebViewClient() {
@@ -204,7 +204,7 @@ public class FloatingOverlayService extends Service {
                 
                 // Load URL (WebViewAssetLoader uses https://appassets.androidplatform.net/)
                 Log.d("GameMapper", "Loading index.html into Overlay WebView");
-                webView.loadUrl("https://appassets.androidplatform.net/index.html?overlay=true");
+                webView.loadUrl("https://appassets.androidplatform.net/public/index.html?overlay=true");
             });
         } catch (Exception e) {
             Log.e("GameMapper", "Error in onCreate of FloatingOverlayService", e);

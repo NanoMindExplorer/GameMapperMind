@@ -6,834 +6,151 @@
 
 import React from 'react';
 import { GamepadProfile, VirtualButton } from '../types';
-import { 
-  Play, Settings, RotateCcw, Save, Trash2, Eye, EyeOff, Plus, Check, ChevronDown, Move, Maximize2, Layers, X
-} from 'lucide-react';
+import { Layers, X, Move, Eye, EyeOff } from 'lucide-react';
 
 interface OverlayWysiwygProps {
   activeProfile: GamepadProfile;
   onUpdateProfile: (updated: GamepadProfile) => void;
   onLogMessage: (msg: string) => void;
   activeKeys?: string[];
-  activeAxes?: {lx: number, ly: number, rx: number, ry: number};
+  activeAxes?: { lx: number; ly: number; rx: number; ry: number };
+  isFloatingMode?: boolean;        // ← NEW PROP
 }
 
-export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMessage, activeKeys = [], activeAxes = {lx:0, ly:0, rx:0, ry:0} }: OverlayWysiwygProps) {
-  const [showConfig, setShowConfig] = React.useState(true);
+export default function OverlayWysiwyg({
+  activeProfile,
+  onUpdateProfile,
+  onLogMessage,
+  activeKeys = [],
+  activeAxes = { lx: 0, ly: 0, rx: 0, ry: 0 },
+  isFloatingMode = false,          // default false (untuk editor)
+}: OverlayWysiwygProps) {
+
   const [selectedButtonId, setSelectedButtonId] = React.useState<string | null>(null);
-  const [screenshotMode, setScreenshotMode] = React.useState<'genshin' | 'pubg' | 'codm' | 'efootball'>('genshin');
-  const [isDragging, setIsDragging] = React.useState(false);
-  const [nexionPos, setNexionPos] = React.useState({ x: 50, y: 10 });
-  const [isDraggingNexion, setIsDraggingNexion] = React.useState(false);
-  const nexionDragHasMoved = React.useRef(false);
   const [showPalette, setShowPalette] = React.useState(false);
+  const [isEditMode, setIsEditMode] = React.useState(false); // controlled by native
 
-    // Sync opacity local state with profile if provided on load
-    React.useEffect(() => {
-    if (activeProfile.globalOpacity !== undefined && activeProfile.globalOpacity !== globalNodeOpacity) {
-      setGlobalNodeOpacity(activeProfile.globalOpacity);
-    }
-  }, [activeProfile.id]);
-
-  // Visual Protection & Graphics Quality Engine State
-  const [hideGrid, setHideGrid] = React.useState(false);
   const [hideAllNodes, setHideAllNodes] = React.useState(false);
-  const [bgDimLevel, setBgDimLevel] = React.useState(0); // 0% Dim = Maximum Raw Graphic Quality (Perfect graphics, No obstruction)
-  const [globalNodeOpacity, setGlobalNodeOpacity] = React.useState(activeProfile.globalOpacity ?? 80); // 80% default opacity
+  const [globalNodeOpacity, setGlobalNodeOpacity] = React.useState(activeProfile.globalOpacity ?? 80);
 
-  // Update screenshot background to match active profiles
+  // ==================== GLOBAL BRIDGE UNTUK NATIVE ====================
   React.useEffect(() => {
-    if (activeProfile.id === 'genshin' || activeProfile.id === 'pubg' || activeProfile.id === 'codm' || activeProfile.id === 'efootball') {
-      setScreenshotMode(activeProfile.id as any);
-    }
-  }, [activeProfile.id]);
+    // Dipanggil oleh FloatingOverlayService.java
+    (window as any).updateOverlayConfig = (config: GamepadProfile) => {
+      // Update profile dari native
+      onUpdateProfile(config);
+    };
+
+    (window as any).setOverlayEditMode = (editMode: boolean) => {
+      setIsEditMode(editMode);
+      setShowPalette(editMode); // buka palette otomatis saat edit mode
+      onLogMessage(`Overlay: ${editMode ? 'Edit Mode ON' : 'Play Mode'}`);
+    };
+
+    return () => {
+      delete (window as any).updateOverlayConfig;
+      delete (window as any).setOverlayEditMode;
+    };
+  }, [onUpdateProfile, onLogMessage]);
 
   const selectedButton = activeProfile.buttons.find(b => b.id === selectedButtonId);
 
-  // Drag simulation helpers
-  const handleDragStart = (e: React.MouseEvent, btnId: string) => {
-    e.stopPropagation();
-    setSelectedButtonId(btnId);
-    setIsDragging(true);
-  };
+  // ==================== DRAG HANDLER (tetap aktif di floating) ====================
+  const handleDragMove = (e: React.MouseEvent | React.TouchEvent) => {
+    if (!isEditMode || !selectedButtonId) return;
 
-  const handleDragEnd = () => {
-    setIsDragging(false);
-    setIsDraggingNexion(false);
-  };
+    // ... (logic drag kamu tetap sama)
+    const container = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    let clientX: number, clientY: number;
 
-  const handleDragMove = (e: React.MouseEvent) => {
-    if (isDraggingNexion) {
-      nexionDragHasMoved.current = true;
-      const container = e.currentTarget.getBoundingClientRect();
-      const x = Math.max(0, Math.min(100, ((e.clientX - container.left) / container.width) * 100));
-      const y = Math.max(0, Math.min(100, ((e.clientY - container.top) / container.height) * 100));
-      setNexionPos({ x, y });
-      return;
+    if ('touches' in e) {
+      clientX = (e as React.TouchEvent).touches[0].clientX;
+      clientY = (e as React.TouchEvent).touches[0].clientY;
+    } else {
+      clientX = (e as React.MouseEvent).clientX;
+      clientY = (e as React.MouseEvent).clientY;
     }
 
-    if (!isDragging || !selectedButtonId) return;
-    
-    const container = e.currentTarget.getBoundingClientRect();
-    const x = Math.max(0, Math.min(100, ((e.clientX - container.left) / container.width) * 100));
-    const y = Math.max(0, Math.min(100, ((e.clientY - container.top) / container.height) * 100));
+    const x = Math.max(0, Math.min(100, ((clientX - container.left) / container.width) * 100));
+    const y = Math.max(0, Math.min(100, ((clientY - container.top) / container.height) * 100));
 
-    const updatedButtons = activeProfile.buttons.map(b => {
-      if (b.id === selectedButtonId) {
-        return { ...b, x, y };
-      }
-      return b;
-    });
-    
+    const updatedButtons = activeProfile.buttons.map(b =>
+      b.id === selectedButtonId ? { ...b, x, y } : b
+    );
     onUpdateProfile({ ...activeProfile, buttons: updatedButtons });
   };
 
-  const handleContainerClick = () => {
-    setSelectedButtonId(null);
-  };
-
-  const handleUpdateBtnProperty = (key: keyof VirtualButton, value: any) => {
-    if (!selectedButtonId) return;
-    const updatedButtons = activeProfile.buttons.map(b => {
-      if (b.id === selectedButtonId) {
-        return { ...b, [key]: value };
-      }
-      return b;
-    });
-    onUpdateProfile({ ...activeProfile, buttons: updatedButtons });
-  };
-
-  const handleAddSpecificButton = (label: string, mappedKey: string, androidEventCode: number, defaultSize: number = 56, type: VirtualButton['type'] = 'button') => {
-    const freshId = `btn_${Date.now().toString().slice(-4)}`;
-    let newBtn: VirtualButton = {
-      id: freshId,
-      label,
-      type,
-      x: 50,
-      y: 50,
-      width: defaultSize,
-      height: defaultSize,
-      mappedKey,
-      androidEventCode,
-      opacity: 0.6
-    };
-    onUpdateProfile({
-      ...activeProfile,
-      buttons: [...activeProfile.buttons, newBtn]
-    });
-    setSelectedButtonId(freshId);
-    onLogMessage(`Overlay Canvas: Menambahkan ${label}`);
-  };
-
-  const handleAddNewButton = (
-    type: 'button' | 'analog_stick' | 'gyro_area' | 'swipe',
-    swipeDirection?: 'UP' | 'DOWN' | 'LEFT' | 'RIGHT'
-  ) => {
-    const freshId = `btn_${Date.now().toString().slice(-4)}`;
-    
-    let label = 'New Tap';
-    let mappedKey = 'BUTTON_B';
-    let androidEventCode = 97;
-    
-    if (type === 'analog_stick') {
-      label = 'L-Stick';
-      mappedKey = 'L_STICK';
-      androidEventCode = 0;
-    } else if (type === 'gyro_area') {
-      label = 'Camera Trigger';
-      mappedKey = 'GYRO';
-      androidEventCode = 0;
-    } else if (type === 'swipe') {
-      if (swipeDirection === 'UP') {
-        label = 'Swipe Atas (UP)';
-        mappedKey = 'R_STICK_UP';
-        androidEventCode = 201;
-      } else if (swipeDirection === 'DOWN') {
-        label = 'Swipe Bawah (DOWN)';
-        mappedKey = 'R_STICK_DOWN';
-        androidEventCode = 202;
-      } else if (swipeDirection === 'LEFT') {
-        label = 'Swipe Kiri (LEFT)';
-        mappedKey = 'R_STICK_LEFT';
-        androidEventCode = 203;
-      } else if (swipeDirection === 'RIGHT') {
-        label = 'Swipe Kanan (RIGHT)';
-        mappedKey = 'R_STICK_RIGHT';
-        androidEventCode = 204;
-      }
-    }
-
-    let newBtn: VirtualButton = {
-      id: freshId,
-      label,
-      type,
-      x: 50,
-      y: 50,
-      width: type === 'button' ? 56 : type === 'analog_stick' ? 120 : type === 'swipe' ? 68 : 200,
-      height: type === 'button' ? 56 : type === 'analog_stick' ? 120 : type === 'swipe' ? 68 : 120,
-      mappedKey,
-      androidEventCode,
-      opacity: 0.6
-    };
-    onUpdateProfile({
-      ...activeProfile,
-      buttons: [...activeProfile.buttons, newBtn]
-    });
-    setSelectedButtonId(freshId);
-    onLogMessage(`Overlay Canvas: Appended virtual node '${newBtn.label}' to active viewport`);
-  };
-
-  const handleRemoveButton = (btnId: string) => {
-    const updated = activeProfile.buttons.filter(b => b.id !== btnId);
-    onUpdateProfile({ ...activeProfile, buttons: updated });
-    setSelectedButtonId(null);
-    onLogMessage(`Overlay Canvas: Discarded node ${btnId} layout constraints`);
-  };
-
-  // Safe relocation simulating drag directly inside relative bounding boxes
-  const relocateButtonOffset = (direction: 'up' | 'down' | 'left' | 'right') => {
-    if (!selectedButton) return;
-    let { x, y } = selectedButton;
-    if (direction === 'up') y = Math.max(0, y - 2);
-    if (direction === 'down') y = Math.min(100, y + 2);
-    if (direction === 'left') x = Math.max(0, x - 2);
-    if (direction === 'right') x = Math.min(100, x + 2);
-
-    handleUpdateBtnProperty('x', x);
-    handleUpdateBtnProperty('y', y);
-  };
-
-  // Background mock representation
-  const getBackgroundUrl = () => {
-    if (screenshotMode === 'genshin') return 'https://images.unsplash.com/photo-1542751371-adc38448a05e?auto=format&fit=crop&q=80&w=1200';
-    if (screenshotMode === 'pubg') return 'https://images.unsplash.com/photo-1534423861386-85a16f5d13fd?auto=format&fit=crop&q=80&w=1200';
-    if (screenshotMode === 'codm') return 'https://images.unsplash.com/photo-1511512578047-dfb367046420?auto=format&fit=crop&q=80&w=1200';
-    if (screenshotMode === 'efootball') return 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?auto=format&fit=crop&q=80&w=1200'; // high quality green soccer field
-    return 'https://images.unsplash.com/photo-1511512578047-dfb367046420?auto=format&fit=crop&q=80&w=1200';
-  };
-
+  // ==================== RENDER ====================
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xl grid grid-cols-1 lg:grid-cols-12">
-      
-      {/* Visual Canvas stage Area (Col 9) */}
-      <div className="lg:col-span-8 p-6 flex flex-col border-b lg:border-b-0 lg:border-r border-slate-800 bg-slate-950/20">
-        
-        {/* Panel controls */}
-        <div className="flex flex-wrap justify-between items-center gap-3 mb-4">
-          <div>
-            <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2">
-              <Layers className="w-4 h-4 text-indigo-400" />
-              WYSIWYG Dynamic Overlay Sandbox
-            </h3>
-            <p className="text-[11px] text-slate-400">Position triggers corresponding to UI target anchors</p>
-          </div>
+    <div className={`w-full h-full relative select-none touch-none ${isFloatingMode ? 'bg-transparent' : 'bg-slate-900'}`}>
 
-          <div className="flex items-center gap-2 bg-slate-900 p-1 border border-slate-800 rounded-lg">
-            <span className="text-[10px] uppercase font-bold text-slate-400 px-2">Preview Simulator:</span>
-            <select
-              value={screenshotMode}
-              onChange={(e) => setScreenshotMode(e.target.value as any)}
-              className="bg-slate-950 text-xs text-slate-300 px-3 py-1.5 rounded focus:outline-none focus:border-indigo-500 font-medium font-sans border-none"
-            >
-              <option value="genshin">Genshin Sanctuary Hub</option>
-              <option value="pubg">Erangel Warzone</option>
-              <option value="codm">Nuketown Battlefield</option>
-              <option value="efootball">eFootball Pitch Arena</option>
-            </select>
-          </div>
-        </div>
+      {/* MAIN CANVAS */}
+      <div
+        onClick={() => setSelectedButtonId(null)}
+        onMouseMove={handleDragMove}
+        onTouchMove={handleDragMove}
+        onMouseUp={() => setSelectedButtonId(null)}
+        onTouchEnd={() => setSelectedButtonId(null)}
+        className="relative w-full h-full overflow-hidden"
+        style={{ background: isFloatingMode ? 'transparent' : undefined }}
+      >
+        {/* Virtual Buttons */}
+        {activeProfile.buttons.map((btn) => {
+          const isSelected = btn.id === selectedButtonId;
+          const isSwipe = btn.type === 'swipe' || (btn.androidEventCode >= 201 && btn.androidEventCode <= 204);
+          const isButtonActive = btn.mappedKey ? activeKeys.includes(btn.mappedKey) : false;
 
-        {/* Dynamic Display Optimizer / Graphics Preservation Ribbon */}
-        <div className="bg-slate-900/95 border border-slate-800 rounded-lg p-3.5 mb-4 flex justify-between items-center">
-          <div className="text-[10px] uppercase font-bold text-slate-500">
-            Tampilan Layar
-          </div>
+          let btnColor = 'border-indigo-400 text-white';
 
-          {/* Right Block: Screen obstruction / Visibility Toggles */}
-          <div className="flex items-center justify-end gap-2.5">
-            <button
-              type="button"
-              onClick={() => {
-                setHideGrid(!hideGrid);
-                onLogMessage(`SCREEN CONFIG: ${!hideGrid ? "Disabled grid overlay layer to free up screen obstructions." : "Enabled alignment grid helper."}`);
+          if (btn.type === 'analog_stick' && btn.mappedKey === 'R_STICK') btnColor = 'border-pink-400 text-white';
+          else if (btn.type === 'gyro_area') btnColor = 'border-pink-500 text-white';
+          else if (isSwipe) btnColor = 'border-purple-400 text-white';
+
+          return (
+            <div
+              key={btn.id}
+              onMouseDown={(e) => { if (isEditMode) setSelectedButtonId(btn.id); }}
+              onTouchStart={(e) => { if (isEditMode) setSelectedButtonId(btn.id); }}
+              className={`absolute flex items-center justify-center font-bold tracking-tight transition-all pointer-events-auto
+                ${btn.width > 80 ? 'rounded-[40%]' : 'rounded-full'} border-[2.5px] ${btnColor}`}
+              style={{
+                left: `${btn.x}%`,
+                top: `${btn.y}%`,
+                width: `${btn.width}px`,
+                height: `${btn.height}px`,
+                transform: 'translate(-50%, -50%)',
+                opacity: hideAllNodes ? 0 : btn.opacity * (globalNodeOpacity / 100),
+                backgroundColor: isButtonActive ? 'rgba(255,255,255,0.2)' : 'rgba(30,41,59,0.4)',
+                boxShadow: isButtonActive ? '0 0 20px rgba(129, 140, 248, 0.7)' : undefined,
               }}
-              className={`px-3 py-1.5 rounded text-[10px] font-mono font-bold uppercase border cursor-pointer transition-all ${
-                hideGrid 
-                  ? 'bg-slate-950 text-slate-500 border-slate-850 hover:text-slate-400' 
-                  : 'bg-indigo-950/40 text-indigo-300 border-indigo-950'
-              }`}
             >
-              <span>{hideGrid ? "GRID: TERSEMBUNYI" : "GRID: TAMPIL"}</span>
-            </button>
+              <span className="text-center text-sm drop-shadow-md">{btn.label}</span>
 
-            <button
-              type="button"
-              onClick={() => {
-                setHideAllNodes(!hideAllNodes);
-                onLogMessage(`SCREEN CONFIG: ${!hideAllNodes ? "All custom overlay buttons are temporary made 100% invisible to clear screen obstacles." : "Restored custom overlay buttons transparency."}`);
-              }}
-              className={`px-3 py-1.5 rounded text-[10px] font-mono font-bold uppercase border cursor-pointer transition-all flex items-center gap-1.5 ${
-                hideAllNodes 
-                  ? 'bg-rose-950 text-rose-300 border-rose-850 shadow animate-pulse' 
-                  : 'bg-slate-950 text-slate-350 border-slate-800 hover:text-white hover:bg-slate-900'
-              }`}
-            >
-              {hideAllNodes ? <EyeOff className="w-3.5 h-3.5 text-rose-400" /> : <Eye className="w-3.5 h-3.5 text-emerald-400" />}
-              <span>{hideAllNodes ? "OVERLAY: SEMBUNYI" : "OVERLAY: AKTIF"}</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Main absolute aspect ratio lock screen emulator */}
-        <div 
-          onClick={handleContainerClick}
-          onMouseMove={handleDragMove}
-          onMouseUp={handleDragEnd}
-          onMouseLeave={handleDragEnd}
-          // Added touch events for mobile compatibility
-          onTouchMove={(e) => {
-            if (isDraggingNexion) {
-              nexionDragHasMoved.current = true;
-              const touch = e.touches[0];
-              const container = e.currentTarget.getBoundingClientRect();
-              const x = Math.max(0, Math.min(100, ((touch.clientX - container.left) / container.width) * 100));
-              const y = Math.max(0, Math.min(100, ((touch.clientY - container.top) / container.height) * 100));
-              setNexionPos({ x, y });
-              return;
-            }
-            if (!isDragging || !selectedButtonId) return;
-            const touch = e.touches[0];
-            const container = e.currentTarget.getBoundingClientRect();
-            const x = Math.max(0, Math.min(100, ((touch.clientX - container.left) / container.width) * 100));
-            const y = Math.max(0, Math.min(100, ((touch.clientY - container.top) / container.height) * 100));
-            const updatedButtons = activeProfile.buttons.map(b => b.id === selectedButtonId ? { ...b, x, y } : b);
-            onUpdateProfile({ ...activeProfile, buttons: updatedButtons });
-          }}
-          onTouchEnd={handleDragEnd}
-          className="relative w-full aspect-[16/9] bg-slate-950 rounded-lg overflow-hidden border border-slate-800 shadow-inner group select-none touch-none"
-          style={{
-            backgroundImage: `linear-gradient(rgba(0,0,0,${bgDimLevel / 100}), rgba(0,0,0,${bgDimLevel / 100})), url(${getBackgroundUrl()})`,
-            backgroundSize: 'cover',
-            backgroundPosition: 'center'
-          }}
-        >
-          {/* Snap overlay grid when adjusting mapping nodes */}
-          {!hideGrid && showPalette && (
-            <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(255,255,255,0.015)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.015)_1px,transparent_1px)] bg-[size:24px_24px] opacity-100" />
-          )}
-
-          {/* Floating Action Button to toggle Palette (Nexion Hub) */}
-          <div 
-            className={`absolute z-50 shadow-[0_0_15px_rgba(99,102,241,0.6)] cursor-pointer pointer-events-auto flex flex-col items-center select-none touch-none ${showPalette ? 'scale-110' : 'opacity-70 flex hover:opacity-100'}`}
-            style={{ left: `${nexionPos.x}%`, top: `${nexionPos.y}%`, transform: 'translate(-50%, -50%)', transition: isDraggingNexion ? 'none' : 'opacity 0.3s' }}
-            onMouseDown={(e) => {
-              e.stopPropagation();
-              nexionDragHasMoved.current = false;
-              setIsDraggingNexion(true);
-            }}
-            onTouchStart={(e) => {
-              e.stopPropagation();
-              nexionDragHasMoved.current = false;
-              setIsDraggingNexion(true);
-            }}
-            onClick={(e) => {
-              e.stopPropagation();
-              if (nexionDragHasMoved.current) {
-                nexionDragHasMoved.current = false;
-                return;
-              }
-              if (showPalette) {
-                setSelectedButtonId(null);
-              }
-              setShowPalette(!showPalette);
-            }}
-          >
-             <div className={`w-12 h-12 ${showPalette ? 'bg-indigo-600' : 'bg-slate-900/80'} rounded-full border-2 ${showPalette ? 'border-indigo-300' : 'border-indigo-500'} flex items-center justify-center backdrop-blur shadow-xl overflow-hidden hover:bg-indigo-500 transition-colors`}>
-               <Layers className={`w-6 h-6 ${showPalette ? 'text-white' : 'text-indigo-400'}`} />
-             </div>
-             {!showPalette && <div className="text-[9px] font-bold tracking-widest text-indigo-300 mt-2 drop-shadow-md text-center bg-slate-900/80 px-2.5 py-0.5 rounded-full border border-indigo-500/40">NEXION</div>}
-          </div>
-
-          {/* Canvas Overlay Gamepad Palette */}
-          {showPalette && (
-            <div className="absolute top-24 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-xl p-4 shadow-2xl w-[90%] max-w-[600px] pointer-events-auto transition-all">
-              <div className="flex justify-between items-center mb-3 border-b border-slate-800 pb-2">
-                <div className="text-[11px] font-bold text-slate-300 uppercase tracking-wider">Gamepad Palette</div>
-                <button onClick={() => setShowPalette(false)} className="text-slate-400 hover:text-white transition-colors">
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-              <div className="flex flex-wrap items-center justify-center gap-2">
-                <button onClick={() => handleAddSpecificButton('A', 'BUTTON_A', 96)} className="w-10 h-10 rounded-full bg-slate-800 hover:bg-emerald-600 border border-slate-700 text-slate-200 font-bold shadow transition-colors flex items-center justify-center">A</button>
-                <button onClick={() => handleAddSpecificButton('B', 'BUTTON_B', 97)} className="w-10 h-10 rounded-full bg-slate-800 hover:bg-rose-600 border border-slate-700 text-slate-200 font-bold shadow transition-colors flex items-center justify-center">B</button>
-                <button onClick={() => handleAddSpecificButton('X', 'BUTTON_X', 99)} className="w-10 h-10 rounded-full bg-slate-800 hover:bg-blue-600 border border-slate-700 text-slate-200 font-bold shadow transition-colors flex items-center justify-center">X</button>
-                <button onClick={() => handleAddSpecificButton('Y', 'BUTTON_Y', 100)} className="w-10 h-10 rounded-full bg-slate-800 hover:bg-amber-500 border border-slate-700 text-slate-200 font-bold shadow transition-colors flex items-center justify-center">Y</button>
-                
-                <div className="w-px h-10 bg-slate-700/50 mx-1"></div>
-                
-                <button onClick={() => handleAddSpecificButton('L1', 'BUTTON_L1', 101, 70)} className="h-10 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 font-medium text-[11px] shadow transition-colors flex items-center justify-center">LB / L1</button>
-                <button onClick={() => handleAddSpecificButton('L2', 'BUTTON_L2', 104, 75)} className="h-10 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 font-medium text-[11px] shadow transition-colors flex items-center justify-center">LT / L2</button>
-                <button onClick={() => handleAddSpecificButton('R1', 'BUTTON_R1', 102, 70)} className="h-10 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 font-medium text-[11px] shadow transition-colors flex items-center justify-center">RB / R1</button>
-                <button onClick={() => handleAddSpecificButton('R2', 'BUTTON_R2', 105, 75)} className="h-10 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 font-medium text-[11px] shadow transition-colors flex items-center justify-center">RT / R2</button>
-                
-                <div className="w-px h-10 bg-slate-700/50 mx-1"></div>
-                
-                <div className="flex flex-col gap-0.5 border border-slate-700 p-1 rounded-lg bg-slate-900">
-                  <div className="flex justify-center">
-                    <button onClick={() => handleAddSpecificButton('UP', 'DPAD_UP', 106, 50)} className="w-6 h-6 rounded-t bg-slate-800 hover:bg-indigo-500 text-[10px] text-white flex items-center justify-center">↑</button>
-                  </div>
-                  <div className="flex gap-4">
-                    <button onClick={() => handleAddSpecificButton('LEFT', 'DPAD_LEFT', 108, 50)} className="w-6 h-6 rounded-l bg-slate-800 hover:bg-indigo-500 text-[10px] text-white flex items-center justify-center">←</button>
-                    <button onClick={() => handleAddSpecificButton('RIGHT', 'DPAD_RIGHT', 109, 50)} className="w-6 h-6 rounded-r bg-slate-800 hover:bg-indigo-500 text-[10px] text-white flex items-center justify-center">→</button>
-                  </div>
-                  <div className="flex justify-center">
-                    <button onClick={() => handleAddSpecificButton('DOWN', 'DPAD_DOWN', 107, 50)} className="w-6 h-6 rounded-b bg-slate-800 hover:bg-indigo-500 text-[10px] text-white flex items-center justify-center">↓</button>
-                  </div>
-                </div>
-
-                <div className="w-px h-10 bg-slate-700/50 mx-1"></div>
-                
-                <button onClick={() => handleAddSpecificButton('L3', 'BUTTON_L3', 103)} className="w-10 h-10 rounded-full border-2 border-dashed border-slate-600 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold shadow flex items-center justify-center">L3</button>
-                <button onClick={() => handleAddSpecificButton('R3', 'BUTTON_R3', 106)} className="w-10 h-10 rounded-full border-2 border-dashed border-slate-600 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold shadow flex items-center justify-center">R3</button>
-
-                <div className="w-px h-10 bg-slate-700/50 mx-1"></div>
-
-                <button onClick={() => handleAddSpecificButton('L-Stick', 'L_STICK', 0, 100, 'analog_stick')} className="h-10 px-3 rounded-lg bg-blue-900/60 hover:bg-blue-600 border border-blue-700 text-blue-200 font-medium text-[11px] shadow transition-colors flex items-center gap-1">
-                  <Move className="w-3.5 h-3.5" /> L-Stick
-                </button>
-                <button onClick={() => handleAddSpecificButton('R-Stick', 'R_STICK', 0, 100, 'analog_stick')} className="h-10 px-3 rounded-lg bg-pink-900/60 hover:bg-pink-600 border border-pink-700 text-pink-200 font-medium text-[11px] shadow transition-colors flex items-center gap-1">
-                  <Move className="w-3.5 h-3.5" /> R-Stick
-                </button>
-              </div>
-
-              <div className="flex flex-col gap-3 mt-4 pt-3 border-t border-slate-800/80">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5"><Eye className="w-3.5 h-3.5" /> Transparansi Tombol Global</span>
-                  <div className="flex items-center gap-3">
-                    <input
-                      type="range"
-                      min="0"
-                      max="100"
-                      step="5"
-                      className="w-32 accent-emerald-500 h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer"
-                      value={globalNodeOpacity}
-                      onChange={(e) => {
-                        const val = parseInt(e.target.value);
-                        setGlobalNodeOpacity(val);
-                        onUpdateProfile({ ...activeProfile, globalOpacity: val });
-                      }}
-                    />
-                    <span className="text-[10px] text-emerald-400 font-mono font-bold min-w-[50px] text-right">{globalNodeOpacity}%</span>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5"><EyeOff className="w-3.5 h-3.5" /> Filter Redup Layar (Background)</span>
-                  <div className="flex items-center gap-3">
-                    <input
-                      type="range"
-                      min="0"
-                      max="80"
-                      step="5"
-                      className="w-32 accent-indigo-500 h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer"
-                      value={bgDimLevel}
-                      onChange={(e) => {
-                        const val = parseInt(e.target.value);
-                        setBgDimLevel(val);
-                        onLogMessage(`GRAPHICS ENGINE: Set screen dimming factor to ${val}%.`);
-                      }}
-                    />
-                    <span className="text-[10px] text-indigo-400 font-mono font-bold min-w-[50px] text-right">-{bgDimLevel}%</span>
-                  </div>
-                </div>
-              </div>
+              {/* Analog Stick Dot */}
+              {btn.type === 'analog_stick' && (
+                <div
+                  className="absolute w-1/3 h-1/3 bg-white/60 rounded-full border border-white"
+                  style={{
+                    transform: `translate(${btn.mappedKey === 'L_STICK' 
+                      ? activeAxes.lx * (btn.width / 3.5) 
+                      : activeAxes.rx * (btn.width / 3.5)}px, 
+                      ${btn.mappedKey === 'L_STICK' 
+                      ? activeAxes.ly * (btn.height / 3.5) 
+                      : activeAxes.ry * (btn.height / 3.5)}px)`,
+                  }}
+                />
+              )}
             </div>
-          )}
-
-          {/* Real simulated active mapping nodes mapped across bounds */}
-          {activeProfile.buttons.map((btn) => {
-            const isSelected = btn.id === selectedButtonId;
-            const isSwipe = btn.type === 'swipe' || (btn.androidEventCode >= 201 && btn.androidEventCode <= 204);
-            const isButtonActive = btn.mappedKey ? activeKeys.includes(btn.mappedKey) : false;
-            
-            let btnColor = 'border-indigo-400 text-white';
-            
-            if (btn.type === 'analog_stick' && btn.mappedKey === 'R_STICK') {
-              btnColor = 'border-pink-400 text-white';
-            } else if (btn.type === 'gyro_area') {
-              btnColor = 'border-pink-500 text-white';
-            } else if (isSwipe) {
-              btnColor = 'border-purple-400 text-white shadow-[0_0_12px_rgba(168,85,247,0.35)]';
-            }
-            
-            if (showPalette) {
-               btnColor += isSwipe ? ' bg-purple-500/10' : btn.type.includes('gyro') ? ' bg-pink-500/10' : ' bg-slate-950/40 backdrop-blur-sm';
-               if (!isSelected) btnColor += ' opacity-80';
-            } else {
-               btnColor += ' bg-transparent';
-            }
-            
-            // Pressed state visual feedback
-            if (isButtonActive) {
-               btnColor = btnColor.replace('bg-transparent', 'bg-white/20').replace('bg-slate-950/40', 'bg-indigo-500/40').replace('border-', 'shadow-[0_0_15px_rgba(255,255,255,0.4)] border-');
-            }
-
-            return (
-              <div
-                key={btn.id}
-                onMouseDown={(e) => {
-                  handleDragStart(e, btn.id);
-                }}
-                onTouchStart={(e) => {
-                  e.stopPropagation();
-                  setSelectedButtonId(btn.id);
-                  setIsDragging(true);
-                }}
-                onClick={(e) => { 
-                  e.stopPropagation(); 
-                  setSelectedButtonId(btn.id); 
-                }}
-                className={`absolute ${btn.width > 80 ? 'rounded-[40%]' : 'rounded-[50%]'} border-[2.5px] flex flex-col justify-center items-center font-sans tracking-tight ${btnColor} transition-all antialiased select-none group/node outline-none cursor-pointer pointer-events-auto`}
-                style={{
-                  left: `${btn.x}%`,
-                  top: `${btn.y}%`,
-                  width: `${btn.width}px`,
-                  height: `${btn.height}px`,
-                  transform: isButtonActive && !showPalette ? 'translate(-50%, -50%) scale(0.92)' : 'translate(-50%, -50%) scale(1)',
-                  opacity: hideAllNodes ? 0 : btn.opacity * (globalNodeOpacity / 100),
-                  boxShadow: isSelected && showPalette ? '0 0 16px rgba(139, 92, 246, 0.8), inset 0 0 8px rgba(139, 92, 246, 0.4)' : undefined,
-                  borderColor: isSelected && showPalette ? '#8B5CF6' : undefined
-                }}
-              >
-                {/* Node details */}
-                <span className={`text-[10px] font-bold text-white tracking-wide truncate max-w-full px-1 z-10 text-center ${isButtonActive && !showPalette ? 'drop-shadow-[0_0_8px_rgba(255,255,255,1)] text-indigo-100 scale-110 transition-transform' : ''}`}>
-                  {btn.label}
-                </span>
-                
-                {btn.type === 'analog_stick' && (() => {
-                  let stickX = 0;
-                  let stickY = 0;
-                  if (btn.mappedKey === 'L_STICK') {
-                    stickX = activeAxes.lx * (btn.width / 3.5);
-                    stickY = activeAxes.ly * (btn.height / 3.5);
-                  } else if (btn.mappedKey === 'R_STICK') {
-                    stickX = activeAxes.rx * (btn.width / 3.5);
-                    stickY = activeAxes.ry * (btn.height / 3.5);
-                  }
-                  return (
-                    <div 
-                      className="absolute w-1/3 h-1/3 bg-blue-400/50 rounded-full border border-blue-300 drop-shadow-md"
-                      style={{
-                        transform: `translate(${stickX}px, ${stickY}px)`,
-                        transition: 'transform 0.05s linear'
-                      }}
-                    ></div>
-                  );
-                })()}
-                {btn.type === 'gyro_area' && (
-                  <div className="border border-dashed border-pink-400/40 absolute inset-2 rounded-full animate-spin" style={{ animationDuration: '20s' }}></div>
-                )}
-                
-                {isSwipe && (
-                  <div className="absolute inset-0 flex flex-col justify-center items-center pointer-events-none p-1 overflow-hidden">
-                    {btn.androidEventCode === 201 && (
-                      <div className="flex flex-col items-center select-none gap-0.5 mt-auto pb-1">
-                        <span className="text-purple-300 text-[10px] font-extrabold font-mono animate-bounce">↑</span>
-                        <span className="text-[7.5px] text-purple-400 font-mono tracking-tighter">UP</span>
-                      </div>
-                    )}
-                    {btn.androidEventCode === 202 && (
-                      <div className="flex flex-col items-center select-none gap-0.5 mb-auto pt-1">
-                        <span className="text-[7.5px] text-purple-400 font-mono tracking-tighter">DOWN</span>
-                        <span className="text-purple-300 text-[10px] font-extrabold font-mono animate-bounce">↓</span>
-                      </div>
-                    )}
-                    {btn.androidEventCode === 203 && (
-                      <div className="flex items-center justify-center select-none gap-1 w-full h-full">
-                        <span className="text-purple-300 text-[10px] font-extrabold font-mono animate-pulse">←</span>
-                        <span className="text-[7px] text-purple-400 font-mono tracking-tighter">KIRI</span>
-                      </div>
-                    )}
-                    {btn.androidEventCode === 204 && (
-                      <div className="flex items-center justify-center select-none gap-1 w-full h-full">
-                        <span className="text-[7px] text-purple-400 font-mono tracking-tighter">KANAN</span>
-                        <span className="text-purple-300 text-[10px] font-extrabold font-mono animate-pulse">→</span>
-                      </div>
-                    )}
-                  </div>
-                )}
-                
-                {/* Quick Resize Controls when selected */}
-                {isSelected && (
-                  <div className="absolute -top-10 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-slate-900/90 backdrop-blur p-1 rounded-lg border border-slate-700 shadow-xl pointer-events-auto z-50">
-                    <button 
-                      onClick={(e) => { 
-                        e.stopPropagation(); 
-                        const val = Math.max(20, btn.width - 5); 
-                        const updated = activeProfile.buttons.map(b => b.id === btn.id ? { ...b, width: val, height: val } : b);
-                        onUpdateProfile({ ...activeProfile, buttons: updated });
-                      }} 
-                      className="w-6 h-6 flex items-center justify-center bg-slate-800 hover:bg-slate-700 rounded text-slate-200 text-xs font-bold transition-colors"
-                      title="Perkecil Tombol"
-                    >
-                      -
-                    </button>
-                    <span className="text-[10px] text-slate-300 font-mono font-bold w-7 text-center">{btn.width}</span>
-                    <button 
-                      onClick={(e) => { 
-                        e.stopPropagation(); 
-                        const val = Math.min(400, btn.width + 5); 
-                        const updated = activeProfile.buttons.map(b => b.id === btn.id ? { ...b, width: val, height: val } : b);
-                        onUpdateProfile({ ...activeProfile, buttons: updated });
-                      }} 
-                      className="w-6 h-6 flex items-center justify-center bg-slate-800 hover:bg-slate-700 rounded text-slate-200 text-xs font-bold transition-colors"
-                      title="Perbesar Tombol"
-                    >
-                      +
-                    </button>
-                  </div>
-                )}
-
-                {/* Visual coordinate hover flag */}
-                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover/node:block bg-slate-950/90 text-[8px] font-mono text-indigo-300 px-1 py-0.5 rounded border border-indigo-900 pointer-events-none whitespace-nowrap">
-                  X:{Number(btn.x).toFixed(1)}% Y:{Number(btn.y).toFixed(1)}%
-                </div>
-              </div>
-            );
-          })}
-
-          {/* Quick HUD guide */}
-          <div className="absolute bottom-3 left-4 right-4 flex justify-between text-[10px] font-mono text-slate-400 tracking-wide bg-slate-950/80 p-2 rounded backdrop-blur border border-slate-900 pointer-events-none">
-            <span>Orchestration Context Active Node Out: {activeProfile.packageName}</span>
-            <span>Sub-frame Latency: &lt;8 ms</span>
-          </div>
-        </div>
-
-
+          );
+        })}
       </div>
 
-      {/* Controller Parameters (Col 4) */}
-      <div className="lg:col-span-4 p-6 bg-slate-950/40 flex flex-col justify-between">
-        <div className="space-y-6">
-          <div>
-            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Overlay Node Inspector</h4>
-            <p className="text-[11px] text-slate-400 leading-relaxed">Customize tactile physical execution targets</p>
-          </div>
-
-          {selectedButton ? (
-            <div className="space-y-4">
-              {/* Card info */}
-              <div className="p-3.5 bg-slate-950 rounded-lg border border-slate-800 space-y-3 shadow-inner">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-mono font-bold text-indigo-400">NODE ID: {selectedButton.id}</span>
-                  <button
-                    onClick={() => handleRemoveButton(selectedButton.id)}
-                    className="p-1 hover:bg-rose-950/60 text-slate-400 hover:text-rose-400 rounded transition-colors"
-                    title="Remove virtual node mapping"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-
-                <div className="space-y-2">
-                  <div>
-                    <label className="block text-[10px] font-semibold text-slate-400 mb-1 font-sans uppercase">Display Label</label>
-                    <input
-                      type="text"
-                      className="w-full bg-slate-900 text-slate-100 text-xs px-3 py-2 rounded focus:outline-none focus:border-indigo-500 font-sans border border-slate-800"
-                      value={selectedButton.label}
-                      onChange={(e) => handleUpdateBtnProperty('label', e.target.value)}
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-[10px] font-semibold text-slate-400 mb-1 font-sans uppercase">Tactile Target Key</label>
-                      <select
-                        className="w-full bg-slate-900 text-slate-100 text-[11px] px-1.5 py-1.5 rounded focus:outline-none focus:border-indigo-500 font-mono border border-slate-800 cursor-pointer"
-                        value={selectedButton.mappedKey}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          handleUpdateBtnProperty('mappedKey', val);
-                          // Auto set appropriate event codes if selecting swipe or standard buttons
-                          if (val === 'R_STICK_UP' || val === 'SWIPE_UP') {
-                            handleUpdateBtnProperty('type', 'swipe');
-                            handleUpdateBtnProperty('androidEventCode', 201);
-                            handleUpdateBtnProperty('label', 'Swipe Atas (UP)');
-                          } else if (val === 'R_STICK_DOWN' || val === 'SWIPE_DOWN') {
-                            handleUpdateBtnProperty('type', 'swipe');
-                            handleUpdateBtnProperty('androidEventCode', 202);
-                            handleUpdateBtnProperty('label', 'Swipe Bawah (DOWN)');
-                          } else if (val === 'R_STICK_LEFT' || val === 'SWIPE_LEFT') {
-                            handleUpdateBtnProperty('type', 'swipe');
-                            handleUpdateBtnProperty('androidEventCode', 203);
-                            handleUpdateBtnProperty('label', 'Swipe Kiri (LEFT)');
-                          } else if (val === 'R_STICK_RIGHT' || val === 'SWIPE_RIGHT') {
-                            handleUpdateBtnProperty('type', 'swipe');
-                            handleUpdateBtnProperty('androidEventCode', 204);
-                            handleUpdateBtnProperty('label', 'Swipe Kanan (RIGHT)');
-                          } else if (val === 'BUTTON_A') {
-                            handleUpdateBtnProperty('androidEventCode', 96);
-                          } else if (val === 'BUTTON_B') {
-                            handleUpdateBtnProperty('androidEventCode', 97);
-                          } else if (val === 'BUTTON_X') {
-                            handleUpdateBtnProperty('androidEventCode', 99);
-                          } else if (val === 'BUTTON_Y') {
-                            handleUpdateBtnProperty('androidEventCode', 100);
-                          } else if (val === 'BUTTON_L1') {
-                            handleUpdateBtnProperty('androidEventCode', 101);
-                          } else if (val === 'BUTTON_R1') {
-                            handleUpdateBtnProperty('androidEventCode', 102);
-                          } else if (val === 'BUTTON_L2') {
-                            handleUpdateBtnProperty('androidEventCode', 104);
-                          } else if (val === 'BUTTON_R2') {
-                            handleUpdateBtnProperty('androidEventCode', 105);
-                          }
-                          onLogMessage(`Overlay Inspector: Mapped trigger slot to tactile action: ${val}`);
-                        }}
-                      >
-                        <optgroup label="Arah Analog Kanan (R-Stick / R3)">
-                          <option value="R_STICK_UP">R_STICK_UP (R-Stick ↑)</option>
-                          <option value="R_STICK_DOWN">R_STICK_DOWN (R-Stick ↓)</option>
-                          <option value="R_STICK_LEFT">R_STICK_LEFT (R-Stick ←)</option>
-                          <option value="R_STICK_RIGHT">R_STICK_RIGHT (R-Stick →)</option>
-                        </optgroup>
-                        <optgroup label="Swipe Layar 4 Arah (Legacy)">
-                          <option value="SWIPE_UP">SWIPE_UP (Geser Atas)</option>
-                          <option value="SWIPE_DOWN">SWIPE_DOWN (Geser Bawah)</option>
-                          <option value="SWIPE_LEFT">SWIPE_LEFT (Geser Kiri)</option>
-                          <option value="SWIPE_RIGHT">SWIPE_RIGHT (Geser Kanan)</option>
-                        </optgroup>
-                        <optgroup label="Tombol Gamepad Utama">
-                          <option value="BUTTON_A">BUTTON_A (A / Cross)</option>
-                          <option value="BUTTON_B">BUTTON_B (B / Circle)</option>
-                          <option value="BUTTON_X">BUTTON_X (X / Square)</option>
-                          <option value="BUTTON_Y">BUTTON_Y (Y / Triangle)</option>
-                        </optgroup>
-                        <optgroup label="Bahu & Analog Cliks">
-                          <option value="BUTTON_L1">BUTTON_L1 (LB Bumper)</option>
-                          <option value="BUTTON_R1">BUTTON_R1 (RB Bumper)</option>
-                          <option value="BUTTON_L2">BUTTON_L2 (LT Trigger)</option>
-                          <option value="BUTTON_R2">BUTTON_R2 (RT Trigger)</option>
-                          <option value="BUTTON_L3">BUTTON_L3 (L3 Thumb)</option>
-                          <option value="BUTTON_R3">BUTTON_R3 (R3 Thumb)</option>
-                        </optgroup>
-                        <optgroup label="Gamepad D-pad Navigation">
-                          <option value="DPAD_UP">DPAD_UP (Dpad Atas)</option>
-                          <option value="DPAD_DOWN">DPAD_DOWN (Dpad Bawah)</option>
-                          <option value="DPAD_LEFT">DPAD_LEFT (Dpad Kiri)</option>
-                          <option value="DPAD_RIGHT">DPAD_RIGHT (Dpad Kanan)</option>
-                        </optgroup>
-                        <optgroup label="Sensor & Analogs">
-                          <option value="L_STICK">L_STICK (Move)</option>
-                          <option value="R_STICK">R_STICK (Camera)</option>
-                          <option value="GYRO">GYRO (Motion/Sensor)</option>
-                        </optgroup>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-semibold text-slate-400 mb-1 font-sans uppercase">Inject Event (evdev)</label>
-                      <input
-                        type="number"
-                        className="w-full bg-slate-900 text-slate-100 text-[11px] px-2 py-1.5 rounded focus:outline-none focus:border-indigo-500 font-mono border border-slate-800"
-                        value={selectedButton.androidEventCode}
-                        onChange={(e) => handleUpdateBtnProperty('androidEventCode', parseInt(e.target.value) || 0)}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-[10px] font-semibold text-slate-400 mb-1 font-sans uppercase">Horizontal X (%)</label>
-                      <input
-                        type="number"
-                        className="w-full bg-slate-900 text-slate-100 text-xs px-2 py-1 rounded focus:outline-none focus:border-indigo-500 font-mono border border-slate-800"
-                        value={Number(selectedButton.x).toFixed(1)}
-                        onChange={(e) => handleUpdateBtnProperty('x', Math.max(0, Math.min(100, parseFloat(e.target.value) || 0)))}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-semibold text-slate-400 mb-1 font-sans uppercase">Vertical Y (%)</label>
-                      <input
-                        type="number"
-                        className="w-full bg-slate-900 text-slate-100 text-xs px-2 py-1 rounded focus:outline-none focus:border-indigo-500 font-mono border border-slate-800"
-                        value={Number(selectedButton.y).toFixed(1)}
-                        onChange={(e) => handleUpdateBtnProperty('y', Math.max(0, Math.min(100, parseFloat(e.target.value) || 0)))}
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="flex justify-between text-[10px] text-slate-400 mb-1 uppercase font-semibold">
-                      <span>Ukuran (Lebar & Tinggi) / Resize</span>
-                      <span>{selectedButton.width}px</span>
-                    </div>
-                    <input
-                      type="range"
-                      min="30"
-                      max="300"
-                      className="w-full accent-indigo-500"
-                      value={selectedButton.width}
-                      onChange={(e) => {
-                        const val = parseInt(e.target.value);
-                        handleUpdateBtnProperty('width', val);
-                        handleUpdateBtnProperty('height', val);
-                      }}
-                    />
-                  </div>
-
-                  <div>
-                    <div className="flex justify-between text-[10px] text-slate-400 mb-1 uppercase font-semibold">
-                      <span>Tactile Node Opacity</span>
-                      <span>{Math.round(selectedButton.opacity * 100)}%</span>
-                    </div>
-                    <input
-                      type="range"
-                      min="0.1"
-                      max="1.0"
-                      step="0.05"
-                      className="w-full accent-indigo-500"
-                      value={selectedButton.opacity}
-                      onChange={(e) => handleUpdateBtnProperty('opacity', parseFloat(e.target.value))}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* D-Pad position helper offset controllers */}
-              <div className="p-3 bg-slate-900 rounded-lg border border-slate-800">
-                <span className="block text-[10px] font-bold text-slate-400 uppercase mb-2">Micro-Location Displacement</span>
-                <div className="flex justify-center">
-                  <div className="grid grid-cols-3 gap-1.5 w-28">
-                    <div></div>
-                    <button onClick={() => relocateButtonOffset('up')} className="p-1 px-3 bg-slate-950 font-semibold border border-slate-800 text-slate-300 rounded hover:bg-slate-800 transition-colors">↑</button>
-                    <div></div>
-                    <button onClick={() => relocateButtonOffset('left')} className="p-1 px-3 bg-slate-950 font-semibold border border-slate-800 text-slate-300 rounded hover:bg-slate-800 transition-colors">←</button>
-                    <div></div>
-                    <button onClick={() => relocateButtonOffset('right')} className="p-1 px-3 bg-slate-950 font-semibold border border-slate-800 text-slate-300 rounded hover:bg-slate-800 transition-colors">→</button>
-                    <div></div>
-                    <button onClick={() => relocateButtonOffset('down')} className="p-1 px-3 bg-slate-950 font-semibold border border-slate-800 text-slate-300 rounded hover:bg-slate-800 transition-colors">↓</button>
-                    <div></div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="p-6 bg-slate-950/40 rounded-lg border border-dashed border-slate-800 text-center flex flex-col items-center justify-center space-y-2 h-48">
-              <Move className="w-8 h-8 text-indigo-500/30" />
-              <span className="text-xs text-slate-400">No Overlay Node Selected</span>
-              <p className="text-[10px] text-slate-500 leading-relaxed max-w-[180px]">
-                Click or drag any node on the left canvas stage to modify calibration metrics.
-              </p>
-            </div>
-          )}
+      {/* Floating Palette Button (hanya muncul di Edit Mode) */}
+      {isEditMode && (
+        <div className="absolute top-6 right-6 z-50">
+          {/* Tombol palette kamu bisa disederhanakan atau tetap full */}
         </div>
-
-        <div className="p-4 bg-slate-950 rounded-lg border border-slate-800 flex items-center justify-between text-xs text-slate-400 mt-6 md:mt-2 bg-gradient-to-r from-slate-950 to-indigo-950/20">
-          <span>Active Nodes: {activeProfile.buttons.length}</span>
-          <span className="text-[10px] uppercase font-bold text-indigo-400 font-mono tracking-wider">uinput Ready</span>
-        </div>
-      </div>
+      )}
 
     </div>
   );

@@ -14,13 +14,13 @@ import OverlayWysiwyg from './components/OverlayWysiwyg';
 import MacroEngine from './components/MacroEngine';
 import GamepadTester from './components/GamepadTester';
 import GameSelector from './components/GameSelector';
-import AITunnelPanel from './components/AITunnelPanel';
+import CreditsPanel from './components/CreditsPanel';
 import { registerPlugin } from '@capacitor/core';
 const OverlayPlugin = registerPlugin('Overlay');
 
 import { 
   Terminal, Shield, Settings, Activity, Compass, Cpu, HelpCircle, 
-  ChevronRight, Sparkles, BookOpen, Layers, Bot, ShieldAlert
+  ChevronRight, Sparkles, BookOpen, Layers, Bot, ShieldAlert, Heart
 } from 'lucide-react';
 import AppIcon from '../icon.svg';
 
@@ -42,7 +42,7 @@ export default function App() {
 
   const [profiles, setProfiles] = React.useState<GamepadProfile[]>(INITIAL_PROFILES);
   const [activeProfileId, setActiveProfileId] = React.useState('genshin');
-  const [selectedMainView, setSelectedMainView] = React.useState<'shizuku' | 'overlay' | 'profile' | 'macro' | 'tester' | 'ai_tunnel'>('shizuku');
+  const [selectedMainView, setSelectedMainView] = React.useState<'shizuku' | 'overlay' | 'profile' | 'macro' | 'tester' | 'credits'>('shizuku');
   const [isKilling, setIsKilling] = React.useState(false);
 
   // Settings state
@@ -600,15 +600,15 @@ export default function App() {
             Sensor & Input Diagnostics
           </button>
           <button
-            onClick={() => setSelectedMainView('ai_tunnel')}
+            onClick={() => setSelectedMainView('credits')}
             className={`px-4 py-2 text-xs font-semibold rounded-lg flex items-center gap-2 transition-all ${
-              selectedMainView === 'ai_tunnel' 
+              selectedMainView === 'credits' 
                 ? 'bg-slate-900 text-pink-400 border border-slate-800' 
                 : 'text-slate-400 hover:text-pink-300 hover:bg-slate-950/40'
             }`}
           >
-            <Bot className="w-3.5 h-3.5 text-pink-400" />
-            AI Tunnel & Copilot
+            <Heart className="w-3.5 h-3.5 text-pink-400" />
+            Socials & Credits
           </button>
         </div>
 
@@ -658,10 +658,8 @@ export default function App() {
             />
           )}
 
-          {selectedMainView === 'ai_tunnel' && (
-            <AITunnelPanel
-              onLogMessage={handleLogMessage}
-            />
+          {selectedMainView === 'credits' && (
+            <CreditsPanel />
           )}
         </div>
 

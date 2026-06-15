@@ -429,6 +429,35 @@ export default function App() {
     handleLogMessage('SYSTEM: Kill-switch engaged. All services and injections terminated.');
   };
 
+  const isNativeOverlayWindow = typeof window !== 'undefined' && window.location.search.includes('overlay=true');
+
+  React.useEffect(() => {
+    if (isNativeOverlayWindow) {
+      document.documentElement.classList.add('is-overlay');
+      document.body.classList.add('is-overlay');
+    }
+  }, [isNativeOverlayWindow]);
+
+  if (isNativeOverlayWindow) {
+    return (
+      <div className="w-screen h-screen bg-transparent select-none overflow-hidden text-slate-100">
+        <OverlayWysiwyg
+          activeProfile={activeProfile}
+          onUpdateProfile={(updated) => {
+            handleUpdateProfile(updated);
+            if (typeof window !== 'undefined' && (window as any).AndroidOverlay) {
+               (window as any).AndroidOverlay.onCommand('request_config_save ' + JSON.stringify(updated));
+            }
+          }}
+          onLogMessage={handleLogMessage}
+          activeKeys={activeKeys}
+          activeAxes={activeAxes}
+          isNativeOverlay={true}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#060608] text-slate-100 flex flex-col font-sans selection:bg-indigo-500 selection:text-white">
       {/* Visual background atmospheric elements */}

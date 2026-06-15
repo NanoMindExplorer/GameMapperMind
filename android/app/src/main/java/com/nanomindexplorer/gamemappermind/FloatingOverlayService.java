@@ -216,9 +216,9 @@ public class FloatingOverlayService extends Service {
                 // Create Floating Button for Toggling Mode
                 floatingButton = new ImageView(FloatingOverlayService.this);
                 // Try to load our icon.png if possible, or use default android icon
-                floatingButton.setImageResource(android.R.drawable.ic_menu_edit);
-                floatingButton.setBackgroundColor(Color.parseColor("#80000000"));
-                floatingButton.setPadding(20, 20, 20, 20);
+                floatingButton.setImageResource(R.mipmap.ic_launcher_round);
+                floatingButton.setBackgroundColor(Color.parseColor("#40000000"));
+                floatingButton.setPadding(10, 10, 10, 10);
                 
                 floatButtonParams = new WindowManager.LayoutParams(
                         WindowManager.LayoutParams.WRAP_CONTENT,
@@ -262,11 +262,11 @@ public class FloatingOverlayService extends Service {
                                     isEditMode = !isEditMode;
                                     if (isEditMode) {
                                         webViewParams.flags &= ~WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
-                                        floatingButton.setImageResource(android.R.drawable.ic_menu_close_clear_cancel);
+                                        floatingButton.setColorFilter(Color.GREEN);
                                         webView.evaluateJavascript("if(window.togglePalette) window.togglePalette(true);", null);
                                     } else {
                                         webViewParams.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
-                                        floatingButton.setImageResource(android.R.drawable.ic_menu_edit);
+                                        floatingButton.clearColorFilter();
                                         webView.evaluateJavascript("if(window.togglePalette) window.togglePalette(false);", null);
                                     }
                                     windowManager.updateViewLayout(webView, webViewParams);

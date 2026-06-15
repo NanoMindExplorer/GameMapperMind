@@ -16,9 +16,10 @@ interface OverlayWysiwygProps {
   onLogMessage: (msg: string) => void;
   activeKeys?: string[];
   activeAxes?: {lx: number, ly: number, rx: number, ry: number};
+  isNativeOverlay?: boolean;
 }
 
-export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMessage, activeKeys = [], activeAxes = {lx:0, ly:0, rx:0, ry:0} }: OverlayWysiwygProps) {
+export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMessage, activeKeys = [], activeAxes = {lx:0, ly:0, rx:0, ry:0}, isNativeOverlay = false }: OverlayWysiwygProps) {
   const [showConfig, setShowConfig] = React.useState(true);
   const [selectedButtonId, setSelectedButtonId] = React.useState<string | null>(null);
   const [screenshotMode, setScreenshotMode] = React.useState<'genshin' | 'pubg' | 'codm' | 'efootball'>('genshin');
@@ -213,13 +214,15 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
   };
 
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xl grid grid-cols-1 lg:grid-cols-12">
+    <div className={isNativeOverlay ? "w-screen h-screen overflow-hidden" : "bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xl grid grid-cols-1 lg:grid-cols-12"}>
       
       {/* Visual Canvas stage Area (Col 9) */}
-      <div className="lg:col-span-8 p-6 flex flex-col border-b lg:border-b-0 lg:border-r border-slate-800 bg-slate-950/20">
+      <div className={isNativeOverlay ? "flex-1 relative w-full h-full" : "lg:col-span-8 p-6 flex flex-col border-b lg:border-b-0 lg:border-r border-slate-800 bg-slate-950/20"}>
         
         {/* Panel controls */}
-        <div className="flex flex-wrap justify-between items-center gap-3 mb-4">
+        {!isNativeOverlay && (
+        <>
+          <div className="flex flex-wrap justify-between items-center gap-3 mb-4">
           <div>
             <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2">
               <Layers className="w-4 h-4 text-indigo-400" />
@@ -283,6 +286,8 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
             </button>
           </div>
         </div>
+        </>
+        )}
 
         {/* Main absolute aspect ratio lock screen emulator */}
         <div 
@@ -310,12 +315,8 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
             onUpdateProfile({ ...activeProfile, buttons: updatedButtons });
           }}
           onTouchEnd={handleDragEnd}
-          className="relative w-full aspect-[16/9] bg-slate-950 rounded-lg overflow-hidden border border-slate-800 shadow-inner group select-none touch-none"
-          style={{
-            backgroundImage: `linear-gradient(rgba(0,0,0,${bgDimLevel / 100}), rgba(0,0,0,${bgDimLevel / 100})), url(${getBackgroundUrl()})`,
-            backgroundSize: 'cover',
-            backgroundPosition: 'center'
-          }}
+          className={containerClass}
+          style={containerStyle}
         >
           {/* Snap overlay grid when adjusting mapping nodes */}
           {!hideGrid && showPalette && (
@@ -482,16 +483,54 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
               <div
                 key={btn.id}
                 onMouseDown={(e) => {
-                  handleDragStart(e, btn.id);
+                  if (showPalette) {
+                    handleDragStart(e, btn.id);
+                  } else {
+                    const ratio = window.devicePixelRatio || 1;
+                    const injectX = Math.round((btn.x / 100) * window.innerWidth * ratio);
+                    const injectY = Math.round((btn.y / 100) * window.innerHeight * ratio);
+                    if (window.AndroidOverlay) window.AndroidOverlay.onCommand(`down ${injectX} ${injectY}`);
+                  }
+                }}
+                onMouseUp={(e) => {
+                  if (!showPalette) {
+                    const ratio = window.devicePixelRatio || 1;
+                    const injectX = Math.round((btn.x / 100) * window.innerWidth * ratio);
+                    const injectY = Math.round((btn.y / 100) * window.innerHeight * ratio);
+                    if (window.AndroidOverlay) window.AndroidOverlay.onCommand(`up ${injectX} ${injectY}`);
+                  }
                 }}
                 onTouchStart={(e) => {
                   e.stopPropagation();
-                  setSelectedButtonId(btn.id);
-                  setIsDragging(true);
+                  if (showPalette) {
+                    setSelectedButtonId(btn.id);
+                    setIsDragging(true);
+                  } else {
+                    const ratio = window.devicePixelRatio || 1;
+                    const injectX = Math.round((btn.x / 100) * window.innerWidth * ratio);
+                    const injectY = Math.round((btn.y / 100) * window.innerHeight * ratio);
+                    if (window.AndroidOverlay) window.AndroidOverlay.onCommand(`down ${injectX} ${injectY}`);
+                  }
+                }}
+                onTouchMove={(e) => {
+                  if (!showPalette) {
+                    const ratio = window.devicePixelRatio || 1;
+                    const injectX = Math.round((btn.x / 100) * window.innerWidth * ratio);
+                    const injectY = Math.round((btn.y / 100) * window.innerHeight * ratio);
+                    if (window.AndroidOverlay) window.AndroidOverlay.onCommand(`move ${injectX} ${injectY}`);
+                  }
+                }}
+                onTouchEnd={(e) => {
+                  if (!showPalette) {
+                    const ratio = window.devicePixelRatio || 1;
+                    const injectX = Math.round((btn.x / 100) * window.innerWidth * ratio);
+                    const injectY = Math.round((btn.y / 100) * window.innerHeight * ratio);
+                    if (window.AndroidOverlay) window.AndroidOverlay.onCommand(`up ${injectX} ${injectY}`);
+                  }
                 }}
                 onClick={(e) => { 
                   e.stopPropagation(); 
-                  setSelectedButtonId(btn.id); 
+                  if (showPalette) setSelectedButtonId(btn.id); 
                 }}
                 className={`absolute ${btn.width > 80 ? 'rounded-[40%]' : 'rounded-[50%]'} border-[2.5px] flex flex-col justify-center items-center font-sans tracking-tight ${btnColor} transition-all antialiased select-none group/node outline-none cursor-pointer pointer-events-auto`}
                 style={{
@@ -613,6 +652,7 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
       </div>
 
       {/* Controller Parameters (Col 4) */}
+      {!isNativeOverlay && (
       <div className="lg:col-span-4 p-6 bg-slate-950/40 flex flex-col justify-between">
         <div className="space-y-6">
           <div>
@@ -834,6 +874,7 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
           <span className="text-[10px] uppercase font-bold text-indigo-400 font-mono tracking-wider">uinput Ready</span>
         </div>
       </div>
+      )}
 
     </div>
   );

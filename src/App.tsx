@@ -224,11 +224,16 @@ export default function App() {
     }
   };
 
+  const shizukuStateRef = React.useRef(shizukuState);
+  React.useEffect(() => {
+    shizukuStateRef.current = shizukuState;
+  }, [shizukuState]);
+
   // Query real simulation logs and stats from server, override with Native plugin state if on device
   const fetchStatus = async () => {
     try {
       // Just re-check native dependencies directly
-      const nextState = await checkShizukuStatus(shizukuState);
+      const nextState = await checkShizukuStatus(shizukuStateRef.current);
       setShizukuState(nextState);
     } catch (err) {
       console.error('Failed to sync native state', err);
@@ -321,6 +326,9 @@ export default function App() {
                method: "POST", headers: { "Content-Type": "application/json" },
                body: JSON.stringify({ command: "touch_down", id: 'L_STICK', x: baseX, y: baseY })
              }).catch(() => {});
+           } else if (typeof window !== 'undefined' && 'Capacitor' in window) {
+             // Analog stick initial touch
+             injectInput(`input tap ${baseX} ${baseY}`);
            }
         }
 
@@ -373,6 +381,9 @@ export default function App() {
                method: "POST", headers: { "Content-Type": "application/json" },
                body: JSON.stringify({ command: "touch_down", id: 'R_STICK', x: baseX, y: baseY })
              }).catch(() => {});
+           } else if (typeof window !== 'undefined' && 'Capacitor' in window) {
+             // Analog stick initial touch
+             injectInput(`input tap ${baseX} ${baseY}`);
            }
         }
 

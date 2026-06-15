@@ -57,8 +57,8 @@ export function useShizuku() {
   const startDaemon = async () => {
     if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
       try {
-        await ShizukuPlugin.startDaemon();
-        return true;
+        const result = await ShizukuPlugin.startDaemon();
+        return result.success;
       } catch (err) {
         console.error("Native start daemon error", err);
         return false;
@@ -70,8 +70,8 @@ export function useShizuku() {
   const stopDaemon = async () => {
     if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
       try {
-        await ShizukuPlugin.stopDaemon();
-        return true;
+        const result = await ShizukuPlugin.stopDaemon();
+        return result.success;
       } catch (err) {
         console.error("Native stop daemon error", err);
         return false;
@@ -83,8 +83,8 @@ export function useShizuku() {
   const injectInput = React.useCallback(async (command: string) => {
     if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
       try {
-        await ShizukuPlugin.injectInput({ command });
-        return true;
+        const result = await ShizukuPlugin.injectInput({ command });
+        return result.success;
       } catch (err) {
         console.error("Native inject input error", err);
         return false;

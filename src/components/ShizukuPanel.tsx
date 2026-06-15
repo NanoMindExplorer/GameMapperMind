@@ -168,8 +168,10 @@ export default function ShizukuPanel({ shizukuState, setShizukuState, onLogMessa
   const triggerAction = async (action: 'start' | 'stop' | 'toggle_mode', mode?: 'shizuku' | 'desktop') => {
     setIsLoading(true);
     try {
+      let success = true;
       if (action === 'start') {
         const res = await startDaemon();
+        success = res;
         if (res) {
            onLogMessage(`[sh] Daemon started successfully.`);
         } else {
@@ -177,6 +179,7 @@ export default function ShizukuPanel({ shizukuState, setShizukuState, onLogMessa
         }
       } else if (action === 'stop') {
         const res = await stopDaemon();
+        success = res;
         if (res) {
            onLogMessage(`[sh] Nexion Shuttle Daemon Terminated.`);
         }
@@ -189,10 +192,10 @@ export default function ShizukuPanel({ shizukuState, setShizukuState, onLogMessa
           let isRunning = prev.daemonRunning;
           let status = prev.status;
 
-          if (action === 'start') {
+          if (action === 'start' && success) {
             isRunning = true;
             status = nextMode === 'shizuku' ? 'CONNECTED_SHIZUKU' : 'CONNECTED_DESKTOP';
-          } else if (action === 'stop') {
+          } else if (action === 'stop' && success) {
             isRunning = false;
             status = 'DISCONNECTED';
           }
@@ -232,11 +235,11 @@ export default function ShizukuPanel({ shizukuState, setShizukuState, onLogMessa
     const res = await executeShizukuCommand(customLog);
     if (res) {
        if (res.output) {
-           const lines = res.output.split('\\n').filter(l => l.trim() !== '');
+           const lines = res.output.split('\n').filter(l => l.trim() !== '');
            lines.forEach(line => onLogMessage(`[sh] ${line}`));
        }
        if (res.error) {
-           const lines = res.error.split('\\n').filter(l => l.trim() !== '');
+           const lines = res.error.split('\n').filter(l => l.trim() !== '');
            lines.forEach(line => onLogMessage(`[sh ERROR] ${line}`));
        }
        if (!res.output && !res.error && res.exitCode === 0) {

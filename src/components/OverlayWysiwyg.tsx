@@ -23,7 +23,9 @@ interface OverlayWysiwygProps {
 export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMessage, activeKeys = [], activeAxes = {lx:0, ly:0, rx:0, ry:0}, isNativeOverlay = false }: OverlayWysiwygProps) {
   const [showConfig, setShowConfig] = React.useState(true);
   const [selectedButtonId, setSelectedButtonId] = React.useState<string | null>(null);
-  const [screenshotMode, setScreenshotMode] = React.useState<'genshin' | 'pubg' | 'codm' | 'efootball'>('genshin');
+  const [screenshotMode, setScreenshotMode] = React.useState<string>('genshin');
+  const [customScreenshotUrl, setCustomScreenshotUrl] = React.useState<string | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = React.useState(false);
   const [nexionPos, setNexionPos] = React.useState({ x: 50, y: 10 });
   const [isDraggingNexion, setIsDraggingNexion] = React.useState(false);
@@ -207,6 +209,7 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
 
   // Background mock representation
   const getBackgroundUrl = () => {
+    if (screenshotMode === 'custom' && customScreenshotUrl) return customScreenshotUrl;
     if (screenshotMode === 'genshin') return 'https://images.unsplash.com/photo-1542751371-adc38448a05e?auto=format&fit=crop&q=80&w=1200';
     if (screenshotMode === 'pubg') return 'https://images.unsplash.com/photo-1534423861386-85a16f5d13fd?auto=format&fit=crop&q=80&w=1200';
     if (screenshotMode === 'codm') return 'https://images.unsplash.com/photo-1511512578047-dfb367046420?auto=format&fit=crop&q=80&w=1200';
@@ -263,14 +266,49 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
             <span className="text-[10px] uppercase font-bold text-slate-400 px-2">Preview Simulator:</span>
             <select
               value={screenshotMode}
-              onChange={(e) => setScreenshotMode(e.target.value as any)}
+              onChange={(e) => {
+                setScreenshotMode(e.target.value);
+                if (e.target.value === 'custom') {
+                  fileInputRef.current?.click();
+                }
+              }}
               className="bg-slate-950 text-xs text-slate-300 px-3 py-1.5 rounded focus:outline-none focus:border-indigo-500 font-medium font-sans border-none"
             >
               <option value="genshin">Genshin Sanctuary Hub</option>
               <option value="pubg">Erangel Warzone</option>
               <option value="codm">Nuketown Battlefield</option>
               <option value="efootball">eFootball Pitch Arena</option>
+              <option value="custom">Upload Screenshot (Custom)</option>
             </select>
+            <input 
+              type="file" 
+              ref={fileInputRef} 
+              className="hidden" 
+              accept="image/*"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  const url = URL.createObjectURL(file);
+                  setCustomScreenshotUrl(url);
+                  setScreenshotMode('custom');
+                  onLogMessage(`SCREEN CONFIG: Added custom screenshot background.`);
+                } else if (screenshotMode === 'custom' && !customScreenshotUrl) {
+                  setScreenshotMode('genshin');
+                }
+              }}
+            />
+            {screenshotMode === 'custom' && customScreenshotUrl && (
+              <button 
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  fileInputRef.current?.click();
+                }}
+                className="text-[10px] font-bold text-indigo-400 hover:text-indigo-300 px-2 border border-indigo-900/50 bg-indigo-950/30 rounded py-1 ml-1"
+              >
+                Ganti Gambar
+              </button>
+            )}
           </div>
         </div>
 

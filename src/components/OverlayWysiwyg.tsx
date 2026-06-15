@@ -670,14 +670,30 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
                     stickX = activeAxes.rx * (btn.width / 3.5);
                     stickY = activeAxes.ry * (btn.height / 3.5);
                   }
+                  
+                  const isLeft = btn.mappedKey === 'L_STICK';
+                  const baseColor = isLeft ? 'bg-indigo-500' : 'bg-pink-500';
+                  const borderColor = isLeft ? 'border-indigo-400' : 'border-pink-400';
+                  
                   return (
-                    <div 
-                      className="absolute w-1/3 h-1/3 bg-blue-400/50 rounded-full border border-blue-300 drop-shadow-md"
-                      style={{
-                        transform: `translate(${stickX}px, ${stickY}px)`,
-                        transition: 'transform 0.05s linear'
-                      }}
-                    ></div>
+                    <>
+                      {/* Sub-grid crosshair indicator */}
+                      <div className="absolute inset-3 border border-white/10 rounded-full flex items-center justify-center pointer-events-none">
+                        <div className="w-full h-[1px] bg-white/5 absolute"></div>
+                        <div className="h-full w-[1px] bg-white/5 absolute"></div>
+                      </div>
+                      
+                      {/* The analog cap that moves */}
+                      <div 
+                        className={`absolute w-[45%] h-[45%] ${baseColor} rounded-full border-[2.5px] ${borderColor} shadow-[0_4px_10px_rgba(0,0,0,0.5),inset_0_3px_5px_rgba(255,255,255,0.4)] z-10 flex items-center justify-center backdrop-blur-md`}
+                        style={{
+                          transform: `translate(${stickX}px, ${stickY}px)`,
+                          transition: 'transform 80ms ease-out'
+                        }}
+                      >
+                         <div className="w-1/3 h-1/3 rounded-full bg-white/30 blur-[1px]"></div>
+                      </div>
+                    </>
                   );
                 })()}
                 {btn.type === 'gyro_area' && (

@@ -67,17 +67,16 @@ const SHIZUKU_STEPS = [
     badge: "Izin Aplikasi"
   },
   {
-    title: "5. Aktifkan Izin Aksesibilitas & Tampilan Di Atas Aplikasi Lain",
-    short: "Izinkan aplikasi membuat overlay controller & menangkap tombol fisik.",
+    title: "5. Izinkan Tampilan Di Atas Aplikasi Lain & Optimasi Baterai",
+    short: "Izinkan rendering overlay di atas game.",
     details: [
       "Buka Pengaturan HP -> Aplikasi -> Kelola Aplikasi -> Cari 'Nexion' -> Aktifkan 'Tampilkan di atas aplikasi lain' (Display over other apps / Draw over other apps) agar tombol overlay HUD bisa muncul mengambang saat Anda bermain game.",
-      "⚠️ SANGAT DIANJURKAN: Buka Pengaturan -> Setelan Tambahan -> Aksesibilitas -> Pilih 'Layanan yang Diunduh/Terpasang' -> Pilih 'Nexion Mapper' -> Ketuk SAKELAR 'Gunakan Nexion Mapper'.",
-      "Layanan Aksesibilitas (Accessibility Service) membantu menangkap input tombol fisik bluetooth/OTG gamepad dari background dengan responsif & tanpa delay.",
-      "🔋 MATIKAN PENGHEMAT BATERAI: Pergi ke Info Aplikasi -> Baterai (Battery) -> Pilih 'Tidak Dibatasi' (Unrestricted / No Restrictions). Ini sangat krusial agar overlay Anda tidak dihentikan (force close) atau freeze oleh sistem saat bermain game berat."
+      "🔋 MATIKAN PENGHEMAT BATERAI: Anda dapat menggunakan tombol 'Ignore Battery Optimizations' di panel atas, atau rubah secara manual di pengaturan perangkat.",
+      "Langkah ini sangat krusial agar overlay Anda tidak dihentikan (force close) atau freeze oleh sistem saat bermain game berat."
     ],
     badge: "Overlay & Akses",
     actionButton: "Buka Pengaturan Aplikasi & Izin",
-    actionMessage: "[SYSTEM] Intent: android.settings.APPLICATION_DETAILS_SETTINGS dipanggil. Buka menu Aksesibilitas dan Overlay."
+    actionMessage: "[SYSTEM] Intent: android.settings.APPLICATION_DETAILS_SETTINGS dipanggil. Buka menu Overlay."
   },
   {
     title: "6. Boot Daemon Shuttle & Mulai Bermain!",
@@ -127,17 +126,16 @@ const DESKTOP_STEPS = [
     badge: "Script Companion"
   },
   {
-    title: "4. Aktifkan Izin Aksesibilitas & Tampilan Di Atas Aplikasi Lain",
+    title: "4. Izinkan Tampilan Di Atas Aplikasi Lain",
     short: "Izinkan aplikasi overlay controller & mendeteksi hardware.",
     details: [
       "Pergi ke Setelan HP -> Aplikasi -> Kelola Aplikasi -> Pilih 'Nexion' -> Nyalakan izin 'Tampilkan di Atas Aplikasi Lain' (Draw Over Other Apps / Display over details).",
-      "Pergi ke Setelan HP -> Setelan Tambahan -> Aksesibilitas -> Layanan Terpasang -> Aktifkan layanan 'Nexion Mapper'.",
       "Izin overlay ini diperlukan agar panel tombol konfigurasi map bisa melayang di atas layar game Anda untuk penempatan langsung.",
-      "🔋 MATIKAN PENGHEMAT BATERAI: Pada menu Info Aplikasi Nexion, ubah mode Baterai menjadi 'Tidak Dibatasi' (Unrestricted). Ini mencegah overlay keluar sendiri atau ngelag di tengah permainan."
+      "🔋 MATIKAN PENGHEMAT BATERAI: Anda dapat menggunakan tombol 'Ignore Battery Optimizations' di panel atas, atau rubah secara manual di pengaturan perangkat. Ini mencegah overlay keluar sendiri atau ngelag di tengah permainan."
     ],
     badge: "Overlay & Akses",
     actionButton: "Buka Pengaturan Aplikasi & Izin",
-    actionMessage: "[SYSTEM] Intent: android.settings.APPLICATION_DETAILS_SETTINGS dipanggil. Buka menu Aksesibilitas dan Overlay."
+    actionMessage: "[SYSTEM] Intent: android.settings.APPLICATION_DETAILS_SETTINGS dipanggil. Buka menu Overlay."
   },
   {
     title: "5. Aktifkan Driver & Lakukan Kalibrasi",

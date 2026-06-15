@@ -47,10 +47,18 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
 
   // Update screenshot background to match active profiles
   React.useEffect(() => {
-    if (activeProfile.id === 'genshin' || activeProfile.id === 'pubg' || activeProfile.id === 'codm' || activeProfile.id === 'efootball') {
+    if (activeProfile.screenshotMode) {
+      setScreenshotMode(activeProfile.screenshotMode);
+    } else if (activeProfile.id === 'genshin' || activeProfile.id === 'pubg' || activeProfile.id === 'codm' || activeProfile.id === 'efootball') {
       setScreenshotMode(activeProfile.id as any);
     }
-  }, [activeProfile.id]);
+    
+    if (activeProfile.customScreenshotUrl) {
+      setCustomScreenshotUrl(activeProfile.customScreenshotUrl);
+    } else {
+      setCustomScreenshotUrl(null); // Reset when switching to a profile without custom screenshot
+    }
+  }, [activeProfile.id, activeProfile.screenshotMode, activeProfile.customScreenshotUrl]);
 
   const selectedButton = activeProfile.buttons.find(b => b.id === selectedButtonId);
 
@@ -268,8 +276,12 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
             <select
               value={screenshotMode}
               onChange={(e) => {
-                setScreenshotMode(e.target.value);
-                if (e.target.value === 'custom') {
+                const newMode = e.target.value;
+                setScreenshotMode(newMode);
+                // Save current screenshot mode back to profile
+                onUpdateProfile({ ...activeProfile, screenshotMode: newMode });
+                
+                if (newMode === 'custom') {
                   fileInputRef.current?.click();
                 }
               }}
@@ -290,11 +302,58 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
                 const file = e.target.files?.[0];
                 if (file) {
                   const url = URL.createObjectURL(file);
+                  // Preview immediately
                   setCustomScreenshotUrl(url);
                   setScreenshotMode('custom');
+                  
+                  // Downscale for storage to prevent quota errors
+                  const img = new Image();
+                  img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    const MAX_WIDTH = 1280;
+                    const MAX_HEIGHT = 720;
+                    let width = img.width;
+                    let height = img.height;
+                    
+                    if (width > height) {
+                      if (width > MAX_WIDTH) {
+                        height *= MAX_WIDTH / width;
+                        width = MAX_WIDTH;
+                      }
+                    } else {
+                      if (height > MAX_HEIGHT) {
+                        width *= MAX_HEIGHT / height;
+                        height = MAX_HEIGHT;
+                      }
+                    }
+                    
+                    canvas.width = Math.round(width);
+                    canvas.height = Math.round(height);
+                    const ctx = canvas.getContext('2d');
+                    ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
+                    
+                    // low quality JPEG is fine for background mapping reference
+                    const base64Url = canvas.toDataURL('image/jpeg', 0.6);
+                    onUpdateProfile({ 
+                      ...activeProfile, 
+                      screenshotMode: 'custom', 
+                      customScreenshotUrl: base64Url 
+                    });
+                    
+                    // replace local url with compressed base64 so it persists properly
+                    setCustomScreenshotUrl(base64Url);
+                    URL.revokeObjectURL(url);
+                  };
+                  img.src = url;
+                  
                   onLogMessage(`SCREEN CONFIG: Added custom screenshot background.`);
                 } else if (screenshotMode === 'custom' && !customScreenshotUrl) {
                   setScreenshotMode('genshin');
+                  onUpdateProfile({ 
+                    ...activeProfile, 
+                    screenshotMode: 'genshin', 
+                    customScreenshotUrl: undefined 
+                  });
                 }
               }}
             />

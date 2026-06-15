@@ -16,6 +16,14 @@ export function useGamepad(
   const previousAxes = useRef({ lx: 0, ly: 0, rx: 0, ry: 0 });
   const lastGamepadId = useRef<string | null>(null);
 
+  const onButtonChangeRef = useRef(onButtonChange);
+  const onAxisMoveRef = useRef(onAxisMove);
+
+  useEffect(() => {
+    onButtonChangeRef.current = onButtonChange;
+    onAxisMoveRef.current = onAxisMove;
+  }, [onButtonChange, onAxisMove]);
+
   useEffect(() => {
     let animationFrameId: number;
 
@@ -79,8 +87,8 @@ export function useGamepad(
           const wasPressed = !!previousButtons.current[btnName];
 
           if (isPressed !== wasPressed) {
-            if (onButtonChange)
-              onButtonChange(btnName, isPressed, btn.value);
+            if (onButtonChangeRef.current)
+              onButtonChangeRef.current(btnName, isPressed, btn.value);
           }
         });
 
@@ -109,7 +117,7 @@ export function useGamepad(
 
         if (hasChanged || !isNeutral) {
           previousAxes.current = { lx: flx, ly: fly, rx: frx, ry: fry };
-          if (onAxisMove) onAxisMove(previousAxes.current);
+          if (onAxisMoveRef.current) onAxisMoveRef.current(previousAxes.current);
         }
       } else {
         // No operation, handled by ID tracking
@@ -123,7 +131,7 @@ export function useGamepad(
     return () => {
       cancelAnimationFrame(animationFrameId);
     };
-  }, [onButtonChange, onAxisMove]);
+  }, []);
 
   return { connectedGamepad };
 }

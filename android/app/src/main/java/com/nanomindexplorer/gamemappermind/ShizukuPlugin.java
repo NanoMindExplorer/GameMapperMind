@@ -70,7 +70,7 @@ public class ShizukuPlugin extends Plugin {
             } else {
                 call.reject("Shizuku is not running");
             }
-        } catch (Throwable e) {
+        } catch (Exception e) {
             e.printStackTrace();
             call.reject("Error requesting permission", e);
         }

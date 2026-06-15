@@ -213,9 +213,11 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
     return 'https://images.unsplash.com/photo-1511512578047-dfb367046420?auto=format&fit=crop&q=80&w=1200';
   };
 
+  const forcePointerEvents = showPalette || isDragging || isDraggingNexion;
+
   const containerClass = isNativeOverlay 
-    ? "relative w-screen h-screen overflow-hidden group select-none touch-none pointer-events-none" 
-    : "relative w-full aspect-[16/9] bg-slate-950 rounded-lg overflow-hidden border border-slate-800 shadow-inner group select-none touch-none";
+    ? `relative w-screen h-screen overflow-hidden group select-none touch-none ${forcePointerEvents ? 'pointer-events-auto bg-slate-900/60 backdrop-blur-sm' : 'pointer-events-none'}`
+    : "relative w-full aspect-[16/9] bg-slate-950 rounded-lg overflow-hidden border border-slate-800 shadow-inner group select-none touch-none pointer-events-auto";
 
   const containerStyle = isNativeOverlay 
     ? {} 
@@ -495,7 +497,7 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
               <div
                 key={btn.id}
                 onMouseDown={(e) => {
-                  if (showPalette) {
+                  if (!isNativeOverlay || showPalette) {
                     handleDragStart(e, btn.id);
                   } else {
                     const ratio = window.devicePixelRatio || 1;
@@ -505,7 +507,7 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
                   }
                 }}
                 onMouseUp={(e) => {
-                  if (!showPalette) {
+                  if (isNativeOverlay && !showPalette) {
                     const ratio = window.devicePixelRatio || 1;
                     const injectX = Math.round((btn.x / 100) * window.innerWidth * ratio);
                     const injectY = Math.round((btn.y / 100) * window.innerHeight * ratio);
@@ -514,7 +516,7 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
                 }}
                 onTouchStart={(e) => {
                   e.stopPropagation();
-                  if (showPalette) {
+                  if (!isNativeOverlay || showPalette) {
                     setSelectedButtonId(btn.id);
                     setIsDragging(true);
                   } else {
@@ -525,7 +527,7 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
                   }
                 }}
                 onTouchMove={(e) => {
-                  if (!showPalette) {
+                  if (isNativeOverlay && !showPalette) {
                     const ratio = window.devicePixelRatio || 1;
                     const injectX = Math.round((btn.x / 100) * window.innerWidth * ratio);
                     const injectY = Math.round((btn.y / 100) * window.innerHeight * ratio);
@@ -533,7 +535,7 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
                   }
                 }}
                 onTouchEnd={(e) => {
-                  if (!showPalette) {
+                  if (isNativeOverlay && !showPalette) {
                     const ratio = window.devicePixelRatio || 1;
                     const injectX = Math.round((btn.x / 100) * window.innerWidth * ratio);
                     const injectY = Math.round((btn.y / 100) * window.innerHeight * ratio);

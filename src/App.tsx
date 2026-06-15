@@ -271,7 +271,7 @@ export default function App() {
            method: "POST",
            headers: { "Content-Type": "application/json" },
            body: JSON.stringify({ command: isPressed ? "touch_down" : "touch_up", id: mapping.id, x, y })
-         });
+         }).catch(() => {});
       }
     }
   }, [activeProfile, shizukuState.status, injectInput]);
@@ -301,7 +301,7 @@ export default function App() {
             fetch("/api/daemon/inject", {
               method: "POST", headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ command: "touch_up", id: 'L_STICK' })
-            });
+            }).catch(() => {});
           }
         }
       } else {
@@ -317,7 +317,7 @@ export default function App() {
              fetch("/api/daemon/inject", {
                method: "POST", headers: { "Content-Type": "application/json" },
                body: JSON.stringify({ command: "touch_down", id: 'L_STICK', x: baseX, y: baseY })
-             });
+             }).catch(() => {});
            }
         }
 
@@ -328,7 +328,7 @@ export default function App() {
              fetch("/api/daemon/inject", {
                method: "POST", headers: { "Content-Type": "application/json" },
                body: JSON.stringify({ command: "touch_move", id: 'L_STICK', x: targetX, y: targetY })
-             });
+             }).catch(() => {});
           }
           activeStickPointer.current.l_lastX = targetX;
           activeStickPointer.current.l_lastY = targetY;
@@ -351,7 +351,7 @@ export default function App() {
             fetch("/api/daemon/inject", {
               method: "POST", headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ command: "touch_up", id: 'R_STICK' })
-            });
+            }).catch(() => {});
           }
         }
       } else {
@@ -367,7 +367,7 @@ export default function App() {
              fetch("/api/daemon/inject", {
                method: "POST", headers: { "Content-Type": "application/json" },
                body: JSON.stringify({ command: "touch_down", id: 'R_STICK', x: baseX, y: baseY })
-             });
+             }).catch(() => {});
            }
         }
 
@@ -378,7 +378,7 @@ export default function App() {
              fetch("/api/daemon/inject", {
                method: "POST", headers: { "Content-Type": "application/json" },
                body: JSON.stringify({ command: "touch_move", id: 'R_STICK', x: targetX, y: targetY })
-             });
+             }).catch(() => {});
           }
           activeStickPointer.current.r_lastX = targetX;
           activeStickPointer.current.r_lastY = targetY;

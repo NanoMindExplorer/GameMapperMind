@@ -40,16 +40,40 @@ public class ShizukuPlugin extends Plugin {
         call.resolve(result);
     }
 
+    private PluginCall permissionCall = null;
+    private final Shizuku.OnRequestPermissionResultListener permissionListener = new Shizuku.OnRequestPermissionResultListener() {
+        @Override
+        public void onRequestPermissionResult(int requestCode, int grantResult) {
+            if (requestCode == 1001 && permissionCall != null) {
+                JSObject result = new JSObject();
+                result.put("granted", grantResult == PackageManager.PERMISSION_GRANTED);
+                permissionCall.resolve(result);
+                permissionCall = null;
+                Shizuku.removeRequestPermissionResultListener(this);
+            }
+        }
+    };
+
     @PluginMethod
     public void requestPermission(PluginCall call) {
         try {
             if (Shizuku.pingBinder()) {
+                if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
+                    JSObject result = new JSObject();
+                    result.put("granted", true);
+                    call.resolve(result);
+                    return;
+                }
+                permissionCall = call;
+                Shizuku.addRequestPermissionResultListener(permissionListener);
                 Shizuku.requestPermission(1001);
+            } else {
+                call.reject("Shizuku is not running");
             }
         } catch (Throwable e) {
             e.printStackTrace();
+            call.reject("Error requesting permission", e);
         }
-        call.resolve();
     }
 
     @PluginMethod

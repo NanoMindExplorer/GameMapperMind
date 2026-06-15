@@ -522,7 +522,7 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
             <div>
               <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2">
                 <Compass className="w-5 h-5 text-indigo-400 animate-spin-slow" />
-                Gamepad Input Tester
+                Gamepad Input Tester (Simulasi Visual)
               </h3>
               <p className="text-[11px] text-slate-400">High-frequency gamepad diagnostics</p>
             </div>
@@ -808,7 +808,7 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-mono font-bold text-indigo-400 uppercase tracking-widest flex items-center gap-1.5 font-sans">
               <Zap className="w-3.5 h-3.5 text-indigo-400 fill-indigo-400/20" />
-              Tuning Latensi Gamepad (Zero Delay Engine)
+              Tuning Latensi Gamepad (Simulator Visual Eksperimental UI)
             </span>
             <span className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded border transition-all ${
               lowLatencyEnabled 

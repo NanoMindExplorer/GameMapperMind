@@ -168,45 +168,27 @@ export default function ShizukuPanel({ shizukuState, setShizukuState, onLogMessa
   const triggerAction = async (action: 'start' | 'stop' | 'toggle_mode', mode?: 'shizuku' | 'desktop') => {
     setIsLoading(true);
     try {
-      let success = true;
       if (action === 'start') {
         const res = await startDaemon();
-        success = res;
         if (res) {
            onLogMessage(`[sh] Daemon started successfully.`);
         } else {
-           onLogMessage(`[sh ERROR] Failed to start Daemon.`);
+           onLogMessage(`[sh ERROR] Failed to start Daemon. (Pastikan native plugin terpasang / simulator aktif)`);
         }
       } else if (action === 'stop') {
         const res = await stopDaemon();
-        success = res;
         if (res) {
            onLogMessage(`[sh] Nexion Shuttle Daemon Terminated.`);
         }
       }
 
-      // Direct local state simulation
       setTimeout(() => {
-        setShizukuState(prev => {
-          const nextMode = mode || prev.mode;
-          let isRunning = prev.daemonRunning;
-          let status = prev.status;
-
-          if (action === 'start' && success) {
-            isRunning = true;
-            status = nextMode === 'shizuku' ? 'CONNECTED_SHIZUKU' : 'CONNECTED_DESKTOP';
-          } else if (action === 'stop' && success) {
-            isRunning = false;
-            status = 'DISCONNECTED';
-          }
-
-          return { ...prev, daemonRunning: isRunning, mode: nextMode, status };
-        });
-        if (action !== 'start' && action !== 'stop') {
-          onLogMessage(`Daemon mode switched: ${mode || 'current mode'}`);
+        if (action === 'toggle_mode') {
+          setShizukuState(prev => ({ ...prev, mode: mode || prev.mode }));
+          onLogMessage(`Daemon mode switched: ${mode || 'current mode'} (Visual Check only)`);
         }
         setIsLoading(false);
-      }, 400); // simulate native processing delay
+      }, 400); // simulate UI loading delay
     } catch (err) {
       console.error(err);
       onLogMessage(`Error executing daemon control: ${action}`);
@@ -218,12 +200,17 @@ export default function ShizukuPanel({ shizukuState, setShizukuState, onLogMessa
     setIsLoading(true);
     onLogMessage("Invoking Shizuku.requestPermission() via android.os.Binder IPC");
     await nativeRequestPerm();
-    setTimeout(() => {
-      setShizukuPermission('GRANTED');
-      onLogMessage("Shizuku Permission request dispatched dynamically.");
-      setIsLoading(false);
-    }, 1000);
+    setIsLoading(false);
   };
+
+  // Sync component permission status with global state
+  React.useEffect(() => {
+    if (shizukuState.status === 'CONNECTED_SHIZUKU') {
+      setShizukuPermission('GRANTED');
+    } else if (shizukuState.status === 'DISCONNECTED') {
+      setShizukuPermission('PROMPT');
+    }
+  }, [shizukuState.status]);
 
 
   const sendCustomCommand = async (e: React.FormEvent) => {

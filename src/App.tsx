@@ -246,6 +246,18 @@ export default function App() {
 
   const activeProfile = profiles.find(p => p.id === activeProfileId) || profiles[0];
 
+  const handleInjectionCommand = React.useCallback((cmd: string) => {
+    if (typeof window !== 'undefined' && 'Capacitor' in window) {
+      if (shizukuState.status === 'CONNECTED_SHIZUKU') {
+        injectInput(cmd);
+      }
+    } else if (typeof window !== 'undefined' && (window as any).AndroidOverlay) {
+      (window as any).AndroidOverlay.onCommand(cmd);
+    } else {
+      console.log("[MOCK INJECT]", cmd);
+    }
+  }, [shizukuState.status, injectInput]);
+
   const handleGamepadPress = React.useCallback(async (button: string, isPressed: boolean) => {
     setActiveKeys(prev => {
       if (isPressed && !prev.includes(button)) return [...prev, button];
@@ -260,21 +272,13 @@ export default function App() {
       const x = Math.round((mapping.x / 100) * screenW);
       const y = Math.round((mapping.y / 100) * screenH);
 
-      if (shizukuState.status === 'CONNECTED_SHIZUKU' && typeof window !== 'undefined' && 'Capacitor' in window) {
-         if (isPressed) {
-           injectInput(`down ${x} ${y}`);
-         } else {
-           injectInput(`up ${x} ${y}`);
-         }
+      if (isPressed) {
+        handleInjectionCommand(`down ${x} ${y}`);
       } else {
-         fetch("/api/daemon/inject", {
-           method: "POST",
-           headers: { "Content-Type": "application/json" },
-           body: JSON.stringify({ command: isPressed ? "touch_down" : "touch_up", id: mapping.id, x, y })
-         }).catch(() => {});
+        handleInjectionCommand(`up ${x} ${y}`);
       }
     }
-  }, [activeProfile, shizukuState.status, injectInput]);
+  }, [activeProfile, handleInjectionCommand]);
 
   const activeStickPointer = React.useRef<{
     l_id: string | null; l_lastX: number; l_lastY: number;
@@ -297,14 +301,7 @@ export default function App() {
       if (isNeutral) {
         if (activeStickPointer.current.l_id === 'L_STICK') {
           activeStickPointer.current.l_id = null;
-          if (shizukuState.status === 'CONNECTED_SHIZUKU' && typeof window !== 'undefined' && 'Capacitor' in window) {
-            injectInput(`up ${activeStickPointer.current.l_lastX} ${activeStickPointer.current.l_lastY}`); 
-          } else {
-            fetch("/api/daemon/inject", {
-              method: "POST", headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ command: "touch_up", id: 'L_STICK' })
-            }).catch(() => {});
-          }
+          handleInjectionCommand(`up ${activeStickPointer.current.l_lastX} ${activeStickPointer.current.l_lastY}`); 
         }
       } else {
         const targetX = Math.round(baseX + (axes.lx * 150));
@@ -315,26 +312,11 @@ export default function App() {
            activeStickPointer.current.l_id = 'L_STICK';
            activeStickPointer.current.l_lastX = baseX;
            activeStickPointer.current.l_lastY = baseY;
-           if (shizukuState.status !== 'CONNECTED_SHIZUKU') {
-             fetch("/api/daemon/inject", {
-               method: "POST", headers: { "Content-Type": "application/json" },
-               body: JSON.stringify({ command: "touch_down", id: 'L_STICK', x: baseX, y: baseY })
-             }).catch(() => {});
-           } else if (typeof window !== 'undefined' && 'Capacitor' in window) {
-             // Analog stick initial touch
-             injectInput(`down ${baseX} ${baseY}`);
-           }
+           handleInjectionCommand(`down ${baseX} ${baseY}`);
         }
 
         if (!isSameAsLast) {
-          if (shizukuState.status === 'CONNECTED_SHIZUKU' && typeof window !== 'undefined' && 'Capacitor' in window) {
-             injectInput(`move ${targetX} ${targetY}`);
-          } else {
-             fetch("/api/daemon/inject", {
-               method: "POST", headers: { "Content-Type": "application/json" },
-               body: JSON.stringify({ command: "touch_move", id: 'L_STICK', x: targetX, y: targetY })
-             }).catch(() => {});
-          }
+          handleInjectionCommand(`move ${targetX} ${targetY}`);
           activeStickPointer.current.l_lastX = targetX;
           activeStickPointer.current.l_lastY = targetY;
         }
@@ -352,14 +334,7 @@ export default function App() {
       if (isNeutral) {
         if (activeStickPointer.current.r_id === 'R_STICK') {
           activeStickPointer.current.r_id = null;
-          if (shizukuState.status === 'CONNECTED_SHIZUKU' && typeof window !== 'undefined' && 'Capacitor' in window) {
-            injectInput(`up ${activeStickPointer.current.r_lastX} ${activeStickPointer.current.r_lastY}`); 
-          } else {
-            fetch("/api/daemon/inject", {
-              method: "POST", headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ command: "touch_up", id: 'R_STICK' })
-            }).catch(() => {});
-          }
+          handleInjectionCommand(`up ${activeStickPointer.current.r_lastX} ${activeStickPointer.current.r_lastY}`); 
         }
       } else {
         const targetX = Math.round(baseX + (axes.rx * 150));
@@ -370,26 +345,11 @@ export default function App() {
            activeStickPointer.current.r_id = 'R_STICK';
            activeStickPointer.current.r_lastX = baseX;
            activeStickPointer.current.r_lastY = baseY;
-           if (shizukuState.status !== 'CONNECTED_SHIZUKU') {
-             fetch("/api/daemon/inject", {
-               method: "POST", headers: { "Content-Type": "application/json" },
-               body: JSON.stringify({ command: "touch_down", id: 'R_STICK', x: baseX, y: baseY })
-             }).catch(() => {});
-           } else if (typeof window !== 'undefined' && 'Capacitor' in window) {
-             // Analog stick initial touch
-             injectInput(`down ${baseX} ${baseY}`);
-           }
+           handleInjectionCommand(`down ${baseX} ${baseY}`);
         }
 
         if (!isSameAsLast) {
-          if (shizukuState.status === 'CONNECTED_SHIZUKU' && typeof window !== 'undefined' && 'Capacitor' in window) {
-             injectInput(`move ${targetX} ${targetY}`);
-          } else {
-             fetch("/api/daemon/inject", {
-               method: "POST", headers: { "Content-Type": "application/json" },
-               body: JSON.stringify({ command: "touch_move", id: 'R_STICK', x: targetX, y: targetY })
-             }).catch(() => {});
-          }
+          handleInjectionCommand(`move ${targetX} ${targetY}`);
           activeStickPointer.current.r_lastX = targetX;
           activeStickPointer.current.r_lastY = targetY;
         }

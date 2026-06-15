@@ -61,14 +61,24 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
         }
       }
       
+      // Read all raw buttons so the user can see if M1/M2 are detected at non-standard indices
+      let rawButtonsPressed: string[] = [];
+      if (activeGP) {
+        activeGP.buttons.forEach((btn, idx) => {
+          if (btn.pressed) rawButtonsPressed.push(`B${idx}`);
+        });
+      }
+
       const activeId = activeGP ? activeGP.id : null;
-      if (activeId !== lastStateRef.current.connectedId) {
+      const rawStr = rawButtonsPressed.join(',');
+      
+      if (activeId !== lastStateRef.current.connectedId || rawStr !== lastStateRef.current.rawBtnStr) {
         setConnectedGamepad(activeGP);
         lastStateRef.current.connectedId = activeId;
-        if (activeGP) {
-          onLogMessage(`[HARDWARE] Terdeteksi Gamepad Terhubung: ${activeGP.id}`);
-        } else {
-          onLogMessage(`[HARDWARE] Gamepad Terputus`);
+        lastStateRef.current.rawBtnStr = rawStr;
+        
+        if (activeGP && rawStr) {
+            onLogMessage(`[HARDWARE] Menekan tombol raw: ${rawStr}`);
         }
       }
       

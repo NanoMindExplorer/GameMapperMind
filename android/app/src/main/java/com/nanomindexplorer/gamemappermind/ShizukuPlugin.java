@@ -23,20 +23,41 @@ public class ShizukuPlugin extends Plugin {
     public void checkStatus(PluginCall call) {
         boolean isRunning = false;
         boolean hasPermission = false;
+        int version = -1;
+        String errorMsg = "";
         try {
             isRunning = Shizuku.pingBinder();
+            if (!isRunning) {
+                Log.d("GameMapper", "Binder not running, attempting manual request");
+                try {
+                    Class<?> shizukuProviderClass = Class.forName("rikka.shizuku.ShizukuProvider");
+                    java.lang.reflect.Method method = shizukuProviderClass.getDeclaredMethod("requestBinderForNonProviderProcess", android.content.Context.class);
+                    method.setAccessible(true);
+                    method.invoke(null, getContext());
+                    
+                    // Small delay to allow binder to process
+                    Thread.sleep(200);
+                    isRunning = Shizuku.pingBinder();
+                } catch (Throwable t) {
+                    Log.e("GameMapper", "Manual bind failed", t);
+                    errorMsg = "Manual bind failed: " + t.toString();
+                }
+            }
             if (isRunning) {
                 hasPermission = Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED;
+                version = Shizuku.getVersion();
             }
         } catch (Throwable e) {
             Log.e("GameMapper", "checkStatus error", e);
-            e.printStackTrace();
+            errorMsg = e.toString();
         }
 
         Log.d("GameMapper", "Shizuku status: running=" + isRunning + ", permission=" + hasPermission);
         JSObject result = new JSObject();
         result.put("isRunning", isRunning);
         result.put("hasPermission", hasPermission);
+        result.put("version", version);
+        result.put("error", errorMsg);
         call.resolve(result);
     }
 
@@ -57,6 +78,15 @@ public class ShizukuPlugin extends Plugin {
     @PluginMethod
     public void requestPermission(PluginCall call) {
         try {
+            if (!Shizuku.pingBinder()) {
+                Log.d("GameMapper", "Binder not running, attempting manual request before permission");
+                Class<?> shizukuProviderClass = Class.forName("rikka.shizuku.ShizukuProvider");
+                java.lang.reflect.Method method = shizukuProviderClass.getDeclaredMethod("requestBinderForNonProviderProcess", android.content.Context.class);
+                method.setAccessible(true);
+                method.invoke(null, getContext());
+                Thread.sleep(200);
+            }
+
             if (Shizuku.pingBinder()) {
                 if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
                     JSObject result = new JSObject();

@@ -3,7 +3,7 @@ import { Capacitor, registerPlugin } from '@capacitor/core';
 import { ShizukuState } from '../types';
 
 export interface ShizukuPluginInterface {
-  checkStatus(): Promise<{ isRunning: boolean; hasPermission: boolean }>;
+  checkStatus(): Promise<{ isRunning: boolean; hasPermission: boolean; error?: string; version?: number }>;
   requestPermission(): Promise<void>;
   executeCommand(options: { command: string }): Promise<{ output: string; error: string; exitCode: number }>;
   startDaemon(): Promise<{ success: boolean }>;
@@ -19,7 +19,10 @@ export function useShizuku() {
   const checkShizukuStatus = async (currentState: ShizukuState): Promise<ShizukuState> => {
     if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
       try {
-        const { isRunning, hasPermission } = await ShizukuPlugin.checkStatus();
+        const { isRunning, hasPermission, error, version } = await ShizukuPlugin.checkStatus();
+        if (error) {
+           console.error("Shizuku Native Check Error Object:", error);
+        }
         return {
           ...currentState,
           daemonRunning: isRunning,

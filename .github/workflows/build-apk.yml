@@ -15,14 +15,14 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 2. Setup Java JDK 17
-      # ✅ FIX #1: Diubah dari '21' ke '17'
-      #    Kotlin Gradle plugin (yang dibundel Capacitor) belum support JVM target 21.
-      #    Error: "Unknown Kotlin JVM target: 21"
-      - name: Set up JDK 17
+      # 2. Setup Java JDK 21
+      # ✅ Dikembalikan ke 21 — capacitor-android 6/7 WAJIB sourceCompatibility 21.
+      #    Error sebelumnya "Unknown Kotlin JVM target: 21" bukan karena JDK-nya,
+      #    tapi karena Kotlin plugin-nya terlalu lama. Diperbaiki di step 7.
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
+          java-version: '21'
           distribution: 'temurin'
 
       # 3. Setup Node.js
@@ -43,14 +43,56 @@ jobs:
         run: |
           npm install @capacitor/core @capacitor/cli @capacitor/android
 
-      # 6. Capacitor Sync
-      # ✅ FIX #2: DIPINDAHKAN ke sini, SEBELUM inject Shizuku.
-      #    Sebelumnya sync ada di step 10 (SETELAH inject), sehingga
-      #    cap sync menimpa AndroidManifest.xml & build.gradle yang sudah dimodifikasi.
+      # 6. Capacitor Sync — SEBELUM inject Shizuku agar tidak ditimpa
       - name: Capacitor Sync
         run: npx cap sync android
 
-      # 7. Generate Icons
+      # 7. ✅ FIX UTAMA: Upgrade Kotlin Gradle Plugin ke 2.0.21
+      #    Kotlin < 1.9.20 tidak mengenal JVM target 21 → error "Unknown Kotlin JVM target: 21"
+      #    Kotlin 2.0.21 sudah fully support JVM 21, kompatibel dengan AGP 8.x
+      - name: Upgrade Kotlin Gradle Plugin to 2.0.21
+        run: |
+          node -e "
+            const fs = require('fs');
+
+            // --- Patch android/build.gradle (root level) ---
+            const rootGradle = 'android/build.gradle';
+            if (fs.existsSync(rootGradle)) {
+              let content = fs.readFileSync(rootGradle, 'utf8');
+
+              // Format 1: ext.kotlin_version = 'x.x.x'
+              content = content.replace(
+                /ext\.kotlin_version\s*=\s*[\"'][^\"']+[\"']/,
+                'ext.kotlin_version = \"2.0.21\"'
+              );
+
+              // Format 2: classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:x.x.x'
+              content = content.replace(
+                /org\.jetbrains\.kotlin:kotlin-gradle-plugin:[0-9.]+/g,
+                'org.jetbrains.kotlin:kotlin-gradle-plugin:2.0.21'
+              );
+
+              fs.writeFileSync(rootGradle, content, 'utf8');
+              console.log('Root build.gradle updated:');
+              console.log(content);
+            } else {
+              console.log('WARNING: android/build.gradle tidak ditemukan!');
+            }
+
+            // --- Patch libs.versions.toml (Gradle version catalog, jika ada) ---
+            const tomlPath = 'android/gradle/libs.versions.toml';
+            if (fs.existsSync(tomlPath)) {
+              let content = fs.readFileSync(tomlPath, 'utf8');
+              content = content.replace(
+                /kotlin\s*=\s*[\"'][^\"']+[\"']/,
+                'kotlin = \"2.0.21\"'
+              );
+              fs.writeFileSync(tomlPath, content, 'utf8');
+              console.log('libs.versions.toml updated.');
+            }
+          "
+
+      # 8. Generate Icons
       - name: Generate launcher icons
         run: |
           sudo apt-get update && sudo apt-get install -y librsvg2-bin
@@ -80,10 +122,8 @@ jobs:
             echo "icon.svg not found or res folder missing, skipping icon generation."
           fi
 
-      # 8. Inject Shizuku ke build.gradle
-      # ✅ FIX #3 (Proaktif): Selain Shizuku, sekarang juga memaksa
-      #    compileOptions ke VERSION_17 dan menambah/memperbaiki
-      #    kotlinOptions { jvmTarget = "17" } agar konsisten dengan JDK di atas.
+      # 9. Inject Shizuku ke build.gradle (app level)
+      #    compileOptions & kotlinOptions sekarang pakai 21 (konsisten dengan JDK & capacitor-android)
       - name: Inject Shizuku dependencies into build.gradle
         run: |
           node -e "
@@ -108,26 +148,33 @@ jobs:
                 content = content.replace('buildTypes {', 'buildFeatures {\n        aidl true\n    }\n    buildTypes {');
               }
 
-              // --- Fix compileOptions ke Java 17 ---
-              content = content.replace(
-                /sourceCompatibility JavaVersion\.VERSION_\w+/,
-                'sourceCompatibility JavaVersion.VERSION_17'
-              );
-              content = content.replace(
-                /targetCompatibility JavaVersion\.VERSION_\w+/,
-                'targetCompatibility JavaVersion.VERSION_17'
-              );
+              // --- Fix compileOptions ke Java 21 (sesuai capacitor-android & JDK) ---
+              if (content.includes('sourceCompatibility')) {
+                content = content.replace(
+                  /sourceCompatibility JavaVersion\.VERSION_\w+/,
+                  'sourceCompatibility JavaVersion.VERSION_21'
+                );
+                content = content.replace(
+                  /targetCompatibility JavaVersion\.VERSION_\w+/,
+                  'targetCompatibility JavaVersion.VERSION_21'
+                );
+              } else {
+                content = content.replace(
+                  'buildTypes {',
+                  'compileOptions {\n        sourceCompatibility JavaVersion.VERSION_21\n        targetCompatibility JavaVersion.VERSION_21\n    }\n    buildTypes {'
+                );
+              }
 
-              // --- Fix / tambah kotlinOptions jvmTarget = 17 ---
+              // --- Fix/tambah kotlinOptions jvmTarget = 21 ---
               if (!content.includes('kotlinOptions')) {
                 content = content.replace(
                   'buildTypes {',
-                  'kotlinOptions {\n        jvmTarget = \"17\"\n    }\n    buildTypes {'
+                  'kotlinOptions {\n        jvmTarget = \"21\"\n    }\n    buildTypes {'
                 );
               } else {
                 content = content.replace(
                   /jvmTarget\s*=\s*[\"'][^\"']+[\"']/,
-                  'jvmTarget = \"17\"'
+                  'jvmTarget = \"21\"'
                 );
               }
 
@@ -138,7 +185,7 @@ jobs:
             }
           "
 
-      # 9. Inject Shizuku ke AndroidManifest.xml
+      # 10. Inject Shizuku ke AndroidManifest.xml
       - name: Inject Shizuku into AndroidManifest.xml
         run: |
           node -e "
@@ -169,9 +216,12 @@ jobs:
             }
           "
 
-      # 10. Cek file kritis ada sebelum build
+      # 11. Cek file kritis ada sebelum build
       - name: Cek file kritis
         run: |
+          echo "=== Verifikasi Kotlin version di root build.gradle ==="
+          grep -E "kotlin_version|kotlin-gradle-plugin" android/build.gradle || echo "Tidak ditemukan pola kotlin version"
+
           echo "=== Cek AIDL ==="
           find android -name "*.aidl" && echo "AIDL ditemukan" || echo "PERINGATAN: AIDL tidak ditemukan"
 
@@ -187,7 +237,7 @@ jobs:
           echo "=== Cek ShizukuBridgePlugin ada ==="
           find android -name "ShizukuBridgePlugin.kt" && echo "ShizukuBridgePlugin.kt ditemukan" || echo "PERINGATAN: ShizukuBridgePlugin.kt tidak ada"
 
-      # 11. Regenerate gradle-wrapper.jar dari distribusi Gradle resmi
+      # 12. Regenerate gradle-wrapper.jar dari distribusi Gradle resmi
       - name: Regenerate gradle-wrapper.jar
         run: |
           echo "=== Download Gradle 8.14.3 resmi ==="
@@ -205,14 +255,14 @@ jobs:
           ls -lh gradle/wrapper/gradle-wrapper.jar
           sha256sum gradle/wrapper/gradle-wrapper.jar
 
-      # 12. Build APK
+      # 13. Build APK
       - name: Build Android APK
         run: |
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug --stacktrace
 
-      # 13. Upload APK
+      # 14. Upload APK
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:

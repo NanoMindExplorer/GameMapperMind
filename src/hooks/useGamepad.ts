@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const BUTTON_MAPPING = [
   "A", "B", "X", "Y",
@@ -12,6 +12,7 @@ export function useGamepad(
   buttonCallback: (buttonName: string, isPressed: boolean, value: number) => void,
   axisCallback: (axes: number[]) => void
 ) {
+  const [connectedGamepad, setConnectedGamepad] = useState<Gamepad | null>(null);
   const requestRef = useRef<number>();
   const buttonCallbackRef = useRef(buttonCallback);
   const axisCallbackRef = useRef(axisCallback);
@@ -32,6 +33,8 @@ export function useGamepad(
           break;
         }
       }
+
+      setConnectedGamepad(activeGamepad);
 
       if (activeGamepad) {
         activeGamepad.buttons.forEach((button, index) => {
@@ -62,4 +65,6 @@ export function useGamepad(
       }
     };
   }, []);
+
+  return { connectedGamepad };
 }

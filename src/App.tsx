@@ -469,7 +469,7 @@ export default function App() {
                 </span>
               </div>
               <p className="text-[9px] uppercase font-mono text-slate-400 tracking-widest mt-0.5 group-hover:text-indigo-400 transition-colors">
-                LOW-LEVEL TACTILE CORE & VERTICAL VISUAL VLM
+                LOW-LEVEL TACTILE CORE
               </p>
             </div>
           </div>
@@ -544,7 +544,7 @@ export default function App() {
               disabled={isKilling}
               id="global-kill-switch-btn"
               className="relative group px-3.5 py-1.5 text-xs font-bold font-mono uppercase bg-red-950/40 hover:bg-red-900/40 border border-red-500/50 hover:border-red-500 text-red-400 rounded-lg shadow-md shadow-red-500/5 hover:shadow-red-500/15 active:scale-[0.97] transition-all flex items-center gap-2"
-              title="Stop all active AI inputs and purge macro buffers"
+              title="Stop all active inputs and purge macro buffers"
             >
               <span className="relative flex h-2 w-2">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span>
@@ -722,8 +722,8 @@ export default function App() {
              <span className="text-indigo-400/80">Author Signature: @author NanoMind Explorer</span>
              <span>© 2026 NanoMind Systems Inc.</span>
           </div>
-          <div className="text-amber-500/80 font-semibold px-4 py-1.5 bg-amber-950/30 rounded border border-amber-900/50">
-            DISCLAIMER: Gunakan hanya di mode yang mengizinkan controller. Uji di akun alt terlebih dahulu. Kami tidak bertanggung jawab atas akun yang di-banned.
+          <div className="text-amber-500/80 font-semibold px-4 py-1.5 bg-amber-950/30 rounded border border-amber-900/50 mt-3 text-[11px] leading-relaxed max-w-4xl text-center">
+            DISCLAIMER: Gunakan hanya di mode yang mengizinkan controller. Ranked kompetitif tetap berisiko flag input pihak ketiga. Uji di akun alt lebih dulu. Kami tidak bertanggung jawab atas akun yang di-banned.
           </div>
         </div>
       </footer>

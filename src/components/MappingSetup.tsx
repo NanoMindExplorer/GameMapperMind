@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import TouchInjection from '../plugins/TouchInjection';
+import { Preferences } from '@capacitor/preferences';
 
 interface MappingItem {
   hardwareKey: string;
@@ -24,9 +25,9 @@ export function MappingSetup({ profileId }: { profileId: string }) {
 
   const fetchProfile = async () => {
     try {
-      const res = await fetch(`/api/profile/${profileId}`);
-      if (res.ok) {
-        const data = await res.json();
+      const result = await Preferences.get({ key: `nexion_mapping_${profileId}` });
+      if (result.value) {
+        const data = JSON.parse(result.value);
         if (data.mappings) {
           // Merge with default buttons
           const defaultMappings = BUTTONS.map(btn => ({
@@ -77,10 +78,9 @@ export function MappingSetup({ profileId }: { profileId: string }) {
   const handleSave = async () => {
     setLoading(true);
     try {
-      await fetch('/api/profile/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ profileId, mappings, joystick })
+      await Preferences.set({
+        key: `nexion_mapping_${profileId}`,
+        value: JSON.stringify({ mappings, joystick })
       });
       alert('Tersimpan!');
     } catch (err) {

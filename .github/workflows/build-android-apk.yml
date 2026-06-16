@@ -1,12 +1,6 @@
 # ============================================================
 # GameMapperMind — Android APK Build (Capacitor + Vite + Shizuku)
 # ============================================================
-# Triggered on:
-#   - Push to main
-#   - Pull request to main
-#   - Manual dispatch (with choice debug/release/both)
-#   - Tag push (v*.*.*) → auto-create GitHub Release with APK
-# ============================================================
 name: Build Android APK (Capacitor)
 
 on:
@@ -27,34 +21,26 @@ on:
           - release
           - both
 
-# Cancel in-progress builds when a new push arrives on the same ref
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Minimal permissions required for the workflow
 permissions:
-  contents: write       # needed for release uploads
+  contents: write
   actions: read
   checks: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
-      # ============================================================
-      # 1. Checkout
-      # ============================================================
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # needed for version tagging if we add it later
+          fetch-depth: 0
 
-      # ============================================================
-      # 2. Setup JDK 21 (LTS, required for AGP 8.x)
-      # ============================================================
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
@@ -62,50 +48,26 @@ jobs:
           distribution: 'zulu'
           cache: 'gradle'
 
-      # ============================================================
-      # 3. Setup Node.js 22 with npm cache
-      # ============================================================
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: 'npm'
 
-      # ============================================================
-      # 4. Setup Android SDK (FIX #1)
-      #    Use bash directly with $ANDROID_HOME instead of
-      #    android-actions/setup-android@v3 which had a bug
-      #    concatenating newline-separated packages into one
-      #    invalid package name.
-      # ============================================================
       - name: Setup Android SDK
         run: |
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null || true
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-36" "build-tools;36.0.0"
 
-      # ============================================================
-      # 5. Install npm dependencies (deterministic from package-lock.json)
-      # ============================================================
       - name: Install dependencies
         run: npm ci
 
-      # ============================================================
-      # 6. Type-check before building (fail fast on TS errors)
-      # ============================================================
       - name: TypeScript type-check
         run: npx tsc --noEmit
 
-      # ============================================================
-      # 7. Build web assets — Vite only (skip esbuild server.ts since
-      #    it produces dist/server.cjs which would bloat the APK and
-      #    is never used on Android)
-      # ============================================================
       - name: Build web app (Vite only)
         run: npx vite build
 
-      # ============================================================
-      # 8. Verify Capacitor config exists
-      # ============================================================
       - name: Verify Capacitor config
         run: |
           if [ ! -f "capacitor.config.ts" ] && [ ! -f "capacitor.config.json" ]; then
@@ -114,9 +76,6 @@ jobs:
           fi
           echo "✓ Capacitor config OK"
 
-      # ============================================================
-      # 9. Generate launcher icons (rsvg-convert from icon.svg)
-      # ============================================================
       - name: Generate launcher icons
         run: |
           sudo apt-get update -qq
@@ -137,7 +96,6 @@ jobs:
           mkdir -p android/app/src/main/res/drawable
           mkdir -p android/app/src/main/res/drawable-v24
 
-          # Standard legacy launcher icons
           rsvg-convert -w 48  -h 48  icon.svg -o android/app/src/main/res/mipmap-mdpi/ic_launcher.png
           rsvg-convert -w 48  -h 48  icon.svg -o android/app/src/main/res/mipmap-mdpi/ic_launcher_round.png
           rsvg-convert -w 72  -h 72  icon.svg -o android/app/src/main/res/mipmap-hdpi/ic_launcher.png
@@ -149,7 +107,6 @@ jobs:
           rsvg-convert -w 192 -h 192 icon.svg -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
           rsvg-convert -w 192 -h 192 icon.svg -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png
 
-          # Adaptive icon foreground/background (Android 8.0+)
           rsvg-convert -w 108 -h 108 icon.svg -o android/app/src/main/res/mipmap-mdpi/ic_launcher_foreground.png
           rsvg-convert -w 108 -h 108 icon.svg -o android/app/src/main/res/mipmap-mdpi/ic_launcher_background.png
           rsvg-convert -w 162 -h 162 icon.svg -o android/app/src/main/res/mipmap-hdpi/ic_launcher_foreground.png
@@ -164,18 +121,15 @@ jobs:
 
           echo "✓ Launcher icons generated"
 
-      # ============================================================
-      # 10. Capacitor sync (copy dist/ → android/app/src/main/assets/public/)
-      # ============================================================
       - name: Capacitor Sync
         run: npx cap sync android
 
       # ============================================================
-      # 11. Verify and repair Gradle wrapper (FIX #2 + #3)
-      #     - chmod +x before checking executable bit (Git sometimes
-      #       loses the executable bit during clone)
-      #     - If gradle-wrapper.jar is corrupt or invalid, regenerate
-      #       it using the system Gradle (installed via apt)
+      # Verify and repair Gradle wrapper
+      # - chmod +x gradlew
+      # - If gradle-wrapper.jar is corrupt or invalid, regenerate it
+      #   using a downloaded Gradle 8.14.3 binary (NOT apt-gradle which
+      #   is too old at v4.4.1)
       # ============================================================
       - name: Verify and repair Gradle wrapper
         run: |
@@ -186,37 +140,31 @@ jobs:
           fi
           chmod +x gradlew
 
-          # Verify gradle-wrapper.jar is a valid ZIP file.
-          # If it's corrupt or missing, regenerate it using the system Gradle.
+          # Verify gradle-wrapper.jar is a valid ZIP archive
           if ! unzip -l gradle/wrapper/gradle-wrapper.jar > /dev/null 2>&1; then
-            echo "::warning::gradle-wrapper.jar is corrupt or invalid — regenerating..."
+            echo "::warning::gradle-wrapper.jar is corrupt or invalid — regenerating with Gradle 8.14.3..."
 
-            # Install system Gradle (Ubuntu runner has it via apt)
-            sudo apt-get update -qq
-            sudo apt-get install -y -qq gradle
-
-            # Regenerate wrapper files (gradlew, gradle-wrapper.jar, properties)
-            gradle wrapper --gradle-version 8.14.3 --distribution-type all
+            # Download official Gradle 8.14.3 binary (NOT apt-gradle which is 4.4.1)
+            GRADLE_VERSION="8.14.3"
+            GRADLE_DIST="gradle-${GRADLE_VERSION}-bin.zip"
+            wget -q "https://services.gradle.org/distributions/${GRADLE_DIST}" -O /tmp/${GRADLE_DIST}
+            unzip -q /tmp/${GRADLE_DIST} -d /tmp/
+            /tmp/gradle-${GRADLE_VERSION}/bin/gradle wrapper --gradle-version ${GRADLE_VERSION} --distribution-type all
 
             chmod +x gradlew
-            echo "✓ Gradle wrapper regenerated"
+            rm -rf /tmp/${GRADLE_DIST} /tmp/gradle-${GRADLE_VERSION}
+            echo "✓ Gradle wrapper regenerated with v${GRADLE_VERSION}"
           else
             echo "✓ Gradle wrapper OK"
           fi
           ls -la gradlew gradle/wrapper/gradle-wrapper.jar
 
-      # ============================================================
-      # 12. Build DEBUG APK
-      # ============================================================
       - name: Build Debug APK
         if: github.event.inputs.build_type != 'release'
         run: |
           cd android
           ./gradlew assembleDebug --no-daemon --stacktrace
 
-      # ============================================================
-      # 13. Build RELEASE APK (unsigned)
-      # ============================================================
       - name: Build Release APK (unsigned)
         if: github.event.inputs.build_type != 'debug'
         run: |
@@ -227,9 +175,6 @@ jobs:
             exit 1
           }
 
-      # ============================================================
-      # 14. (Optional) Sign Release APK with provided keystore
-      # ============================================================
       - name: Sign Release APK
         if: |
           github.event.inputs.build_type != 'debug' &&
@@ -253,9 +198,6 @@ jobs:
             -Pandroid.injected.signing.key.password=$KEY_PASSWORD
           rm -f app/keystore.jks
 
-      # ============================================================
-      # 15. Collect APK artifacts
-      # ============================================================
       - name: Collect APK artifacts
         run: |
           mkdir -p artifacts
@@ -270,9 +212,6 @@ jobs:
           fi
           ls -la artifacts/
 
-      # ============================================================
-      # 16. Upload artifacts
-      # ============================================================
       - name: Upload Debug APK
         if: github.event.inputs.build_type != 'release'
         uses: actions/upload-artifact@v4
@@ -293,9 +232,6 @@ jobs:
           retention-days: 90
           if-no-files-found: warn
 
-      # ============================================================
-      # 17. (Tag only) Create GitHub Release with APK attached
-      # ============================================================
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
@@ -310,9 +246,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # ============================================================
-      # 18. Summary
-      # ============================================================
       - name: Build Summary
         if: always()
         run: |

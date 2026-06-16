@@ -35,6 +35,49 @@ class TouchInjectionPlugin : Plugin() {
             data.put("axes", jsArray)
             instance?.notifyListeners("onGamepadAxis", data)
         }
+
+        // ============================================================
+        // Gyroscope data — emitted by GamepadListenerService when the
+        // connected controller exposes rotational-rate axes.
+        // ============================================================
+        fun emitGyroData(x: Float, y: Float, z: Float, timestamp: Long) {
+            val data = JSObject()
+            data.put("x", x.toDouble())
+            data.put("y", y.toDouble())
+            data.put("z", z.toDouble())
+            data.put("timestamp", timestamp)
+            instance?.notifyListeners("onGyroData", data)
+        }
+
+        // ============================================================
+        // Foreground app change — emitted by TouchAccessibilityService
+        // when the user switches apps (used for auto-start game detection).
+        // ============================================================
+        fun emitForegroundAppChanged(packageName: String) {
+            val data = JSObject()
+            data.put("packageName", packageName)
+            data.put("timestamp", System.currentTimeMillis())
+            instance?.notifyListeners("onForegroundAppChanged", data)
+        }
+
+        // ============================================================
+        // Real macro capture events — emitted by TouchAccessibilityService
+        // while startMacroCapture() is active.
+        // ============================================================
+        fun emitMacroCapture(
+            action: String, pointerId: Int, x: Float, y: Float,
+            pressure: Float, size: Float, timestamp: Long
+        ) {
+            val data = JSObject()
+            data.put("action", action)
+            data.put("pointerId", pointerId)
+            data.put("x", x.toDouble())
+            data.put("y", y.toDouble())
+            data.put("pressure", pressure.toDouble())
+            data.put("size", size.toDouble())
+            data.put("timestamp", timestamp)
+            instance?.notifyListeners("onMacroCapture", data)
+        }
     }
 
     private var touchService: ITouchService? = null
@@ -175,5 +218,80 @@ class TouchInjectionPlugin : Plugin() {
         } catch (e: Exception) {
             call.reject("Injection failed: ${e.message}")
         }
+    }
+
+    // ============================================================
+    // Push anti-ban configuration to the daemon. Called from JS
+    // whenever the active profile changes or antiBanEnabled toggles.
+    // ============================================================
+    @PluginMethod
+    fun setAntiBanConfig(call: PluginCall) {
+        try {
+            val enabled = call.getBoolean("enabled", false) ?: false
+            val coordinateJitter = (call.getFloat("coordinateJitter", 4f) ?: 4f)
+            val timingJitter = call.getInt("timingJitter", 3) ?: 3
+            val pressureVariance = (call.getFloat("pressureVariance", 0.15f) ?: 0.15f)
+            val sizeVariance = (call.getFloat("sizeVariance", 0.10f) ?: 0.10f)
+            val strokeDurationJitter = call.getInt("strokeDurationJitter", 12) ?: 12
+            val microPauseProbability = (call.getFloat("microPauseProbability", 0.02f) ?: 0.02f)
+            val microPauseMaxMs = call.getInt("microPauseMaxMs", 45) ?: 45
+            touchService?.setAntiBanConfig(
+                enabled, coordinateJitter, timingJitter, pressureVariance,
+                sizeVariance, strokeDurationJitter, microPauseProbability, microPauseMaxMs
+            )
+            call.resolve()
+        } catch (e: Exception) {
+            call.reject("setAntiBanConfig failed: ${e.message}")
+        }
+    }
+
+    // ============================================================
+    // Real macro capture — toggles whether TouchAccessibilityService
+    // should forward MotionEvents to JS as onMacroCapture events.
+    // ============================================================
+    @PluginMethod
+    fun startMacroCapture(call: PluginCall) {
+        try {
+            TouchAccessibilityService.setMacroCaptureEnabled(true, System.currentTimeMillis())
+            call.resolve()
+        } catch (e: Exception) {
+            call.reject("startMacroCapture failed: ${e.message}")
+        }
+    }
+
+    @PluginMethod
+    fun stopMacroCapture(call: PluginCall) {
+        try {
+            TouchAccessibilityService.setMacroCaptureEnabled(false, 0L)
+            call.resolve()
+        } catch (e: Exception) {
+            call.reject("stopMacroCapture failed: ${e.message}")
+        }
+    }
+
+    // ============================================================
+    // Public overlay-facing helpers (used by FloatingOverlayService)
+    // — added so the overlay WebView can inject touch events through
+    //   the same Shizuku UserService as the React side, without
+    //   constructing a PluginCall. (Issue #27 fix)
+    // ============================================================
+    fun injectTouchDown(pointerId: Int, x: Float, y: Float) {
+        try { touchService?.touchDown(pointerId, x, y) }
+        catch (e: Exception) { Log.e("GameMapper", "overlay touchDown failed", e) }
+    }
+
+    fun injectTouchMove(pointerId: Int, x: Float, y: Float) {
+        try { touchService?.touchMove(pointerId, x, y) }
+        catch (e: Exception) { Log.e("GameMapper", "overlay touchMove failed", e) }
+    }
+
+    fun injectTouchUp(pointerId: Int) {
+        try { touchService?.touchUp(pointerId) }
+        catch (e: Exception) { Log.e("GameMapper", "overlay touchUp failed", e) }
+    }
+
+    fun injectTapFromOverlay(x: Float, y: Float) {
+        try { touchService?.injectTap(x, y) }
+        catch (e: Exception) { Log.e("GameMapper", "overlay tap failed", e) }
     }
 }

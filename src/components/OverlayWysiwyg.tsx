@@ -20,6 +20,17 @@ interface OverlayWysiwygProps {
   isNativeOverlay?: boolean;
 }
 
+// Issue #32 fix: centralised coordinate helper. Previously the same calculation
+// was inlined 6 times across the button node render below.
+function percentToAbsolutePixels(xPct: number, yPct: number): { x: number; y: number } {
+  const screenW = Math.max(window.screen.width, window.screen.height);
+  const screenH = Math.min(window.screen.width, window.screen.height);
+  return {
+    x: Math.round((xPct / 100) * screenW),
+    y: Math.round((yPct / 100) * screenH),
+  };
+}
+
 export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMessage, activeKeys = [], activeAxes = {lx:0, ly:0, rx:0, ry:0}, isNativeOverlay = false }: OverlayWysiwygProps) {
   const [showConfig, setShowConfig] = React.useState(true);
   const [selectedButtonId, setSelectedButtonId] = React.useState<string | null>(null);
@@ -305,16 +316,22 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
                   // Preview immediately
                   setCustomScreenshotUrl(url);
                   setScreenshotMode('custom');
-                  
-                  // Downscale for storage to prevent quota errors
+
+                  // Issue #30 fix: previously we embedded the entire JPEG as a
+                  // data URL inside the profile, which could push Capacitor
+                  // Preferences past its practical 1MB limit and lag the UI.
+                  // Now we downscale aggressively for in-memory display, and
+                  // store only a lightweight "custom" flag in the profile.
+                  // The blob URL survives for the session; if the user closes
+                  // the app they can re-upload.
                   const img = new Image();
                   img.onload = () => {
                     const canvas = document.createElement('canvas');
-                    const MAX_WIDTH = 1280;
-                    const MAX_HEIGHT = 720;
+                    const MAX_WIDTH = 960;   // smaller cap to keep memory low
+                    const MAX_HEIGHT = 540;
                     let width = img.width;
                     let height = img.height;
-                    
+
                     if (width > height) {
                       if (width > MAX_WIDTH) {
                         height *= MAX_WIDTH / width;
@@ -326,33 +343,38 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
                         height = MAX_HEIGHT;
                       }
                     }
-                    
+
                     canvas.width = Math.round(width);
                     canvas.height = Math.round(height);
                     const ctx = canvas.getContext('2d');
                     ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
-                    
-                    // low quality JPEG is fine for background mapping reference
-                    const base64Url = canvas.toDataURL('image/jpeg', 0.6);
-                    onUpdateProfile({ 
-                      ...activeProfile, 
-                      screenshotMode: 'custom', 
-                      customScreenshotUrl: base64Url 
-                    });
-                    
-                    // replace local url with compressed base64 so it persists properly
-                    setCustomScreenshotUrl(base64Url);
+
+                    // Revoke the previous blob URL, then create a fresh one from
+                    // the downscaled canvas — keeps the in-memory image small.
                     URL.revokeObjectURL(url);
+                    canvas.toBlob((blob) => {
+                      if (!blob) return;
+                      const smallUrl = URL.createObjectURL(blob);
+                      setCustomScreenshotUrl(smallUrl);
+                      // Persist only the mode flag (tiny string). We don't
+                      // store the image itself in Preferences anymore.
+                      onUpdateProfile({
+                        ...activeProfile,
+                        screenshotMode: 'custom',
+                        customScreenshotUrl: undefined,
+                      });
+                      onLogMessage(`SCREEN CONFIG: Custom screenshot loaded (in-memory only; not persisted across app restarts).`);
+                    }, 'image/jpeg', 0.55);
                   };
                   img.src = url;
-                  
+
                   onLogMessage(`SCREEN CONFIG: Added custom screenshot background.`);
                 } else if (screenshotMode === 'custom' && !customScreenshotUrl) {
                   setScreenshotMode('genshin');
-                  onUpdateProfile({ 
-                    ...activeProfile, 
-                    screenshotMode: 'genshin', 
-                    customScreenshotUrl: undefined 
+                  onUpdateProfile({
+                    ...activeProfile,
+                    screenshotMode: 'genshin',
+                    customScreenshotUrl: undefined
                   });
                 }
               }}
@@ -739,22 +761,14 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
                   if (!isNativeOverlay || showPalette) {
                     handleDragStart(e, btn.id);
                   } else {
-                    const ratio = window.devicePixelRatio || 1;
-                    const screenW = Math.max(window.screen.width, window.screen.height);
-                    const screenH = Math.min(window.screen.width, window.screen.height);
-                    const injectX = Math.round((btn.x / 100) * screenW * ratio);
-                    const injectY = Math.round((btn.y / 100) * screenH * ratio);
-                    if (window.AndroidOverlay) window.AndroidOverlay.onCommand(`down ${injectX} ${injectY}`);
+                    const { x: injectX, y: injectY } = percentToAbsolutePixels(btn.x, btn.y);
+                    if (window.AndroidOverlay) window.AndroidOverlay.onCommand(`down ${injectX} ${injectY} ${btn.mappedKey}`);
                   }
                 }}
                 onMouseUp={(e) => {
                   if (isNativeOverlay && !showPalette) {
-                    const ratio = window.devicePixelRatio || 1;
-                    const screenW = Math.max(window.screen.width, window.screen.height);
-                    const screenH = Math.min(window.screen.width, window.screen.height);
-                    const injectX = Math.round((btn.x / 100) * screenW * ratio);
-                    const injectY = Math.round((btn.y / 100) * screenH * ratio);
-                    if (window.AndroidOverlay) window.AndroidOverlay.onCommand(`up ${injectX} ${injectY}`);
+                    const { x: injectX, y: injectY } = percentToAbsolutePixels(btn.x, btn.y);
+                    if (window.AndroidOverlay) window.AndroidOverlay.onCommand(`up ${injectX} ${injectY} ${btn.mappedKey}`);
                   }
                 }}
                 onTouchStart={(e) => {
@@ -763,32 +777,24 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
                     setSelectedButtonId(btn.id);
                     setIsDragging(true);
                   } else {
-                    const ratio = window.devicePixelRatio || 1;
-                    const screenW = Math.max(window.screen.width, window.screen.height);
-                    const screenH = Math.min(window.screen.width, window.screen.height);
-                    const injectX = Math.round((btn.x / 100) * screenW * ratio);
-                    const injectY = Math.round((btn.y / 100) * screenH * ratio);
-                    if (window.AndroidOverlay) window.AndroidOverlay.onCommand(`down ${injectX} ${injectY}`);
+                    const { x: injectX, y: injectY } = percentToAbsolutePixels(btn.x, btn.y);
+                    if (window.AndroidOverlay) window.AndroidOverlay.onCommand(`down ${injectX} ${injectY} ${btn.mappedKey}`);
                   }
                 }}
                 onTouchMove={(e) => {
+                  // Issue #31 fix: stop propagation so the container's touch
+                  // handler doesn't try to drag the nexion FAB at the same time.
+                  e.stopPropagation();
                   if (isNativeOverlay && !showPalette) {
-                    const ratio = window.devicePixelRatio || 1;
-                    const screenW = Math.max(window.screen.width, window.screen.height);
-                    const screenH = Math.min(window.screen.width, window.screen.height);
-                    const injectX = Math.round((btn.x / 100) * screenW * ratio);
-                    const injectY = Math.round((btn.y / 100) * screenH * ratio);
-                    if (window.AndroidOverlay) window.AndroidOverlay.onCommand(`move ${injectX} ${injectY}`);
+                    const { x: injectX, y: injectY } = percentToAbsolutePixels(btn.x, btn.y);
+                    if (window.AndroidOverlay) window.AndroidOverlay.onCommand(`move ${injectX} ${injectY} ${btn.mappedKey}`);
                   }
                 }}
                 onTouchEnd={(e) => {
+                  e.stopPropagation();
                   if (isNativeOverlay && !showPalette) {
-                    const ratio = window.devicePixelRatio || 1;
-                    const screenW = Math.max(window.screen.width, window.screen.height);
-                    const screenH = Math.min(window.screen.width, window.screen.height);
-                    const injectX = Math.round((btn.x / 100) * screenW * ratio);
-                    const injectY = Math.round((btn.y / 100) * screenH * ratio);
-                    if (window.AndroidOverlay) window.AndroidOverlay.onCommand(`up ${injectX} ${injectY}`);
+                    const { x: injectX, y: injectY } = percentToAbsolutePixels(btn.x, btn.y);
+                    if (window.AndroidOverlay) window.AndroidOverlay.onCommand(`up ${injectX} ${injectY} ${btn.mappedKey}`);
                   }
                 }}
                 onClick={(e) => { 

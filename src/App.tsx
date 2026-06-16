@@ -5,8 +5,8 @@
  */
 
 import React from 'react';
-import { 
-  GamepadProfile, GamepadMacro, ShizukuState 
+import {
+  GamepadProfile, GamepadMacro, ShizukuState, OnboardingState, GameDetectionEvent
 } from './types';
 import { INITIAL_PROFILES, INITIAL_MACROS } from './defaults';
 import ShizukuPanel from './components/ShizukuPanel';
@@ -15,19 +15,32 @@ import MacroEngine from './components/MacroEngine';
 import GamepadTester from './components/GamepadTester';
 import GameSelector from './components/GameSelector';
 import CreditsPanel from './components/CreditsPanel';
+import Onboarding from './components/Onboarding';
 
-import { 
-  Terminal, Shield, Settings, Activity, Compass, Cpu, HelpCircle, 
+import {
+  Terminal, Shield, Settings, Activity, Compass, Cpu, HelpCircle,
   ChevronRight, Sparkles, BookOpen, Layers, Bot, ShieldAlert, Heart
 } from 'lucide-react';
 import AppIcon from '../icon.svg';
 
-import { useShizuku } from './hooks/useShizuku';
+import { useShizuku, normalizeHardwareKey } from './hooks/useShizuku';
 import { useGamepad } from './hooks/useGamepad';
+import { useGamepadLoop } from './hooks/useGamepadLoop';
 import { useInputInjector } from './hooks/useInputInjector';
+import { useGameDetection } from './hooks/useGameDetection';
+import { Capacitor } from '@capacitor/core';
+
+// Helper: detect landscape orientation so coordinate math stays correct in
+// portrait too. (Issue #15 fix.)
+function getEffectiveScreenSize() {
+  const w = window.screen.width;
+  const h = window.screen.height;
+  if (w >= h) return { screenW: w, screenH: h, isLandscape: true };
+  return { screenW: h, screenH: w, isLandscape: false };
+}
 
 export default function App() {
-  const { checkShizukuStatus, executeShizukuCommand, injectInput, stopDaemon } = useShizuku();
+  const { checkShizukuStatus, executeShizukuCommand, injectInput, stopDaemon, resetButtonPointers } = useShizuku();
   const { startOverlay, stopOverlay } = useInputInjector();
   const [shizukuState, setShizukuState] = React.useState<ShizukuState>({
     status: 'DISCONNECTED',
@@ -49,6 +62,59 @@ export default function App() {
   const [isEditingSettings, setIsEditingSettings] = React.useState(false);
 
   const [macros, setMacros] = React.useState<GamepadMacro[]>(INITIAL_MACROS);
+
+  // ============================================================
+  // Onboarding state — shown on first launch (or until completed)
+  // ============================================================
+  const [onboardingState, setOnboardingState] = React.useState<OnboardingState | null>(null);
+  const [showOnboarding, setShowOnboarding] = React.useState(false);
+
+  // Load onboarding state from Preferences on mount
+  React.useEffect(() => {
+    import('@capacitor/preferences').then(({ Preferences }) => {
+      Preferences.get({ key: 'nexion_onboarding' }).then((res) => {
+        if (res.value) {
+          try {
+            const parsed = JSON.parse(res.value) as OnboardingState;
+            setOnboardingState(parsed);
+            if (!parsed.completed) setShowOnboarding(true);
+          } catch (e) { setShowOnboarding(true); }
+        } else {
+          // First launch — show onboarding
+          setShowOnboarding(true);
+        }
+      }).catch(() => setShowOnboarding(true));
+    }).catch(() => {});
+  }, []);
+
+  const handleOnboardingComplete = async (state: OnboardingState) => {
+    setOnboardingState(state);
+    setShowOnboarding(false);
+    try {
+      const { Preferences } = await import('@capacitor/preferences');
+      await Preferences.set({ key: 'nexion_onboarding', value: JSON.stringify(state) });
+    } catch (e) { console.warn('Failed to persist onboarding state', e); }
+    handleLogMessage('SYSTEM: Onboarding completed. Welcome to GameMapperMind!');
+  };
+
+  const handleOnboardingSkip = async () => {
+    const skipped: OnboardingState = {
+      completed: false,
+      currentStep: 0,
+      steps: {
+        welcome: false, installShizuku: false, grantPermissions: false,
+        connectGamepad: false, calibrateProfile: false,
+      },
+      shizukuSkipped: true,
+    };
+    setOnboardingState(skipped);
+    setShowOnboarding(false);
+    try {
+      const { Preferences } = await import('@capacitor/preferences');
+      await Preferences.set({ key: 'nexion_onboarding', value: JSON.stringify(skipped) });
+    } catch (e) {}
+    handleLogMessage('SYSTEM: Onboarding skipped. You can re-run it from settings.');
+  };
 
   // Persistence
   React.useEffect(() => {
@@ -193,8 +259,11 @@ export default function App() {
   const handleGlobalKillSwitch = async () => {
     setIsKilling(true);
     try {
-      // Simulate hardware interrupt sequence
-      await new Promise(r => setTimeout(r, 600));
+      // Cancel any in-flight swipe timeouts (Issue #13 fix).
+      cancelPendingSwipes();
+      // Release any allocated button pointers (Issue #12 fix).
+      resetButtonPointers();
+      // Notify macro engine + other listeners.
       window.dispatchEvent(new CustomEvent('emergency-kill'));
       if (overlayActive) {
         await stopOverlay();
@@ -244,10 +313,43 @@ export default function App() {
 
   const activeProfile = profiles.find(p => p.id === activeProfileId) || profiles[0];
 
+  // Issue #11 fix: activate useGamepadLoop when Shizuku is connected so the
+  // native GamepadListenerService (evdev) path takes effect. The browser
+  // Gamepad API (useGamepad below) still handles visual feedback + fallback
+  // for dev mode in the browser.
+  const isShizukuConnected = shizukuState.status === 'CONNECTED_SHIZUKU';
+  useGamepadLoop(activeProfile, isShizukuConnected);
+
+  // ============================================================
+  // Auto-start game detection — listens to foreground app changes
+  // and auto-switches profile + optionally auto-starts overlay.
+  // ============================================================
+  useGameDetection({
+    profiles,
+    enabled: !showOnboarding,
+    onGameDetected: (event: GameDetectionEvent) => {
+      if (event.matchedProfileId && event.matchedProfileId !== activeProfileId) {
+        handleLogMessage(`[AUTO-DETECT] Foreground: ${event.packageName} → profile ${event.matchedProfileId}`);
+        handleProfileSelect(event.matchedProfileId);
+      } else if (!event.matchedProfileId) {
+        handleLogMessage(`[AUTO-DETECT] Foreground: ${event.packageName} (no matching profile)`);
+      }
+    },
+    onAutoStart: (profile: GamepadProfile) => {
+      handleLogMessage(`[AUTO-START] Activating overlay for ${profile.name}`);
+      if (!overlayActive) {
+        handleToggleOverlay();
+      }
+    },
+  });
+
   const handleInjectionCommand = React.useCallback((cmd: string) => {
-    if (typeof window !== 'undefined' && 'Capacitor' in window) {
+    if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
       if (shizukuState.status === 'CONNECTED_SHIZUKU') {
         injectInput(cmd);
+      } else {
+        // Shizuku not bound — log for user visibility but don't crash.
+        console.warn('[inject] Shizuku not connected; skipping:', cmd);
       }
     } else if (typeof window !== 'undefined' && (window as any).AndroidOverlay) {
       (window as any).AndroidOverlay.onCommand(cmd);
@@ -256,17 +358,33 @@ export default function App() {
     }
   }, [shizukuState.status, injectInput]);
 
-  const handleGamepadPress = React.useCallback(async (button: string, isPressed: boolean) => {
+  // Track pending swipe timeouts so the kill-switch can cancel them.
+  // (Issue #13 fix: previously bare setTimeouts could fire after kill.)
+  const swipeTimeoutsRef = React.useRef<ReturnType<typeof setTimeout>[]>([]);
+  const cancelPendingSwipes = React.useCallback(() => {
+    swipeTimeoutsRef.current.forEach(t => clearTimeout(t));
+    swipeTimeoutsRef.current = [];
+  }, []);
+
+  // Issue #14 fix: removed unnecessary `async` keyword — no awaits inside.
+  const handleGamepadPress = React.useCallback((button: string, isPressed: boolean) => {
+    // Normalize the Web Gamepad API name (e.g. "A") to the profile dialect
+    // ("BUTTON_A") so OverlayWysiwyg's active-keys check matches. (Issue #29 fix.)
+    const normalizedKey = normalizeHardwareKey(button);
     setActiveKeys(prev => {
-      if (isPressed && !prev.includes(button)) return [...prev, button];
-      if (!isPressed && prev.includes(button)) return prev.filter(k => k !== button);
+      if (isPressed && !prev.includes(normalizedKey)) return [...prev, normalizedKey];
+      if (!isPressed && prev.includes(normalizedKey)) return prev.filter(k => k !== normalizedKey);
       return prev;
     });
 
-    const mapping = activeProfile.buttons.find(b => b.mappedKey === button);
+    // When Shizuku is connected, useGamepadLoop already handles injection via
+    // the native evdev path — we only update visual state here to avoid
+    // double-injecting the same event.
+    if (isShizukuConnected) return;
+
+    const mapping = activeProfile.buttons.find(b => b.mappedKey === normalizedKey);
     if (mapping) {
-      const screenW = Math.max(window.screen.width, window.screen.height);
-      const screenH = Math.min(window.screen.width, window.screen.height);
+      const { screenW, screenH } = getEffectiveScreenSize();
       const x = Math.round((mapping.x / 100) * screenW);
       const y = Math.round((mapping.y / 100) * screenH);
 
@@ -282,37 +400,52 @@ export default function App() {
         else if (mapping.swipeDirection === 'LEFT') targetX = Math.max(0, x - distance);
         else if (mapping.swipeDirection === 'RIGHT') targetX = Math.min(screenW, x + distance);
 
-        // Execute fast swipe sequence
-        handleInjectionCommand(`down ${x} ${y}`);
-        setTimeout(() => handleInjectionCommand(`move ${Math.round((x + targetX) / 2)} ${Math.round((y + targetY) / 2)}`), 30);
-        setTimeout(() => handleInjectionCommand(`move ${targetX} ${targetY}`), 60);
-        setTimeout(() => handleInjectionCommand(`up ${targetX} ${targetY}`), 90);
+        // Issue #13 fix: track swipe timeouts so kill-switch can cancel them.
+        handleInjectionCommand(`down ${x} ${y} ${normalizedKey}`);
+        swipeTimeoutsRef.current.push(
+          setTimeout(() => handleInjectionCommand(`move ${Math.round((x + targetX) / 2)} ${Math.round((y + targetY) / 2)} ${normalizedKey}`), 30)
+        );
+        swipeTimeoutsRef.current.push(
+          setTimeout(() => handleInjectionCommand(`move ${targetX} ${targetY} ${normalizedKey}`), 60)
+        );
+        swipeTimeoutsRef.current.push(
+          setTimeout(() => {
+            handleInjectionCommand(`up ${targetX} ${targetY} ${normalizedKey}`);
+            swipeTimeoutsRef.current = swipeTimeoutsRef.current.filter(t => t);
+          }, 90)
+        );
         return;
       }
 
+      // Issue #12 fix: pass virtualKey so useShizuku can allocate a unique
+      // pointer ID per button press (multi-touch support).
       if (isPressed) {
-        handleInjectionCommand(`down ${x} ${y}`);
+        handleInjectionCommand(`down ${x} ${y} ${normalizedKey}`);
       } else {
-        handleInjectionCommand(`up ${x} ${y}`);
+        handleInjectionCommand(`up ${x} ${y} ${normalizedKey}`);
       }
     }
-  }, [activeProfile, handleInjectionCommand]);
+  }, [activeProfile, handleInjectionCommand, isShizukuConnected]);
 
   const activeStickPointer = React.useRef<{
     l_id: string | null; l_lastX: number; l_lastY: number;
     r_id: string | null; r_lastX: number; r_lastY: number;
   }>({ l_id: null, l_lastX: 0, l_lastY: 0, r_id: null, r_lastX: 0, r_lastY: 0 });
 
-  const handleGamepadAxis = React.useCallback(async (axes: { lx: number, ly: number, rx: number, ry: number }) => {
+  const handleGamepadAxis = React.useCallback((axes: { lx: number, ly: number, rx: number, ry: number }) => {
     setActiveAxes(axes);
+
+    // Same as button press: when Shizuku is connected, useGamepadLoop already
+    // drives stick injection via the native evdev path. Skip to avoid duplicate.
+    if (isShizukuConnected) return;
+
     const lStickMapping = activeProfile.buttons.find(b => b.mappedKey === 'L_STICK');
     const rStickMapping = activeProfile.buttons.find(b => b.mappedKey === 'R_STICK');
+    const { screenW, screenH } = getEffectiveScreenSize();
     
     // Process Left Stick
     if (lStickMapping) {
       const isNeutral = Math.abs(axes.lx) < 0.1 && Math.abs(axes.ly) < 0.1;
-      const screenW = Math.max(window.screen.width, window.screen.height);
-      const screenH = Math.min(window.screen.width, window.screen.height);
       const baseX = Math.round((lStickMapping.x / 100) * screenW);
       const baseY = Math.round((lStickMapping.y / 100) * screenH);
 
@@ -373,9 +506,18 @@ export default function App() {
         }
       }
     }
-  }, [activeProfile, shizukuState.status, injectInput]);
+  }, [activeProfile, shizukuState.status, injectInput, isShizukuConnected]);
 
-  const { connectedGamepad } = useGamepad(handleGamepadPress, handleGamepadAxis);
+  const handleGamepadAxisWrapper = React.useCallback((axes: number[]) => {
+    // useGamepad hook calls axisCallback with a 4-element array.
+    handleGamepadAxis({ lx: axes[0] ?? 0, ly: axes[1] ?? 0, rx: axes[2] ?? 0, ry: axes[3] ?? 0 });
+  }, [handleGamepadAxis]);
+
+  const handleGamepadPressWrapper = React.useCallback((button: string, isPressed: boolean, _value: number) => {
+    handleGamepadPress(button, isPressed);
+  }, [handleGamepadPress]);
+
+  const { connectedGamepad } = useGamepad(handleGamepadPressWrapper, handleGamepadAxisWrapper);
 
   const handleLogMessage = React.useCallback((msg: string) => {
     setShizukuState(prev => {
@@ -387,6 +529,9 @@ export default function App() {
   }, []);
 
   const handleKillSwitch = async () => {
+    cancelPendingSwipes();
+    resetButtonPointers();
+    window.dispatchEvent(new CustomEvent('emergency-kill'));
     if (overlayActive) {
       await stopOverlay();
       setOverlayActive(false);
@@ -426,6 +571,19 @@ export default function App() {
           isNativeOverlay={true}
         />
       </div>
+    );
+  }
+
+  // ============================================================
+  // Onboarding overlay — shown on first launch (or until completed)
+  // ============================================================
+  if (showOnboarding) {
+    return (
+      <Onboarding
+        shizukuState={shizukuState}
+        onComplete={handleOnboardingComplete}
+        onSkip={handleOnboardingSkip}
+      />
     );
   }
 

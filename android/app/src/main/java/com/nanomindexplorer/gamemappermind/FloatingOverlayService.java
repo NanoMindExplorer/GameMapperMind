@@ -23,9 +23,6 @@ import android.os.Looper;
 import androidx.core.app.NotificationCompat;
 import androidx.webkit.WebViewAssetLoader;
 
-import com.getcapacitor.Bridge;
-import com.getcapacitor.Plugin;
-
 public class FloatingOverlayService extends Service {
     private WindowManager windowManager;
     private WebView webView;
@@ -158,7 +155,7 @@ public class FloatingOverlayService extends Service {
     /**
      * Bridge exposed to the overlay WebView as window.AndroidOverlay.
      * React-side OverlayWysiwyg calls these methods when the user taps virtual
-     * buttons in play mode (Issue #27 fix: was previously an empty stub).
+     * buttons in play mode.
      */
     private class WebAppInterface {
         @JavascriptInterface
@@ -176,12 +173,12 @@ public class FloatingOverlayService extends Service {
 
         /**
          * Handle commands from the React overlay.
-         * Supported formats (consistent with useShizuku.injectInput parser):
-         *   "down <x> <y>"   → touchDown
-         *   "move <x> <y>"   → touchMove
-         *   "up <x> <y>"     → touchUp
-         *   "tap <x> <y>"    → injectTap
-         * Coordinates are absolute pixels (NOT pre-multiplied by devicePixelRatio).
+         * Supported formats:
+         *   "down <x> <y> [virtualKey]"   → touchDown
+         *   "move <x> <y> [virtualKey]"   → touchMove
+         *   "up <x> <y> [virtualKey]"     → touchUp
+         *   "tap <x> <y>"                 → injectTap
+         * Coordinates are absolute pixels.
          */
         @JavascriptInterface
         public void onCommand(String command) {
@@ -191,52 +188,27 @@ public class FloatingOverlayService extends Service {
 
             String action = parts[0].toLowerCase();
             try {
-                // x / y are optional for "up" actions
                 int x = parts.length > 1 ? Integer.parseInt(parts[1]) : 0;
                 int y = parts.length > 2 ? Integer.parseInt(parts[2]) : 0;
 
                 switch (action) {
                     case "down":
-                        TouchInjectionPlugin.emitGamepadButton("OVERLAY_DOWN", 1, 1.0f);
-                        // Forward to the active Shizuku user service (if bound)
-                        forwardToTouchService("touchDown", 99, x, y);
+                        TouchInjectionPlugin.injectTouchDown(99, (float) x, (float) y);
                         break;
                     case "move":
-                        forwardToTouchService("touchMove", 99, x, y);
+                        TouchInjectionPlugin.injectTouchMove(99, (float) x, (float) y);
                         break;
                     case "up":
-                        forwardToTouchService("touchUp", 99, 0, 0);
+                        TouchInjectionPlugin.injectTouchUp(99);
                         break;
                     case "tap":
-                        forwardToTouchService("injectTap", 0, x, y);
+                        TouchInjectionPlugin.injectTapFromOverlay((float) x, (float) y);
                         break;
                     default:
                         Log.w("GameMapper", "Unknown overlay command: " + command);
                 }
             } catch (NumberFormatException e) {
                 Log.e("GameMapper", "Bad command format: " + command, e);
-            }
-        }
-
-        private void forwardToTouchService(String method, int pointerId, float x, float y) {
-            // The Overlay service runs in the app process. We delegate to the
-            // TouchInjectionPlugin singleton (bound to the Shizuku UserService).
-            try {
-                TouchInjectionPlugin plugin = TouchInjectionPlugin.instance;
-                if (plugin == null) {
-                    Log.w("GameMapper", "TouchInjectionPlugin not loaded; cannot " + method);
-                    return;
-                }
-                // Use reflection-free public API on TouchInjectionPlugin:
-                // we re-export a static helper there.
-                switch (method) {
-                    case "touchDown": plugin.injectTouchDown(pointerId, x, y); break;
-                    case "touchMove": plugin.injectTouchMove(pointerId, x, y); break;
-                    case "touchUp":   plugin.injectTouchUp(pointerId);          break;
-                    case "injectTap": plugin.injectTapFromOverlay(x, y);        break;
-                }
-            } catch (Exception e) {
-                Log.e("GameMapper", "forwardToTouchService failed: " + method, e);
             }
         }
 

@@ -1,5 +1,6 @@
 package com.nanomindexplorer.gamemappermind
 
+import android.app.Service
 import android.content.Intent
 import android.hardware.input.InputManager
 import android.os.IBinder
@@ -8,16 +9,15 @@ import android.util.Log
 import android.util.SparseArray
 import android.view.InputDevice
 import android.view.MotionEvent
-import rikka.shizuku.Shizuku
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.random.Random
 
-class TouchDaemonService : Shizuku.UserService() {
+// TouchDaemonService runs as a Shizuku UserService (shell-privilege process).
+// In Shizuku API v13.1.5, UserService is NOT a class you extend — you write
+// a regular Android Service and bind to it via Shizuku.bindUserService().
+class TouchDaemonService : Service() {
 
-    // ============================================================
-    // Anti-ban configuration — set from JS via setAntiBanConfig()
-    // ============================================================
     data class AntiBanConfig(
         var enabled: Boolean = false,
         var coordinateJitter: Float = 4f,
@@ -46,10 +46,6 @@ class TouchDaemonService : Shizuku.UserService() {
         }
         override fun isAlive(): Boolean = true
 
-        // ============================================================
-        // Anti-ban configuration endpoint — called by TouchInjectionPlugin
-        // when the active profile changes.
-        // ============================================================
         override fun setAntiBanConfig(
             enabled: Boolean,
             coordinateJitter: Float,
@@ -68,7 +64,7 @@ class TouchDaemonService : Shizuku.UserService() {
         }
     }
 
-    override fun onBind(intent: Intent?): IBinder = touchStub
+    override fun onBind(intent: Intent?): IBinder? = touchStub
 
     private val inputManager: InputManager? by lazy {
         try {
@@ -102,11 +98,6 @@ class TouchDaemonService : Shizuku.UserService() {
     private var baseDownTime: Long = 0L
     private val rng = Random(System.currentTimeMillis())
 
-    // ============================================================
-    // Anti-ban helpers — apply humanization to coordinates/pressure/timing
-    // ============================================================
-
-    /** Apply radial jitter to (x, y) — random direction, magnitude ≤ jitter. */
     private fun applyCoordinateJitter(x: Float, y: Float): Pair<Float, Float> {
         if (!antiBan.enabled || antiBan.coordinateJitter <= 0f) return Pair(x, y)
         val angle = rng.nextFloat() * 2f * Math.PI.toFloat()
@@ -114,19 +105,16 @@ class TouchDaemonService : Shizuku.UserService() {
         return Pair(x + cos(angle) * mag, y + sin(angle) * mag)
     }
 
-    /** Randomize pressure around 1.0 within variance. */
     private fun applyPressureVariance(): Float {
         if (!antiBan.enabled || antiBan.pressureVariance <= 0f) return 1.0f
         return 1.0f - (rng.nextFloat() * antiBan.pressureVariance)
     }
 
-    /** Randomize touch size around 1.0 within variance. */
     private fun applySizeVariance(): Float {
         if (!antiBan.enabled || antiBan.sizeVariance <= 0f) return 1.0f
         return 1.0f - (rng.nextFloat() * antiBan.sizeVariance)
     }
 
-    /** Apply random timing delay (blocking) if anti-ban enabled. */
     private fun applyTimingJitter() {
         if (!antiBan.enabled || antiBan.timingJitter <= 0) return
         val delay = rng.nextInt(0, antiBan.timingJitter * 2) - antiBan.timingJitter
@@ -135,7 +123,6 @@ class TouchDaemonService : Shizuku.UserService() {
         }
     }
 
-    /** Possibly insert a micro-pause (random). */
     private fun maybeMicroPause() {
         if (!antiBan.enabled || antiBan.microPauseProbability <= 0f) return
         if (rng.nextFloat() < antiBan.microPauseProbability) {
@@ -174,7 +161,6 @@ class TouchDaemonService : Shizuku.UserService() {
                 pointerProperties[activeIndex].id = pointerId
                 pointerProperties[activeIndex].toolType = MotionEvent.TOOL_TYPE_FINGER
 
-                // Apply anti-ban jitter to coordinates + pressure + size
                 val (jx, jy) = applyCoordinateJitter(state.x, state.y)
                 pointerCoords[activeIndex].x = jx
                 pointerCoords[activeIndex].y = jy
@@ -215,7 +201,6 @@ class TouchDaemonService : Shizuku.UserService() {
     }
 
     fun touchDown(pointerId: Int, x: Float, y: Float) {
-        // Anti-ban: micro-pause before DOWN with low probability
         maybeMicroPause()
         applyTimingJitter()
 
@@ -248,7 +233,6 @@ class TouchDaemonService : Shizuku.UserService() {
         val state = pointers.get(pointerId) ?: return
         state.x = x
         state.y = y
-        // Slowly drift pressure during move for realism
         if (antiBan.enabled) {
             state.pressure = (state.pressure + (rng.nextFloat() - 0.5f) * antiBan.pressureVariance * 0.3f)
                 .coerceIn(0.7f, 1.0f)
@@ -279,7 +263,6 @@ class TouchDaemonService : Shizuku.UserService() {
     }
 
     fun injectTap(x: Float, y: Float) {
-        // Randomized tap duration (anti-ban)
         val duration = if (antiBan.enabled) {
             (20 + rng.nextInt(0, antiBan.strokeDurationJitter * 2) - antiBan.strokeDurationJitter)
                 .coerceAtLeast(8).toLong()

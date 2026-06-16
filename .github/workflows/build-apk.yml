@@ -15,11 +15,14 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 2. Setup Java JDK
+      # 2. Setup Java JDK 17
+      # ✅ FIX #1: Diubah dari '21' ke '17'
+      #    Kotlin Gradle plugin (yang dibundel Capacitor) belum support JVM target 21.
+      #    Error: "Unknown Kotlin JVM target: 21"
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          java-version: '21'
+          java-version: '17'
           distribution: 'temurin'
 
       # 3. Setup Node.js
@@ -40,7 +43,14 @@ jobs:
         run: |
           npm install @capacitor/core @capacitor/cli @capacitor/android
 
-      # 6. Generate Icons
+      # 6. Capacitor Sync
+      # ✅ FIX #2: DIPINDAHKAN ke sini, SEBELUM inject Shizuku.
+      #    Sebelumnya sync ada di step 10 (SETELAH inject), sehingga
+      #    cap sync menimpa AndroidManifest.xml & build.gradle yang sudah dimodifikasi.
+      - name: Capacitor Sync
+        run: npx cap sync android
+
+      # 7. Generate Icons
       - name: Generate launcher icons
         run: |
           sudo apt-get update && sudo apt-get install -y librsvg2-bin
@@ -70,7 +80,10 @@ jobs:
             echo "icon.svg not found or res folder missing, skipping icon generation."
           fi
 
-      # 7. Inject Shizuku ke build.gradle
+      # 8. Inject Shizuku ke build.gradle
+      # ✅ FIX #3 (Proaktif): Selain Shizuku, sekarang juga memaksa
+      #    compileOptions ke VERSION_17 dan menambah/memperbaiki
+      #    kotlinOptions { jvmTarget = "17" } agar konsisten dengan JDK di atas.
       - name: Inject Shizuku dependencies into build.gradle
         run: |
           node -e "
@@ -78,16 +91,46 @@ jobs:
             const path = 'android/app/build.gradle';
             if (fs.existsSync(path)) {
               let content = fs.readFileSync(path, 'utf8');
+
+              // --- Shizuku dependencies ---
               const depString = '\n    implementation \"dev.rikka.shizuku:api:13.1.5\"\n    implementation \"dev.rikka.shizuku:provider:13.1.5\"\n';
               if (!content.includes('dev.rikka.shizuku')) {
                 content = content.replace('dependencies {', 'dependencies {' + depString);
               }
+
+              // --- Exclude kotlin-stdlib konflik ---
               if (!content.includes('kotlin-stdlib-jdk7')) {
                 content += '\nconfigurations.all {\n    exclude group: \"org.jetbrains.kotlin\", module: \"kotlin-stdlib-jdk7\"\n    exclude group: \"org.jetbrains.kotlin\", module: \"kotlin-stdlib-jdk8\"\n}\n';
               }
+
+              // --- Aktifkan AIDL ---
               if (!content.includes('buildFeatures') && !content.includes('aidl true')) {
                 content = content.replace('buildTypes {', 'buildFeatures {\n        aidl true\n    }\n    buildTypes {');
               }
+
+              // --- Fix compileOptions ke Java 17 ---
+              content = content.replace(
+                /sourceCompatibility JavaVersion\.VERSION_\w+/,
+                'sourceCompatibility JavaVersion.VERSION_17'
+              );
+              content = content.replace(
+                /targetCompatibility JavaVersion\.VERSION_\w+/,
+                'targetCompatibility JavaVersion.VERSION_17'
+              );
+
+              // --- Fix / tambah kotlinOptions jvmTarget = 17 ---
+              if (!content.includes('kotlinOptions')) {
+                content = content.replace(
+                  'buildTypes {',
+                  'kotlinOptions {\n        jvmTarget = \"17\"\n    }\n    buildTypes {'
+                );
+              } else {
+                content = content.replace(
+                  /jvmTarget\s*=\s*[\"'][^\"']+[\"']/,
+                  'jvmTarget = \"17\"'
+                );
+              }
+
               fs.writeFileSync(path, content, 'utf8');
               console.log('build.gradle updated successfully.');
             } else {
@@ -95,7 +138,7 @@ jobs:
             }
           "
 
-      # 8. Inject Shizuku ke AndroidManifest.xml
+      # 9. Inject Shizuku ke AndroidManifest.xml
       - name: Inject Shizuku into AndroidManifest.xml
         run: |
           node -e "
@@ -126,7 +169,7 @@ jobs:
             }
           "
 
-      # 9. Cek file kritis ada sebelum build
+      # 10. Cek file kritis ada sebelum build
       - name: Cek file kritis
         run: |
           echo "=== Cek AIDL ==="
@@ -143,10 +186,6 @@ jobs:
 
           echo "=== Cek ShizukuBridgePlugin ada ==="
           find android -name "ShizukuBridgePlugin.kt" && echo "ShizukuBridgePlugin.kt ditemukan" || echo "PERINGATAN: ShizukuBridgePlugin.kt tidak ada"
-
-      # 10. Capacitor Sync
-      - name: Capacitor Sync
-        run: npx cap sync android
 
       # 11. Regenerate gradle-wrapper.jar dari distribusi Gradle resmi
       - name: Regenerate gradle-wrapper.jar

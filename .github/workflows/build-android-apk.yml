@@ -74,57 +74,49 @@ jobs:
             echo "::error::capacitor.config.ts not found in repo root"
             exit 1
           fi
-          echo "✓ Capacitor config OK"
+          echo "OK Capacitor config found"
 
-      # ============================================================
-      # Clean ALL resource files (icons, splash, values) and
-      # regenerate from scratch to avoid duplicate resource conflicts.
-      # ============================================================
-      - name: Clean and regenerate launcher icons + splash + values
+      - name: Clean and regenerate launcher icons
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq librsvg2-bin imagemagick
+          sudo apt-get install -y -qq librsvg2-bin
 
           if [ ! -f "icon.svg" ]; then
             echo "::warning::icon.svg not found, skipping icon generation"
             exit 0
           fi
 
-          echo "Cleaning ALL resource files..."
-          # Delete everything under res/ that could conflict
-          rm -rf android/app/src/main/res/mipmap-*
-          rm -rf android/app/src/main/res/drawable
-          rm -rf android/app/src/main/res/drawable-*
-          # Delete conflicting values files — keep only strings.xml
-          rm -f android/app/src/main/res/values/colors.xml
-          rm -f android/app/src/main/res/values/styles.xml
-          rm -f android/app/src/main/res/values/ic_launcher_background.xml
-          rm -f android/app/src/main/res/values/themes.xml
+          echo "Cleaning old launcher icons and splash PNGs..."
+          rm -rf android/app/src/main/res/mipmap-ldpi
+          rm -rf android/app/src/main/res/mipmap-mdpi
+          rm -rf android/app/src/main/res/mipmap-hdpi
+          rm -rf android/app/src/main/res/mipmap-xhdpi
+          rm -rf android/app/src/main/res/mipmap-xxhdpi
+          rm -rf android/app/src/main/res/mipmap-xxxhdpi
+          rm -rf android/app/src/main/res/drawable-port-night-ldpi
+          rm -rf android/app/src/main/res/drawable-land-ldpi
+          rm -rf android/app/src/main/res/drawable-port-ldpi
+          rm -rf android/app/src/main/res/drawable/splash.png
 
-          # Recreate directories
           mkdir -p android/app/src/main/res/mipmap-mdpi
           mkdir -p android/app/src/main/res/mipmap-hdpi
           mkdir -p android/app/src/main/res/mipmap-xhdpi
           mkdir -p android/app/src/main/res/mipmap-xxhdpi
           mkdir -p android/app/src/main/res/mipmap-xxxhdpi
-          mkdir -p android/app/src/main/res/mipmap-anydpi-v26
           mkdir -p android/app/src/main/res/drawable
-          mkdir -p android/app/src/main/res/values
 
           echo "Generating launcher icons from icon.svg..."
-          # Standard legacy launcher icons
-          rsvg-convert -w 48  -h 48  icon.svg -o android/app/src/main/res/mipmap-mdpi/ic_launcher.png
-          rsvg-convert -w 48  -h 48  icon.svg -o android/app/src/main/res/mipmap-mdpi/ic_launcher_round.png
-          rsvg-convert -w 72  -h 72  icon.svg -o android/app/src/main/res/mipmap-hdpi/ic_launcher.png
-          rsvg-convert -w 72  -h 72  icon.svg -o android/app/src/main/res/mipmap-hdpi/ic_launcher_round.png
-          rsvg-convert -w 96  -h 96  icon.svg -o android/app/src/main/res/mipmap-xhdpi/ic_launcher.png
-          rsvg-convert -w 96  -h 96  icon.svg -o android/app/src/main/res/mipmap-xhdpi/ic_launcher_round.png
+          rsvg-convert -w 48 -h 48 icon.svg -o android/app/src/main/res/mipmap-mdpi/ic_launcher.png
+          rsvg-convert -w 48 -h 48 icon.svg -o android/app/src/main/res/mipmap-mdpi/ic_launcher_round.png
+          rsvg-convert -w 72 -h 72 icon.svg -o android/app/src/main/res/mipmap-hdpi/ic_launcher.png
+          rsvg-convert -w 72 -h 72 icon.svg -o android/app/src/main/res/mipmap-hdpi/ic_launcher_round.png
+          rsvg-convert -w 96 -h 96 icon.svg -o android/app/src/main/res/mipmap-xhdpi/ic_launcher.png
+          rsvg-convert -w 96 -h 96 icon.svg -o android/app/src/main/res/mipmap-xhdpi/ic_launcher_round.png
           rsvg-convert -w 144 -h 144 icon.svg -o android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png
           rsvg-convert -w 144 -h 144 icon.svg -o android/app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png
           rsvg-convert -w 192 -h 192 icon.svg -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
           rsvg-convert -w 192 -h 192 icon.svg -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png
 
-          # Adaptive icon foreground/background
           rsvg-convert -w 108 -h 108 icon.svg -o android/app/src/main/res/mipmap-mdpi/ic_launcher_foreground.png
           rsvg-convert -w 108 -h 108 icon.svg -o android/app/src/main/res/mipmap-mdpi/ic_launcher_background.png
           rsvg-convert -w 162 -h 162 icon.svg -o android/app/src/main/res/mipmap-hdpi/ic_launcher_foreground.png
@@ -135,69 +127,10 @@ jobs:
           rsvg-convert -w 324 -h 324 icon.svg -o android/app/src/main/res/mipmap-xxhdpi/ic_launcher_background.png
           rsvg-convert -w 432 -h 432 icon.svg -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png
           rsvg-convert -w 432 -h 432 icon.svg -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_background.png
-          rsvg-convert -w 512 -h 512 icon.svg -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground_512.png
 
-          # Splash screen — single PNG, Capacitor will scale
           rsvg-convert -w 1080 -h 1920 icon.svg -o android/app/src/main/res/drawable/splash.png
 
-          # Adaptive icon XML for Android 8.0+
-          cat > android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml << 'XML_EOF'
-<?xml version="1.0" encoding="utf-8"?>
-<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-    <background android:drawable="@mipmap/ic_launcher_background"/>
-    <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
-</adaptive-icon>
-XML_EOF
-
-          cat > android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml << 'XML_EOF'
-<?xml version="1.0" encoding="utf-8"?>
-<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-    <background android:drawable="@mipmap/ic_launcher_background"/>
-    <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
-</adaptive-icon>
-XML_EOF
-
-          # Single source of truth for colors (no duplicate ic_launcher_background)
-          cat > android/app/src/main/res/values/colors.xml << 'XML_EOF'
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <color name="colorPrimary">#6366F1</color>
-    <color name="colorPrimaryDark">#4F46E5</color>
-    <color name="colorAccent">#EC4899</color>
-    <color name="ic_launcher_background">#0F172A</color>
-</resources>
-XML_EOF
-
-          # Styles referencing splash drawable
-          cat > android/app/src/main/res/values/styles.xml << 'XML_EOF'
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
-        <item name="colorPrimary">@color/colorPrimary</item>
-        <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
-        <item name="colorAccent">@color/colorAccent</item>
-    </style>
-    <style name="AppTheme.NoActionBarLaunch" parent="AppTheme">
-        <item name="android:background">@drawable/splash</item>
-        <item name="android:windowNoTitle">true</item>
-        <item name="android:windowActionBar">false</item>
-        <item name="android:windowFullscreen">true</item>
-        <item name="android:windowContentOverlay">@null</item>
-    </style>
-</resources>
-XML_EOF
-
-          # Verify no duplicate resource definitions
-          echo "=== Verifying no duplicate resources ==="
-          DUPLICATES=$(grep -rl "ic_launcher_background" android/app/src/main/res/values/ | wc -l)
-          echo "Files defining ic_launcher_background: $DUPLICATES"
-          if [ "$DUPLICATES" -gt 1 ]; then
-            echo "::error::Still have duplicate ic_launcher_background definitions"
-            grep -rl "ic_launcher_background" android/app/src/main/res/values/
-            exit 1
-          fi
-          echo "✓ No duplicate resources"
-          echo "✓ All launcher icons + splash + styles + colors regenerated"
+          echo "Icons generated successfully"
 
       - name: Capacitor Sync
         run: npx cap sync android
@@ -212,7 +145,7 @@ XML_EOF
           chmod +x gradlew
 
           if ! unzip -l gradle/wrapper/gradle-wrapper.jar > /dev/null 2>&1; then
-            echo "::warning::gradle-wrapper.jar is corrupt or invalid — regenerating with Gradle 8.14.3..."
+            echo "::warning::gradle-wrapper.jar is corrupt or invalid - regenerating with Gradle 8.14.3..."
             GRADLE_VERSION="8.14.3"
             GRADLE_DIST="gradle-${GRADLE_VERSION}-bin.zip"
             wget -q "https://services.gradle.org/distributions/${GRADLE_DIST}" -O /tmp/${GRADLE_DIST}
@@ -220,9 +153,9 @@ XML_EOF
             /tmp/gradle-${GRADLE_VERSION}/bin/gradle wrapper --gradle-version ${GRADLE_VERSION} --distribution-type all
             chmod +x gradlew
             rm -rf /tmp/${GRADLE_DIST} /tmp/gradle-${GRADLE_VERSION}
-            echo "✓ Gradle wrapper regenerated with v${GRADLE_VERSION}"
+            echo "Gradle wrapper regenerated"
           else
-            echo "✓ Gradle wrapper OK"
+            echo "Gradle wrapper OK"
           fi
           ls -la gradlew gradle/wrapper/gradle-wrapper.jar
 
@@ -324,15 +257,15 @@ XML_EOF
           echo "" >> $GITHUB_STEP_SUMMARY
           if [ -f "artifacts/GameMapperMind-debug.apk" ]; then
             DEBUG_SIZE=$(du -h artifacts/GameMapperMind-debug.apk | cut -f1)
-            echo "- ✅ Debug APK built (\`$DEBUG_SIZE\`)" >> $GITHUB_STEP_SUMMARY
+            echo "- Debug APK built ($DEBUG_SIZE)" >> $GITHUB_STEP_SUMMARY
           else
-            echo "- ⏭️ Debug APK not built (skipped or failed)" >> $GITHUB_STEP_SUMMARY
+            echo "- Debug APK not built" >> $GITHUB_STEP_SUMMARY
           fi
           if [ -f "artifacts/GameMapperMind-release.apk" ] || [ -f "artifacts/GameMapperMind-release-unsigned.apk" ]; then
-            echo "- ✅ Release APK built" >> $GITHUB_STEP_SUMMARY
+            echo "- Release APK built" >> $GITHUB_STEP_SUMMARY
           else
-            echo "- ⏭️ Release APK not built (skipped or failed)" >> $GITHUB_STEP_SUMMARY
+            echo "- Release APK not built" >> $GITHUB_STEP_SUMMARY
           fi
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Download" >> $GITHUB_STEP_SUMMARY
-          echo "Artifacts are available in the workflow run page (Actions tab → this run → Artifacts section)." >> $GITHUB_STEP_SUMMARY
+          echo "Artifacts are available in the Actions tab - this run - Artifacts section." >> $GITHUB_STEP_SUMMARY

@@ -131,21 +131,24 @@ jobs:
       - name: Patch build.gradle to use debug signing for release (no keystore in CI)
         run: |
           cd android/app
-          # Replace signingConfigs.release block with one that uses debug keystore
-          # This allows release APK build without requiring user-provided keystore
-          sed -i 's|storeFile file("keystore.jks")|storeFile file("${System.env.HOME}/.android/debug.keystore")|g' build.gradle
-          sed -i 's|storePassword "password_placeholder"|storePassword "android"|g' build.gradle
-          sed -i 's|keyAlias "alias_placeholder"|keyAlias "androiddebugkey"|g' build.gradle
-          sed -i 's|keyPassword "password_placeholder"|keyPassword "android"|g' build.gradle
+          # Use $HOME (bash syntax) — NOT ${System.env.HOME} which is Gradle Groovy syntax
+          ANDROID_HOME_DIR="$HOME/.android"
+          mkdir -p "$ANDROID_HOME_DIR"
 
           # Create debug keystore if it doesn't exist (CI runner)
-          mkdir -p ${System.env.HOME}/.android
-          if [ ! -f "${System.env.HOME}/.android/debug.keystore" ]; then
-            keytool -genkey -v -keystore ${System.env.HOME}/.android/debug.keystore \
+          if [ ! -f "$ANDROID_HOME_DIR/debug.keystore" ]; then
+            keytool -genkey -v -keystore "$ANDROID_HOME_DIR/debug.keystore" \
               -storepass android -alias androiddebugkey -keypass android \
               -keyalg RSA -keysize 2048 -validity 10000 \
               -dname "CN=Android Debug, O=Android, C=US" 2>/dev/null || true
           fi
+
+          # Patch signingConfigs.release to use debug keystore
+          # sed needs to use | as delimiter because paths contain /
+          sed -i "s|storeFile file(\"keystore.jks\")|storeFile file(\"$ANDROID_HOME_DIR/debug.keystore\")|g" build.gradle
+          sed -i 's|storePassword "password_placeholder"|storePassword "android"|g' build.gradle
+          sed -i 's|keyAlias "alias_placeholder"|keyAlias "androiddebugkey"|g' build.gradle
+          sed -i 's|keyPassword "password_placeholder"|keyPassword "android"|g' build.gradle
 
           echo "Patched build.gradle to use debug signing for release builds"
           grep -A5 "signingConfigs" build.gradle || true

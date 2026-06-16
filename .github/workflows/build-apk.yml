@@ -148,9 +148,23 @@ jobs:
       - name: Capacitor Sync
         run: npx cap sync android
 
-      # 11. Setup Gradle (otomatis download & validasi wrapper jar)
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
+      # 11. Regenerate gradle-wrapper.jar dari distribusi Gradle resmi
+      - name: Regenerate gradle-wrapper.jar
+        run: |
+          echo "=== Download Gradle 8.14.3 resmi ==="
+          curl -fsSL https://services.gradle.org/distributions/gradle-8.14.3-bin.zip \
+            -o /tmp/gradle-8.14.3-bin.zip
+
+          echo "=== Extract distribusi Gradle ==="
+          unzip -q /tmp/gradle-8.14.3-bin.zip -d /tmp/gradle-dist/
+
+          echo "=== Regenerate wrapper jar menggunakan Gradle resmi ==="
+          cd android
+          /tmp/gradle-dist/gradle-8.14.3/bin/gradle wrapper --gradle-version 8.14.3
+
+          echo "=== Verifikasi jar baru ==="
+          ls -lh gradle/wrapper/gradle-wrapper.jar
+          sha256sum gradle/wrapper/gradle-wrapper.jar
 
       # 12. Build APK
       - name: Build Android APK

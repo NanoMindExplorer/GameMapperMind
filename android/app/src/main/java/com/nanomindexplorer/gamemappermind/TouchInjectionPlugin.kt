@@ -18,8 +18,12 @@ import android.content.pm.PackageManager
 class TouchInjectionPlugin : Plugin() {
 
     companion object {
+        // @JvmField makes `instance` accessible as a plain field from Java code
+        // (FloatingOverlayService.java needs this for forwarding overlay touch events).
+        @JvmField
         var instance: TouchInjectionPlugin? = null
 
+        @JvmStatic
         fun emitGamepadButton(buttonName: String, value: Int, pressure: Float) {
             val data = JSObject()
             data.put("buttonName", buttonName)
@@ -28,6 +32,7 @@ class TouchInjectionPlugin : Plugin() {
             instance?.notifyListeners("onGamepadButton", data)
         }
 
+        @JvmStatic
         fun emitGamepadAxis(axes: FloatArray) {
             val data = JSObject()
             val jsArray = com.getcapacitor.JSArray()
@@ -36,10 +41,7 @@ class TouchInjectionPlugin : Plugin() {
             instance?.notifyListeners("onGamepadAxis", data)
         }
 
-        // ============================================================
-        // Gyroscope data — emitted by GamepadListenerService when the
-        // connected controller exposes rotational-rate axes.
-        // ============================================================
+        @JvmStatic
         fun emitGyroData(x: Float, y: Float, z: Float, timestamp: Long) {
             val data = JSObject()
             data.put("x", x.toDouble())
@@ -49,10 +51,7 @@ class TouchInjectionPlugin : Plugin() {
             instance?.notifyListeners("onGyroData", data)
         }
 
-        // ============================================================
-        // Foreground app change — emitted by TouchAccessibilityService
-        // when the user switches apps (used for auto-start game detection).
-        // ============================================================
+        @JvmStatic
         fun emitForegroundAppChanged(packageName: String) {
             val data = JSObject()
             data.put("packageName", packageName)
@@ -60,10 +59,7 @@ class TouchInjectionPlugin : Plugin() {
             instance?.notifyListeners("onForegroundAppChanged", data)
         }
 
-        // ============================================================
-        // Real macro capture events — emitted by TouchAccessibilityService
-        // while startMacroCapture() is active.
-        // ============================================================
+        @JvmStatic
         fun emitMacroCapture(
             action: String, pointerId: Int, x: Float, y: Float,
             pressure: Float, size: Float, timestamp: Long
@@ -220,10 +216,6 @@ class TouchInjectionPlugin : Plugin() {
         }
     }
 
-    // ============================================================
-    // Push anti-ban configuration to the daemon. Called from JS
-    // whenever the active profile changes or antiBanEnabled toggles.
-    // ============================================================
     @PluginMethod
     fun setAntiBanConfig(call: PluginCall) {
         try {
@@ -245,10 +237,6 @@ class TouchInjectionPlugin : Plugin() {
         }
     }
 
-    // ============================================================
-    // Real macro capture — toggles whether TouchAccessibilityService
-    // should forward MotionEvents to JS as onMacroCapture events.
-    // ============================================================
     @PluginMethod
     fun startMacroCapture(call: PluginCall) {
         try {
@@ -271,25 +259,27 @@ class TouchInjectionPlugin : Plugin() {
 
     // ============================================================
     // Public overlay-facing helpers (used by FloatingOverlayService)
-    // — added so the overlay WebView can inject touch events through
-    //   the same Shizuku UserService as the React side, without
-    //   constructing a PluginCall. (Issue #27 fix)
+    // — made @JvmStatic for cleaner Java interop
     // ============================================================
+    @JvmStatic
     fun injectTouchDown(pointerId: Int, x: Float, y: Float) {
         try { touchService?.touchDown(pointerId, x, y) }
         catch (e: Exception) { Log.e("GameMapper", "overlay touchDown failed", e) }
     }
 
+    @JvmStatic
     fun injectTouchMove(pointerId: Int, x: Float, y: Float) {
         try { touchService?.touchMove(pointerId, x, y) }
         catch (e: Exception) { Log.e("GameMapper", "overlay touchMove failed", e) }
     }
 
+    @JvmStatic
     fun injectTouchUp(pointerId: Int) {
         try { touchService?.touchUp(pointerId) }
         catch (e: Exception) { Log.e("GameMapper", "overlay touchUp failed", e) }
     }
 
+    @JvmStatic
     fun injectTapFromOverlay(x: Float, y: Float) {
         try { touchService?.injectTap(x, y) }
         catch (e: Exception) { Log.e("GameMapper", "overlay tap failed", e) }

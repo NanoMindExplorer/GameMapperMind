@@ -171,12 +171,13 @@ jobs:
         run: npx cap sync android
 
       # ============================================================
-      # 11. Verify Gradle wrapper (FIX #2)
-      #     chmod +x before checking executable bit, because Git
-      #     doesn't always preserve the executable bit when files
-      #     are committed without proper mode.
+      # 11. Verify and repair Gradle wrapper (FIX #2 + #3)
+      #     - chmod +x before checking executable bit (Git sometimes
+      #       loses the executable bit during clone)
+      #     - If gradle-wrapper.jar is corrupt or invalid, regenerate
+      #       it using the system Gradle (installed via apt)
       # ============================================================
-      - name: Verify Gradle wrapper
+      - name: Verify and repair Gradle wrapper
         run: |
           cd android
           if [ ! -f "./gradlew" ]; then
@@ -184,8 +185,25 @@ jobs:
             exit 1
           fi
           chmod +x gradlew
-          ls -la gradlew
-          echo "✓ Gradle wrapper OK"
+
+          # Verify gradle-wrapper.jar is a valid ZIP file.
+          # If it's corrupt or missing, regenerate it using the system Gradle.
+          if ! unzip -l gradle/wrapper/gradle-wrapper.jar > /dev/null 2>&1; then
+            echo "::warning::gradle-wrapper.jar is corrupt or invalid — regenerating..."
+
+            # Install system Gradle (Ubuntu runner has it via apt)
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq gradle
+
+            # Regenerate wrapper files (gradlew, gradle-wrapper.jar, properties)
+            gradle wrapper --gradle-version 8.14.3 --distribution-type all
+
+            chmod +x gradlew
+            echo "✓ Gradle wrapper regenerated"
+          else
+            echo "✓ Gradle wrapper OK"
+          fi
+          ls -la gradlew gradle/wrapper/gradle-wrapper.jar
 
       # ============================================================
       # 12. Build DEBUG APK

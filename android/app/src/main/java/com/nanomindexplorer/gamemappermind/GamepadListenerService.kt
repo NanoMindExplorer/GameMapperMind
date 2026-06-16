@@ -20,7 +20,6 @@ class GamepadListenerService : Service() {
 
     companion object {
         var isRunning = false
-        // Last detected controller id (for mode detection on the JS side)
         @Volatile var lastSeenControllerId: String = ""
         private val AXIS_RANGES = mutableMapOf<String, IntArray>()
     }
@@ -57,7 +56,6 @@ class GamepadListenerService : Service() {
         }
     }
 
-    /** Normalize a raw evdev axis value to a [-1, 1] float with dynamic range expansion. */
     private fun normalizeAxis(axisName: String, rawValue: Int): Float {
         var min = 0
         var max = 255
@@ -73,107 +71,102 @@ class GamepadListenerService : Service() {
         isListening = true
         Thread {
             try {
-                evdevProcess = rikka.shizuku.Shizuku.newProcess(arrayOf("sh", "-c", "getevent -l"), null, null)
+                // Run getevent via Runtime.exec — this works in the app process
+                // but only returns shell-privilege events if Shizuku is bound.
+                // For full evdev access, the call should be routed through the
+                // Shizuku UserService (TouchDaemonService).
+                val pb = ProcessBuilder("sh", "-c", "getevent -l")
+                pb.redirectErrorStream(true)
+                evdevProcess = pb.start()
                 val reader = BufferedReader(InputStreamReader(evdevProcess!!.inputStream))
-                var line: String?
+                var line: String? = null  // FIX: must be initialized
 
                 var lStickX = 0f; var lStickY = 0f
                 var rStickX = 0f; var rStickY = 0f
                 var l2Analog = -1f; var r2Analog = -1f
-                // Gyro accumulator — many controllers expose rotational rate via
-                // ABS_RX (pitch), ABS_RY (roll), ABS_RZ (yaw). Values are typically
-                // signed 16-bit, range ~[-32768, 32767].
                 var gyroX = 0f; var gyroY = 0f; var gyroZ = 0f
 
-                // Track add/remove events to remember device names → id strings.
                 val deviceNames = mutableMapOf<Int, String>()
 
                 while (isListening && reader.readLine().also { line = it } != null) {
-                    line?.let { raw ->
-                        try {
-                            // Device name capture: lines like:
-                            //   add device 6: /dev/input/event12
-                            //     name:     "Vortex XP107"
-                            if (raw.startsWith("add device")) {
-                                val parts = raw.split(":")
-                                if (parts.size >= 2) {
-                                    val devId = parts[0].removePrefix("add device").trim().toIntOrNull() ?: -1
-                                    val path = parts.slice(1..parts.lastIndex).joinToString(":").trim()
-                                    deviceNames[devId] = path
-                                }
-                            } else if (raw.trim().startsWith("name:")) {
-                                // The line AFTER "add device N: path" carries the human-readable name.
-                                val name = raw.trim().removePrefix("name:").trim().trim('"')
-                                if (deviceNames.isNotEmpty()) {
-                                    val lastKey = deviceNames.keys.maxOrNull()
-                                    if (lastKey != null) {
-                                        deviceNames[lastKey] = name
-                                        lastSeenControllerId = name
-                                        // Emit as a synthetic button event so the JS side can detect mode.
-                                        TouchInjectionPlugin.emitGamepadButton(
-                                            "CONTROLLER_ID:$name", 1, 1.0f
-                                        )
-                                    }
-                                }
+                    val raw = line ?: continue
+                    try {
+                        if (raw.startsWith("add device")) {
+                            val parts = raw.split(":")
+                            if (parts.size >= 2) {
+                                val devId = parts[0].removePrefix("add device").trim().toIntOrNull() ?: -1
+                                val path = parts.slice(1..parts.lastIndex).joinToString(":").trim()
+                                deviceNames[devId] = path
                             }
-
-                            if (raw.contains("EV_ABS")) {
-                                val parts = raw.split(Regex("\\s+")).filter { it.isNotBlank() }
-                                if (parts.size >= 4) {
-                                    val axisType = parts[2]
-                                    val valueHex = parts[3]
-                                    val valueInt = java.lang.Long.parseLong(valueHex, 16).toInt()
-                                    val normalized = normalizeAxis(axisType, valueInt)
-
-                                    when (axisType) {
-                                        "ABS_X" -> lStickX = normalized
-                                        "ABS_Y" -> lStickY = normalized
-                                        "ABS_Z", "ABS_RX" -> rStickX = normalized
-                                        "ABS_RZ", "ABS_RY" -> rStickY = normalized
-                                        "ABS_BRAKE" -> l2Analog = (normalized + 1f) / 2f
-                                        "ABS_GAS"   -> r2Analog = (normalized + 1f) / 2f
-                                        "ABS_HAT0X", "ABS_HAT0Y" -> {
-                                            val isDown = valueInt != 0
-                                            val btnName = when {
-                                                axisType == "ABS_HAT0X" && valueInt < 0 -> "LEFT"
-                                                axisType == "ABS_HAT0X" && valueInt > 0 -> "RIGHT"
-                                                axisType == "ABS_HAT0Y" && valueInt < 0 -> "UP"
-                                                axisType == "ABS_HAT0Y" && valueInt > 0 -> "DOWN"
-                                                else -> return@let
-                                            }
-                                            TouchInjectionPlugin.emitGamepadButton(btnName, if (isDown) 1 else 0, 1.0f)
-                                        }
-                                        // Gyroscope axes (rotational rate).
-                                        // Convention: RX=pitch, RY=roll, RZ=yaw (rad/s after normalization).
-                                        "ABS_RX2", "ABS_RY2", "ABS_RZ2" -> {
-                                            // Some controllers expose gyro on a secondary device with these axes.
-                                            when (axisType) {
-                                                "ABS_RX2" -> gyroX = normalized
-                                                "ABS_RY2" -> gyroY = normalized
-                                                "ABS_RZ2" -> gyroZ = normalized
-                                            }
-                                            TouchInjectionPlugin.emitGyroData(gyroX, gyroY, gyroZ, System.currentTimeMillis())
-                                        }
-                                    }
-                                    TouchInjectionPlugin.emitGamepadAxis(
-                                        floatArrayOf(lStickX, lStickY, rStickX, rStickY, l2Analog, r2Analog)
+                        } else if (raw.trim().startsWith("name:")) {
+                            val name = raw.trim().removePrefix("name:").trim().trim('"')
+                            if (deviceNames.isNotEmpty()) {
+                                val lastKey = deviceNames.keys.maxOrNull()
+                                if (lastKey != null) {
+                                    deviceNames[lastKey] = name
+                                    lastSeenControllerId = name
+                                    TouchInjectionPlugin.emitGamepadButton(
+                                        "CONTROLLER_ID:$name", 1, 1.0f
                                     )
                                 }
-                            } else if (raw.contains("EV_KEY")) {
-                                val parts = raw.split(Regex("\\s+")).filter { it.isNotBlank() }
-                                if (parts.size >= 4) {
-                                    val btnRaw = parts[2]
-                                    val stateStr = parts[3]
-                                    val isDown = if (stateStr == "DOWN") 1 else 0
-                                    val btnMap = mapEvdevToButton(btnRaw)
-                                    if (btnMap != "UNKNOWN") {
-                                        TouchInjectionPlugin.emitGamepadButton(btnMap, isDown, 1.0f)
+                            }
+                        }
+
+                        if (raw.contains("EV_ABS")) {
+                            val parts = raw.split(Regex("\\s+")).filter { it.isNotBlank() }
+                            if (parts.size >= 4) {
+                                val axisType = parts[2]
+                                val valueHex = parts[3]
+                                val valueInt = java.lang.Long.parseLong(valueHex, 16).toInt()
+                                val normalized = normalizeAxis(axisType, valueInt)
+
+                                when (axisType) {
+                                    "ABS_X" -> lStickX = normalized
+                                    "ABS_Y" -> lStickY = normalized
+                                    "ABS_Z", "ABS_RX" -> rStickX = normalized
+                                    "ABS_RZ", "ABS_RY" -> rStickY = normalized
+                                    "ABS_BRAKE" -> l2Analog = (normalized + 1f) / 2f
+                                    "ABS_GAS"   -> r2Analog = (normalized + 1f) / 2f
+                                    "ABS_HAT0X", "ABS_HAT0Y" -> {
+                                        val isDown = valueInt != 0
+                                        val btnName = when {
+                                            axisType == "ABS_HAT0X" && valueInt < 0 -> "LEFT"
+                                            axisType == "ABS_HAT0X" && valueInt > 0 -> "RIGHT"
+                                            axisType == "ABS_HAT0Y" && valueInt < 0 -> "UP"
+                                            axisType == "ABS_HAT0Y" && valueInt > 0 -> "DOWN"
+                                            else -> ""
+                                        }
+                                        if (btnName.isNotEmpty()) {
+                                            TouchInjectionPlugin.emitGamepadButton(btnName, if (isDown) 1 else 0, 1.0f)
+                                        }
+                                    }
+                                    "ABS_RX2", "ABS_RY2", "ABS_RZ2" -> {
+                                        when (axisType) {
+                                            "ABS_RX2" -> gyroX = normalized
+                                            "ABS_RY2" -> gyroY = normalized
+                                            "ABS_RZ2" -> gyroZ = normalized
+                                        }
+                                        TouchInjectionPlugin.emitGyroData(gyroX, gyroY, gyroZ, System.currentTimeMillis())
                                     }
                                 }
+                                TouchInjectionPlugin.emitGamepadAxis(
+                                    floatArrayOf(lStickX, lStickY, rStickX, rStickY, l2Analog, r2Analog)
+                                )
                             }
-                        } catch (e: Exception) {
-                            // ignore parse errors on individual lines
+                        } else if (raw.contains("EV_KEY")) {
+                            val parts = raw.split(Regex("\\s+")).filter { it.isNotBlank() }
+                            if (parts.size >= 4) {
+                                val btnRaw = parts[2]
+                                val stateStr = parts[3]
+                                val isDown = if (stateStr == "DOWN") 1 else 0
+                                val btnMap = mapEvdevToButton(btnRaw)
+                                if (btnMap != "UNKNOWN") {
+                                    TouchInjectionPlugin.emitGamepadButton(btnMap, isDown, 1.0f)
+                                }
+                            }
                         }
+                    } catch (e: Exception) {
+                        // ignore parse errors on individual lines
                     }
                 }
             } catch (e: Exception) {
@@ -196,7 +189,7 @@ class GamepadListenerService : Service() {
             evdevName.contains("BTN_THUMBR") -> "R3"
             evdevName.contains("BTN_START")  -> "START"
             evdevName.contains("BTN_SELECT") -> "SELECT"
-            evdevName.contains("BTN_MODE")   -> "MODE"   // Xbox Guide button — toggles controller mode on some pads
+            evdevName.contains("BTN_MODE")   -> "MODE"
             evdevName.contains("BTN_DPAD_UP")    -> "UP"
             evdevName.contains("BTN_DPAD_DOWN")  -> "DOWN"
             evdevName.contains("BTN_DPAD_LEFT")  -> "LEFT"

@@ -12,14 +12,13 @@ on:
   workflow_dispatch:
     inputs:
       build_type:
-        description: 'Build type'
+        description: 'Build type (debug only by default — release requires keystore secrets)'
         required: true
-        default: 'both'
+        default: 'debug'
         type: choice
         options:
           - debug
           - release
-          - both
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -87,11 +86,8 @@ jobs:
           fi
 
           echo "Cleaning ALL old launcher icons and splash PNGs..."
-          # Delete ALL mipmap folders (will regenerate clean)
           rm -rf android/app/src/main/res/mipmap-*
-          # Delete ALL drawable folders that contain splash.png (ldpi/mdpi/hdpi/etc, port/land, day/night)
           rm -rf android/app/src/main/res/drawable-*
-          # Delete drawable (single) — will recreate with one splash
           rm -rf android/app/src/main/res/drawable
 
           mkdir -p android/app/src/main/res/mipmap-mdpi
@@ -132,6 +128,28 @@ jobs:
       - name: Capacitor Sync
         run: npx cap sync android
 
+      - name: Patch build.gradle to use debug signing for release (no keystore in CI)
+        run: |
+          cd android/app
+          # Replace signingConfigs.release block with one that uses debug keystore
+          # This allows release APK build without requiring user-provided keystore
+          sed -i 's|storeFile file("keystore.jks")|storeFile file("${System.env.HOME}/.android/debug.keystore")|g' build.gradle
+          sed -i 's|storePassword "password_placeholder"|storePassword "android"|g' build.gradle
+          sed -i 's|keyAlias "alias_placeholder"|keyAlias "androiddebugkey"|g' build.gradle
+          sed -i 's|keyPassword "password_placeholder"|keyPassword "android"|g' build.gradle
+
+          # Create debug keystore if it doesn't exist (CI runner)
+          mkdir -p ${System.env.HOME}/.android
+          if [ ! -f "${System.env.HOME}/.android/debug.keystore" ]; then
+            keytool -genkey -v -keystore ${System.env.HOME}/.android/debug.keystore \
+              -storepass android -alias androiddebugkey -keypass android \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug, O=Android, C=US" 2>/dev/null || true
+          fi
+
+          echo "Patched build.gradle to use debug signing for release builds"
+          grep -A5 "signingConfigs" build.gradle || true
+
       - name: Verify and repair Gradle wrapper
         run: |
           cd android
@@ -162,18 +180,15 @@ jobs:
           cd android
           ./gradlew assembleDebug --no-daemon --stacktrace
 
-      - name: Build Release APK (unsigned)
-        if: github.event.inputs.build_type != 'debug'
+      - name: Build Release APK (signed with debug keystore)
+        if: github.event.inputs.build_type == 'release'
         run: |
           cd android
-          ./gradlew assembleRelease --no-daemon --stacktrace -PsigningConfig=none || {
-            echo "::warning::Release build failed."
-            exit 1
-          }
+          ./gradlew assembleRelease --no-daemon --stacktrace
 
-      - name: Sign Release APK
+      - name: Sign Release APK with user keystore (if secrets provided)
         if: |
-          github.event.inputs.build_type != 'debug' &&
+          github.event.inputs.build_type == 'release' &&
           env.KEYSTORE_BASE64 != ''
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
@@ -182,7 +197,7 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           if [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
-            echo "::warning::Keystore secrets incomplete, skipping signing"
+            echo "::warning::Keystore secrets incomplete, keeping debug-signed release"
             exit 0
           fi
           echo "$KEYSTORE_BASE64" | base64 -d > android/app/keystore.jks
@@ -200,9 +215,6 @@ jobs:
           if [ -f "android/app/build/outputs/apk/debug/app-debug.apk" ]; then
             cp android/app/build/outputs/apk/debug/app-debug.apk artifacts/GameMapperMind-debug.apk
           fi
-          if [ -f "android/app/build/outputs/apk/release/app-release-unsigned.apk" ]; then
-            cp android/app/build/outputs/apk/release/app-release-unsigned.apk artifacts/GameMapperMind-release-unsigned.apk
-          fi
           if [ -f "android/app/build/outputs/apk/release/app-release.apk" ]; then
             cp android/app/build/outputs/apk/release/app-release.apk artifacts/GameMapperMind-release.apk
           fi
@@ -218,13 +230,11 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload Release APK
-        if: github.event.inputs.build_type != 'debug'
+        if: github.event.inputs.build_type == 'release'
         uses: actions/upload-artifact@v4
         with:
           name: GameMapperMind-release-apk
-          path: |
-            artifacts/GameMapperMind-release.apk
-            artifacts/GameMapperMind-release-unsigned.apk
+          path: artifacts/GameMapperMind-release.apk
           retention-days: 90
           if-no-files-found: warn
 
@@ -235,7 +245,6 @@ jobs:
           files: |
             artifacts/GameMapperMind-debug.apk
             artifacts/GameMapperMind-release.apk
-            artifacts/GameMapperMind-release-unsigned.apk
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-beta') || contains(github.ref, '-alpha') }}
@@ -250,7 +259,7 @@ jobs:
           echo "- **Trigger**: \`${{ github.event_name }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Ref**: \`${{ github.ref }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Commit**: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Build type requested**: \`${{ github.event.inputs.build_type || 'default (both)' }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Build type requested**: \`${{ github.event.inputs.build_type || 'default (debug)' }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           if [ -f "artifacts/GameMapperMind-debug.apk" ]; then
             DEBUG_SIZE=$(du -h artifacts/GameMapperMind-debug.apk | cut -f1)
@@ -258,7 +267,7 @@ jobs:
           else
             echo "- Debug APK not built" >> $GITHUB_STEP_SUMMARY
           fi
-          if [ -f "artifacts/GameMapperMind-release.apk" ] || [ -f "artifacts/GameMapperMind-release-unsigned.apk" ]; then
+          if [ -f "artifacts/GameMapperMind-release.apk" ]; then
             echo "- Release APK built" >> $GITHUB_STEP_SUMMARY
           else
             echo "- Release APK not built" >> $GITHUB_STEP_SUMMARY

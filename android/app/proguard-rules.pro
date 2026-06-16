@@ -23,9 +23,5 @@
 # GameMapper Shizuku & AIDL rules
 -keep class rikka.shizuku.** { *; }
 -keep interface rikka.shizuku.** { *; }
--keep class com.nanomindexplorer.gamemappermind.ITouchService** { *; }
--keep class com.nanomindexplorer.gamemappermind.TouchDaemonService** { *; }
--keep class com.nanomindexplorer.gamemappermind.TouchInjectionPlugin** { *; }
--keepclassmembers class * extends com.getcapacitor.Plugin {
-    public <methods>;
-}
+-keep class com.nanomindexplorer.gamemappermind.** { *; }
+-keep class com.getcapacitor.** { *; }

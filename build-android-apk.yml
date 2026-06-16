@@ -1,0 +1,323 @@
+# ============================================================
+# GameMapperMind — Android APK Build (Capacitor + Vite + Shizuku)
+# ============================================================
+# Triggered on:
+#   - Push to main
+#   - Pull request to main
+#   - Manual dispatch (with choice debug/release/both)
+#   - Tag push (v*.*.*) → auto-create GitHub Release with APK
+# ============================================================
+name: Build Android APK (Capacitor)
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*.*.*' ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Build type'
+        required: true
+        default: 'both'
+        type: choice
+        options:
+          - debug
+          - release
+          - both
+
+# Cancel in-progress builds when a new push arrives on the same ref
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Minimal permissions required for the workflow
+permissions:
+  contents: write       # needed for release uploads
+  actions: read
+  checks: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      # ============================================================
+      # 1. Checkout
+      # ============================================================
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # needed for version tagging if we add it later
+
+      # ============================================================
+      # 2. Setup JDK 21 (LTS, required for AGP 8.x)
+      # ============================================================
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'zulu'
+          cache: 'gradle'
+
+      # ============================================================
+      # 3. Setup Node.js 22 with npm cache
+      # ============================================================
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # ============================================================
+      # 4. Setup Android SDK (explicit — runner image may not have SDK 36)
+      # ============================================================
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: |
+            platforms;android-36
+            build-tools;36.0.0
+
+      # ============================================================
+      # 5. Install npm dependencies (deterministic from package-lock.json)
+      # ============================================================
+      - name: Install dependencies
+        run: npm ci
+
+      # ============================================================
+      # 6. Type-check before building (fail fast on TS errors)
+      # ============================================================
+      - name: TypeScript type-check
+        run: npx tsc --noEmit
+
+      # ============================================================
+      # 7. Build web assets — Vite only (skip esbuild server.ts since
+      #    it produces dist/server.cjs which would bloat the APK and
+      #    is never used on Android)
+      # ============================================================
+      - name: Build web app (Vite only)
+        run: npx vite build
+
+      # ============================================================
+      # 8. Verify Capacitor config exists (skip init if present)
+      # ============================================================
+      - name: Verify Capacitor config
+        run: |
+          if [ ! -f "capacitor.config.ts" ] && [ ! -f "capacitor.config.json" ]; then
+            echo "::error::capacitor.config.ts not found in repo root"
+            exit 1
+          fi
+          echo "✓ Capacitor config OK"
+
+      # ============================================================
+      # 9. Generate launcher icons (rsvg-convert from icon.svg)
+      #    Idempotent — safe to re-run.
+      # ============================================================
+      - name: Generate launcher icons
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq librsvg2-bin
+
+          if [ ! -f "icon.svg" ]; then
+            echo "::warning::icon.svg not found, skipping icon generation"
+            exit 0
+          fi
+
+          echo "Generating launcher icons from icon.svg..."
+          mkdir -p android/app/src/main/res/mipmap-mdpi
+          mkdir -p android/app/src/main/res/mipmap-hdpi
+          mkdir -p android/app/src/main/res/mipmap-xhdpi
+          mkdir -p android/app/src/main/res/mipmap-xxhdpi
+          mkdir -p android/app/src/main/res/mipmap-xxxhdpi
+          mkdir -p android/app/src/main/res/mipmap-anydpi-v26
+          mkdir -p android/app/src/main/res/drawable
+          mkdir -p android/app/src/main/res/drawable-v24
+
+          # Standard legacy launcher icons
+          rsvg-convert -w 48  -h 48  icon.svg -o android/app/src/main/res/mipmap-mdpi/ic_launcher.png
+          rsvg-convert -w 48  -h 48  icon.svg -o android/app/src/main/res/mipmap-mdpi/ic_launcher_round.png
+          rsvg-convert -w 72  -h 72  icon.svg -o android/app/src/main/res/mipmap-hdpi/ic_launcher.png
+          rsvg-convert -w 72  -h 72  icon.svg -o android/app/src/main/res/mipmap-hdpi/ic_launcher_round.png
+          rsvg-convert -w 96  -h 96  icon.svg -o android/app/src/main/res/mipmap-xhdpi/ic_launcher.png
+          rsvg-convert -w 96  -h 96  icon.svg -o android/app/src/main/res/mipmap-xhdpi/ic_launcher_round.png
+          rsvg-convert -w 144 -h 144 icon.svg -o android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png
+          rsvg-convert -w 144 -h 144 icon.svg -o android/app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png
+          rsvg-convert -w 192 -h 192 icon.svg -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
+          rsvg-convert -w 192 -h 192 icon.svg -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png
+
+          # Adaptive icon foreground/background (Android 8.0+)
+          rsvg-convert -w 108 -h 108 icon.svg -o android/app/src/main/res/mipmap-mdpi/ic_launcher_foreground.png
+          rsvg-convert -w 108 -h 108 icon.svg -o android/app/src/main/res/mipmap-mdpi/ic_launcher_background.png
+          rsvg-convert -w 162 -h 162 icon.svg -o android/app/src/main/res/mipmap-hdpi/ic_launcher_foreground.png
+          rsvg-convert -w 162 -h 162 icon.svg -o android/app/src/main/res/mipmap-hdpi/ic_launcher_background.png
+          rsvg-convert -w 216 -h 216 icon.svg -o android/app/src/main/res/mipmap-xhdpi/ic_launcher_foreground.png
+          rsvg-convert -w 216 -h 216 icon.svg -o android/app/src/main/res/mipmap-xhdpi/ic_launcher_background.png
+          rsvg-convert -w 324 -h 324 icon.svg -o android/app/src/main/res/mipmap-xxhdpi/ic_launcher_foreground.png
+          rsvg-convert -w 324 -h 324 icon.svg -o android/app/src/main/res/mipmap-xxhdpi/ic_launcher_background.png
+          rsvg-convert -w 432 -h 432 icon.svg -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png
+          rsvg-convert -w 432 -h 432 icon.svg -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_background.png
+          rsvg-convert -w 512 -h 512 icon.svg -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground_512.png
+
+          echo "✓ Launcher icons generated"
+
+      # ============================================================
+      # 10. Capacitor sync (copy dist/ → android/app/src/main/assets/public/)
+      # ============================================================
+      - name: Capacitor Sync
+        run: npx cap sync android
+
+      # ============================================================
+      # 11. Verify Gradle wrapper (skip regeneration if already present)
+      # ============================================================
+      - name: Verify Gradle wrapper
+        run: |
+          cd android
+          if [ ! -x "./gradlew" ]; then
+            echo "::error::gradlew not found or not executable"
+            exit 1
+          fi
+          chmod +x gradlew
+          echo "✓ Gradle wrapper OK"
+
+      # ============================================================
+      # 12. Build DEBUG APK
+      # ============================================================
+      - name: Build Debug APK
+        if: github.event.inputs.build_type != 'release'
+        run: |
+          cd android
+          ./gradlew assembleDebug --no-daemon --stacktrace
+
+      # ============================================================
+      # 13. Build RELEASE APK (unsigned — user must sign before distribute)
+      #     For auto-signed release builds, configure secrets.KEYSTORE_BASE64
+      #     and secrets.KEYSTORE_PASSWORD etc.
+      # ============================================================
+      - name: Build Release APK (unsigned)
+        if: github.event.inputs.build_type != 'debug'
+        run: |
+          cd android
+          ./gradlew assembleRelease --no-daemon --stacktrace -PsigningConfig=none || {
+            echo "::warning::Release build with minifyEnabled=true can fail if proguard strips needed classes."
+            echo "::warning::If this happens, check proguard-rules.pro keep rules."
+            exit 1
+          }
+
+      # ============================================================
+      # 14. (Optional) Sign Release APK with provided keystore
+      #     Set these secrets to enable:
+      #       KEYSTORE_BASE64        — base64-encoded .jks file
+      #       KEYSTORE_PASSWORD      — keystore password
+      #       KEY_ALIAS              — key alias
+      #       KEY_PASSWORD           — key password
+      # ============================================================
+      - name: Sign Release APK
+        if: |
+          github.event.inputs.build_type != 'debug' &&
+          env.KEYSTORE_BASE64 != ''
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "::warning::Keystore secrets incomplete, skipping signing"
+            exit 0
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > android/app/keystore.jks
+          cd android
+          ./gradlew assembleRelease --no-daemon \
+            -Pandroid.injected.signing.store.file=app/keystore.jks \
+            -Pandroid.injected.signing.store.password=$KEYSTORE_PASSWORD \
+            -Pandroid.injected.signing.key.alias=$KEY_ALIAS \
+            -Pandroid.injected.signing.key.password=$KEY_PASSWORD
+          rm -f app/keystore.jks
+
+      # ============================================================
+      # 15. Collect APK artifacts
+      # ============================================================
+      - name: Collect APK artifacts
+        run: |
+          mkdir -p artifacts
+          if [ -f "android/app/build/outputs/apk/debug/app-debug.apk" ]; then
+            cp android/app/build/outputs/apk/debug/app-debug.apk artifacts/GameMapperMind-debug.apk
+          fi
+          if [ -f "android/app/build/outputs/apk/release/app-release-unsigned.apk" ]; then
+            cp android/app/build/outputs/apk/release/app-release-unsigned.apk artifacts/GameMapperMind-release-unsigned.apk
+          fi
+          if [ -f "android/app/build/outputs/apk/release/app-release.apk" ]; then
+            cp android/app/build/outputs/apk/release/app-release.apk artifacts/GameMapperMind-release.apk
+          fi
+          ls -la artifacts/
+
+      # ============================================================
+      # 16. Upload artifacts
+      # ============================================================
+      - name: Upload Debug APK
+        if: github.event.inputs.build_type != 'release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: GameMapperMind-debug-apk
+          path: artifacts/GameMapperMind-debug.apk
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload Release APK
+        if: github.event.inputs.build_type != 'debug'
+        uses: actions/upload-artifact@v4
+        with:
+          name: GameMapperMind-release-apk
+          path: |
+            artifacts/GameMapperMind-release.apk
+            artifacts/GameMapperMind-release-unsigned.apk
+          retention-days: 90
+          if-no-files-found: warn
+
+      # ============================================================
+      # 17. (Tag only) Create GitHub Release with APK attached
+      # ============================================================
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/GameMapperMind-debug.apk
+            artifacts/GameMapperMind-release.apk
+            artifacts/GameMapperMind-release-unsigned.apk
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-beta') || contains(github.ref, '-alpha') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ============================================================
+      # 18. Summary
+      # ============================================================
+      - name: Build Summary
+        if: always()
+        run: |
+          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Trigger**: \`${{ github.event_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Ref**: \`${{ github.ref }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Build type requested**: \`${{ github.event.inputs.build_type || 'default (both)' }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f "artifacts/GameMapperMind-debug.apk" ]; then
+            DEBUG_SIZE=$(du -h artifacts/GameMapperMind-debug.apk | cut -f1)
+            echo "- ✅ Debug APK built (\`$DEBUG_SIZE\`)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ⏭️ Debug APK not built (skipped or failed)" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ -f "artifacts/GameMapperMind-release.apk" ] || [ -f "artifacts/GameMapperMind-release-unsigned.apk" ]; then
+            echo "- ✅ Release APK built" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ⏭️ Release APK not built (skipped or failed)" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Download" >> $GITHUB_STEP_SUMMARY
+          echo "Artifacts are available in the workflow run page (Actions tab → this run → Artifacts section)." >> $GITHUB_STEP_SUMMARY

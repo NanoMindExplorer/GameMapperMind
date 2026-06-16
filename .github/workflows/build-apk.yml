@@ -148,29 +148,9 @@ jobs:
       - name: Capacitor Sync
         run: npx cap sync android
 
-      # 11. Perbaiki gradle-wrapper.jar yang corrupt
-      - name: Fix gradle-wrapper.jar
-        run: |
-          echo "=== Cek gradle-wrapper.properties ==="
-          cat android/gradle/wrapper/gradle-wrapper.properties
-
-          # Baca versi Gradle dari properties file
-          GRADLE_VERSION=$(grep distributionUrl android/gradle/wrapper/gradle-wrapper.properties \
-            | sed 's/.*gradle-\(.*\)-bin.zip/\1/' \
-            | tr -d '\\')
-          echo "Versi Gradle yang dibutuhkan: $GRADLE_VERSION"
-
-          # Download gradle-wrapper.jar yang benar dari GitHub Gradle releases
-          curl -fsSL \
-            "https://raw.githubusercontent.com/gradle/gradle/v${GRADLE_VERSION}/gradle/wrapper/gradle-wrapper.jar" \
-            -o android/gradle/wrapper/gradle-wrapper.jar \
-            || curl -fsSL \
-            "https://github.com/gradle/gradle/raw/v${GRADLE_VERSION}/gradle/wrapper/gradle-wrapper.jar" \
-            -o android/gradle/wrapper/gradle-wrapper.jar
-
-          # Verifikasi file valid
-          file android/gradle/wrapper/gradle-wrapper.jar
-          ls -lh android/gradle/wrapper/gradle-wrapper.jar
+      # 11. Setup Gradle (otomatis download & validasi wrapper jar)
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
 
       # 12. Build APK
       - name: Build Android APK

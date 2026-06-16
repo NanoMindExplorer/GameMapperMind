@@ -11,7 +11,7 @@ import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
-import dev.rikka.shizuku.Shizuku
+import rikka.shizuku.Shizuku
 
 @CapacitorPlugin(name = "ShizukuBridge")
 class ShizukuBridgePlugin : Plugin() {
@@ -19,7 +19,7 @@ class ShizukuBridgePlugin : Plugin() {
     private var touchService: ITouchService? = null
     private val USER_SERVICE_ARGS = Shizuku.UserServiceArgs(
         ComponentName("com.nanomindexplorer.gamemappermind", TouchDaemonService::class.java.name)
-    ).daemon(false).processNameSuffix("touch_daemon").version(BuildConfig.VERSION_CODE)
+    ).daemon(false).processNameSuffix("touch_daemon").version(1)
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(componentName: ComponentName, binder: IBinder) {

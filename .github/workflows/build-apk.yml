@@ -15,15 +15,12 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 2. Setup Java JDK 21
-      # ✅ Dikembalikan ke 21 — capacitor-android 6/7 WAJIB sourceCompatibility 21.
-      #    Error sebelumnya "Unknown Kotlin JVM target: 21" bukan karena JDK-nya,
-      #    tapi karena Kotlin plugin-nya terlalu lama. Diperbaiki di step 7.
+      # 2. Setup Java JDK (diperlukan untuk Gradle/Android SDK)
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           java-version: '21'
-          distribution: 'temurin'
+          distribution: 'zulu'
 
       # 3. Setup Node.js
       - name: Set up Node.js
@@ -32,237 +29,167 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
-      # 4. Install Dependencies & Build Web Assets
+      # 4. Install Dependencies & Build Web Assets (dist/)
       - name: Install dependencies and build web app
         run: |
           npm ci
           npm run build
 
-      # 5. Install Capacitor
-      - name: Install Capacitor packages
+      # 5. Setup / Inisialisasi Capacitor secara otomatis jika perangkat belum terinstal
+      - name: Setup and Initialize Capacitor
         run: |
+          # Install dependencies Capacitor secara lokal untuk runtime build CI
           npm install @capacitor/core @capacitor/cli @capacitor/android
 
-      # 6. Capacitor Sync — SEBELUM inject Shizuku agar tidak ditimpa
-      - name: Capacitor Sync
-        run: npx cap sync android
+          # Inisialisasi file konfigurasi Capacitor jika belum ada
+          if [ ! -f "capacitor.config.json" ] && [ ! -f "capacitor.config.ts" ]; then
+            npx cap init "Gamepad Mapper" "com.example.gamepadmapper" --web-dir=dist
+          fi
 
-      # 7. ✅ FIX UTAMA: Upgrade Kotlin Gradle Plugin ke 2.0.21
-      #    Kotlin < 1.9.20 tidak mengenal JVM target 21 → error "Unknown Kotlin JVM target: 21"
-      #    Kotlin 2.0.21 sudah fully support JVM 21, kompatibel dengan AGP 8.x
-      - name: Upgrade Kotlin Gradle Plugin to 2.0.21
-        run: |
-          node -e "
-            const fs = require('fs');
+          # Tambahkan folder platform android jika belum ada
+          if [ ! -d "android" ]; then
+            npx cap add android
+          fi
 
-            // --- Patch android/build.gradle (root level) ---
-            const rootGradle = 'android/build.gradle';
-            if (fs.existsSync(rootGradle)) {
-              let content = fs.readFileSync(rootGradle, 'utf8');
-
-              // Format 1: ext.kotlin_version = 'x.x.x'
-              content = content.replace(
-                /ext\.kotlin_version\s*=\s*[\"'][^\"']+[\"']/,
-                'ext.kotlin_version = \"2.0.21\"'
-              );
-
-              // Format 2: classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:x.x.x'
-              content = content.replace(
-                /org\.jetbrains\.kotlin:kotlin-gradle-plugin:[0-9.]+/g,
-                'org.jetbrains.kotlin:kotlin-gradle-plugin:2.0.21'
-              );
-
-              fs.writeFileSync(rootGradle, content, 'utf8');
-              console.log('Root build.gradle updated:');
-              console.log(content);
-            } else {
-              console.log('WARNING: android/build.gradle tidak ditemukan!');
-            }
-
-            // --- Patch libs.versions.toml (Gradle version catalog, jika ada) ---
-            const tomlPath = 'android/gradle/libs.versions.toml';
-            if (fs.existsSync(tomlPath)) {
-              let content = fs.readFileSync(tomlPath, 'utf8');
-              content = content.replace(
-                /kotlin\s*=\s*[\"'][^\"']+[\"']/,
-                'kotlin = \"2.0.21\"'
-              );
-              fs.writeFileSync(tomlPath, content, 'utf8');
-              console.log('libs.versions.toml updated.');
-            }
-          "
-
-      # 8. Generate Icons
-      - name: Generate launcher icons
-        run: |
+          # Install packages to securely convert SVG to high-quality PNGs
           sudo apt-get update && sudo apt-get install -y librsvg2-bin
 
-          if [ -f "icon.svg" ] && [ -d "android/app/src/main/res" ]; then
-            echo "Generating launcher icons from icon.svg..."
-
+          # Generate and replace default icon files with custom branded game mapper icon
+          if [ -d "android/app/src/main/res" ]; then
+            echo "Generating high-fidelity launcher icons from icon.svg..."
+            
             mkdir -p android/app/src/main/res/mipmap-mdpi
             mkdir -p android/app/src/main/res/mipmap-hdpi
             mkdir -p android/app/src/main/res/mipmap-xhdpi
             mkdir -p android/app/src/main/res/mipmap-xxhdpi
             mkdir -p android/app/src/main/res/mipmap-xxxhdpi
+            mkdir -p android/app/src/main/res/drawable
+            mkdir -p android/app/src/main/res/drawable-v24
 
-            rsvg-convert -w 48  -h 48  icon.svg -o android/app/src/main/res/mipmap-mdpi/ic_launcher.png
-            rsvg-convert -w 48  -h 48  icon.svg -o android/app/src/main/res/mipmap-mdpi/ic_launcher_round.png
-            rsvg-convert -w 72  -h 72  icon.svg -o android/app/src/main/res/mipmap-hdpi/ic_launcher.png
-            rsvg-convert -w 72  -h 72  icon.svg -o android/app/src/main/res/mipmap-hdpi/ic_launcher_round.png
-            rsvg-convert -w 96  -h 96  icon.svg -o android/app/src/main/res/mipmap-xhdpi/ic_launcher.png
-            rsvg-convert -w 96  -h 96  icon.svg -o android/app/src/main/res/mipmap-xhdpi/ic_launcher_round.png
+            # Standard Legacy Icons
+            rsvg-convert -w 48 -h 48 icon.svg -o android/app/src/main/res/mipmap-mdpi/ic_launcher.png
+            rsvg-convert -w 48 -h 48 icon.svg -o android/app/src/main/res/mipmap-mdpi/ic_launcher_round.png
+            
+            rsvg-convert -w 72 -h 72 icon.svg -o android/app/src/main/res/mipmap-hdpi/ic_launcher.png
+            rsvg-convert -w 72 -h 72 icon.svg -o android/app/src/main/res/mipmap-hdpi/ic_launcher_round.png
+            
+            rsvg-convert -w 96 -h 96 icon.svg -o android/app/src/main/res/mipmap-xhdpi/ic_launcher.png
+            rsvg-convert -w 96 -h 96 icon.svg -o android/app/src/main/res/mipmap-xhdpi/ic_launcher_round.png
+            
             rsvg-convert -w 144 -h 144 icon.svg -o android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png
             rsvg-convert -w 144 -h 144 icon.svg -o android/app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png
+            
             rsvg-convert -w 192 -h 192 icon.svg -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
             rsvg-convert -w 192 -h 192 icon.svg -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png
 
-            echo "Icons generated successfully."
-          else
-            echo "icon.svg not found or res folder missing, skipping icon generation."
+            # Adaptive Icons
+            mkdir -p android/app/src/main/res/mipmap-anydpi-v26
+            
+            rm -f android/app/src/main/res/drawable/ic_launcher_background.xml
+            rm -f android/app/src/main/res/drawable-v24/ic_launcher_foreground.xml
+            rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_background.xml
+            rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_foreground.xml
+            rm -f android/app/src/main/res/mipmap-mdpi/ic_launcher_foreground.png
+            rm -f android/app/src/main/res/mipmap-mdpi/ic_launcher_background.png
+            rm -f android/app/src/main/res/mipmap-hdpi/ic_launcher_foreground.png
+            rm -f android/app/src/main/res/mipmap-hdpi/ic_launcher_background.png
+            rm -f android/app/src/main/res/mipmap-xhdpi/ic_launcher_foreground.png
+            rm -f android/app/src/main/res/mipmap-xhdpi/ic_launcher_background.png
+            rm -f android/app/src/main/res/mipmap-xxhdpi/ic_launcher_foreground.png
+            rm -f android/app/src/main/res/mipmap-xxhdpi/ic_launcher_background.png
+            rm -f android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png
+            rm -f android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_background.png
+
+            # Generate foreground and background for all densities
+            rsvg-convert -w 108 -h 108 icon.svg -o android/app/src/main/res/mipmap-mdpi/ic_launcher_foreground.png
+            rsvg-convert -w 108 -h 108 icon.svg -o android/app/src/main/res/mipmap-mdpi/ic_launcher_background.png
+            rsvg-convert -w 162 -h 162 icon.svg -o android/app/src/main/res/mipmap-hdpi/ic_launcher_foreground.png
+            rsvg-convert -w 162 -h 162 icon.svg -o android/app/src/main/res/mipmap-hdpi/ic_launcher_background.png
+            rsvg-convert -w 216 -h 216 icon.svg -o android/app/src/main/res/mipmap-xhdpi/ic_launcher_foreground.png
+            rsvg-convert -w 216 -h 216 icon.svg -o android/app/src/main/res/mipmap-xhdpi/ic_launcher_background.png
+            rsvg-convert -w 324 -h 324 icon.svg -o android/app/src/main/res/mipmap-xxhdpi/ic_launcher_foreground.png
+            rsvg-convert -w 324 -h 324 icon.svg -o android/app/src/main/res/mipmap-xxhdpi/ic_launcher_background.png
+            rsvg-convert -w 432 -h 432 icon.svg -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png
+            rsvg-convert -w 432 -h 432 icon.svg -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_background.png
+
+            rsvg-convert -w 512 -h 512 icon.svg -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground_512.png
+            rsvg-convert -w 512 -h 512 icon.svg -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_background_512.png
+
+            
+            echo "Custom launcher icons successfully generated and populated!"
           fi
 
-      # 9. Inject Shizuku ke build.gradle (app level)
-      #    compileOptions & kotlinOptions sekarang pakai 21 (konsisten dengan JDK & capacitor-android)
-      - name: Inject Shizuku dependencies into build.gradle
+          # 1. Resolve Kotlin conflicts and inject Shizuku Gradle API dependencies (api & provider libraries)
+          if [ -f "android/app/build.gradle" ]; then
+            node -e "
+              const fs = require('fs');
+              const path = 'android/app/build.gradle';
+              if (fs.existsSync(path)) {
+                let content = fs.readFileSync(path, 'utf8');
+                const depString = '\n    implementation \"dev.rikka.shizuku:api:13.1.5\"\n    implementation \"dev.rikka.shizuku:provider:13.1.5\"\n';
+                if (!content.includes('dev.rikka.shizuku')) {
+                  if (content.includes('dependencies {')) {
+                    content = content.replace('dependencies {', 'dependencies {' + depString);
+                  }
+                }
+                if (!content.includes('kotlin-stdlib-jdk7')) {
+                  content += '\nconfigurations.all {\n    exclude group: \"org.jetbrains.kotlin\", module: \"kotlin-stdlib-jdk7\"\n    exclude group: \"org.jetbrains.kotlin\", module: \"kotlin-stdlib-jdk8\"\n}\n';
+                }
+                fs.writeFileSync(path, content, 'utf8');
+                console.log('Successfully injected Shizuku dependencies and Kotlin exclusions into build.gradle');
+              }
+            "
+          fi
+
+          # 2. Inject Shizuku permissions, queries block, and ShizukuProvider into AndroidManifest.xml
+          if [ -f "android/app/src/main/AndroidManifest.xml" ]; then
+            node -e "
+              const fs = require('fs');
+              const path = 'android/app/src/main/AndroidManifest.xml';
+              if (fs.existsSync(path)) {
+                let content = fs.readFileSync(path, 'utf8');
+                
+                // Add uses-permission if missing
+                if (!content.includes('rikka.shizuku.permission.API_V23')) {
+                  const target = '<application';
+                  const insert = '    <uses-permission android:name=\"rikka.shizuku.permission.API_V23\" />\n    ';
+                  content = content.replace(target, insert + target);
+                }
+                
+                // Add queries block for Android 11+ visibility
+                if (!content.includes('moe.shizuku.privileged.api')) {
+                  const queriesInsert = '\n    <queries>\n        <package android:name=\"moe.shizuku.privileged.api\" />\n    </queries>\n';
+                  const target = '<application';
+                  content = content.replace(target, queriesInsert + target);
+                }
+                
+                // Add ShizukuProvider inside <application> block
+                if (!content.includes('rikka.shizuku.ShizukuProvider')) {
+                  const providerInsert = '\n        <!-- Shizuku Provider -->\n        <provider\n            android:name=\"rikka.shizuku.ShizukuProvider\"\n            android:authorities=\"\${applicationId}.shizuku\"\n            android:multiprocess=\"false\"\n            android:enabled=\"true\"\n            android:exported=\"true\"\n            android:permission=\"android.permission.INTERACTIVE_AUTOMATION\" />\n';
+                  // Locate opening tag <application ...> and insert provider right after it
+                  content = content.replace(/<application([^>]*?)>/, '<application$1>' + providerInsert);
+                }
+                
+                fs.writeFileSync(path, content, 'utf8');
+                console.log('Successfully injected Shizuku elements (permission, queries, provider) into AndroidManifest.xml');
+              }
+            "
+          fi
+
+      # 6. Sinkronkan Aset Web ke Proyek Android Capacitor
+      - name: Capacitor Sync
         run: |
-          node -e "
-            const fs = require('fs');
-            const path = 'android/app/build.gradle';
-            if (fs.existsSync(path)) {
-              let content = fs.readFileSync(path, 'utf8');
+          npx cap sync android
 
-              // --- Shizuku dependencies ---
-              const depString = '\n    implementation \"dev.rikka.shizuku:api:13.1.5\"\n    implementation \"dev.rikka.shizuku:provider:13.1.5\"\n';
-              if (!content.includes('dev.rikka.shizuku')) {
-                content = content.replace('dependencies {', 'dependencies {' + depString);
-              }
-
-              // --- Exclude kotlin-stdlib konflik ---
-              if (!content.includes('kotlin-stdlib-jdk7')) {
-                content += '\nconfigurations.all {\n    exclude group: \"org.jetbrains.kotlin\", module: \"kotlin-stdlib-jdk7\"\n    exclude group: \"org.jetbrains.kotlin\", module: \"kotlin-stdlib-jdk8\"\n}\n';
-              }
-
-              // --- Aktifkan AIDL ---
-              if (!content.includes('buildFeatures') && !content.includes('aidl true')) {
-                content = content.replace('buildTypes {', 'buildFeatures {\n        aidl true\n    }\n    buildTypes {');
-              }
-
-              // --- Fix compileOptions ke Java 21 (sesuai capacitor-android & JDK) ---
-              if (content.includes('sourceCompatibility')) {
-                content = content.replace(
-                  /sourceCompatibility JavaVersion\.VERSION_\w+/,
-                  'sourceCompatibility JavaVersion.VERSION_21'
-                );
-                content = content.replace(
-                  /targetCompatibility JavaVersion\.VERSION_\w+/,
-                  'targetCompatibility JavaVersion.VERSION_21'
-                );
-              } else {
-                content = content.replace(
-                  'buildTypes {',
-                  'compileOptions {\n        sourceCompatibility JavaVersion.VERSION_21\n        targetCompatibility JavaVersion.VERSION_21\n    }\n    buildTypes {'
-                );
-              }
-
-              // --- Fix/tambah kotlinOptions jvmTarget = 21 ---
-              if (!content.includes('kotlinOptions')) {
-                content = content.replace(
-                  'buildTypes {',
-                  'kotlinOptions {\n        jvmTarget = \"21\"\n    }\n    buildTypes {'
-                );
-              } else {
-                content = content.replace(
-                  /jvmTarget\s*=\s*[\"'][^\"']+[\"']/,
-                  'jvmTarget = \"21\"'
-                );
-              }
-
-              fs.writeFileSync(path, content, 'utf8');
-              console.log('build.gradle updated successfully.');
-            } else {
-              console.log('build.gradle not found, skipping.');
-            }
-          "
-
-      # 10. Inject Shizuku ke AndroidManifest.xml
-      - name: Inject Shizuku into AndroidManifest.xml
-        run: |
-          node -e "
-            const fs = require('fs');
-            const path = 'android/app/src/main/AndroidManifest.xml';
-            if (fs.existsSync(path)) {
-              let content = fs.readFileSync(path, 'utf8');
-
-              if (!content.includes('rikka.shizuku.permission.API_V23')) {
-                content = content.replace('<application', '    <uses-permission android:name=\"rikka.shizuku.permission.API_V23\" />\n    <application');
-              }
-
-              if (!content.includes('moe.shizuku.privileged.api')) {
-                content = content.replace('<application', '\n    <queries>\n        <package android:name=\"moe.shizuku.privileged.api\" />\n    </queries>\n    <application');
-              }
-
-              if (!content.includes('rikka.shizuku.ShizukuProvider')) {
-                content = content.replace(
-                  /<application([^>]*?)>/,
-                  '<application\$1>\n        <provider\n            android:name=\"rikka.shizuku.ShizukuProvider\"\n            android:authorities=\"\${applicationId}.shizuku\"\n            android:multiprocess=\"false\"\n            android:enabled=\"true\"\n            android:exported=\"true\"\n            android:permission=\"android.permission.INTERACT_ACROSS_USERS_FULL\" />\n        <service\n            android:name=\".TouchDaemonService\"\n            android:exported=\"true\"\n            android:permission=\"moe.shizuku.manager.permission.API_V23\" />'
-                );
-              }
-
-              fs.writeFileSync(path, content, 'utf8');
-              console.log('AndroidManifest.xml updated successfully.');
-            } else {
-              console.log('AndroidManifest.xml not found, skipping.');
-            }
-          "
-
-      # 11. Cek file kritis ada sebelum build
-      - name: Cek file kritis
-        run: |
-          echo "=== Verifikasi Kotlin version di root build.gradle ==="
-          grep -E "kotlin_version|kotlin-gradle-plugin" android/build.gradle || echo "Tidak ditemukan pola kotlin version"
-
-          echo "=== Cek AIDL ==="
-          find android -name "*.aidl" && echo "AIDL ditemukan" || echo "PERINGATAN: AIDL tidak ditemukan"
-
-          echo "=== Cek OverlayPlugin tidak tertinggal ==="
-          grep -r "OverlayPlugin" android/ && echo "PERINGATAN: OverlayPlugin masih ada!" || echo "OK: OverlayPlugin bersih"
-
-          echo "=== Cek bug isAlive tanpa kurung ==="
-          grep -rn "isAlive[^(]" android/app/src/main/java/ && echo "PERINGATAN: bug isAlive ditemukan!" || echo "OK: isAlive() benar"
-
-          echo "=== Cek TouchDaemonService ada ==="
-          find android -name "TouchDaemonService.kt" && echo "TouchDaemonService.kt ditemukan" || echo "PERINGATAN: TouchDaemonService.kt tidak ada"
-
-          echo "=== Cek ShizukuBridgePlugin ada ==="
-          find android -name "ShizukuBridgePlugin.kt" && echo "ShizukuBridgePlugin.kt ditemukan" || echo "PERINGATAN: ShizukuBridgePlugin.kt tidak ada"
-
-      # 12. Regenerate gradle-wrapper.jar dari distribusi Gradle resmi
-      - name: Regenerate gradle-wrapper.jar
-        run: |
-          echo "=== Download Gradle 8.14.3 resmi ==="
-          curl -fsSL https://services.gradle.org/distributions/gradle-8.14.3-bin.zip \
-            -o /tmp/gradle-8.14.3-bin.zip
-
-          echo "=== Extract distribusi Gradle ==="
-          unzip -q /tmp/gradle-8.14.3-bin.zip -d /tmp/gradle-dist/
-
-          echo "=== Regenerate wrapper jar menggunakan Gradle resmi ==="
-          cd android
-          /tmp/gradle-dist/gradle-8.14.3/bin/gradle wrapper --gradle-version 8.14.3
-
-          echo "=== Verifikasi jar baru ==="
-          ls -lh gradle/wrapper/gradle-wrapper.jar
-          sha256sum gradle/wrapper/gradle-wrapper.jar
-
-      # 13. Build APK
+      # 7. Build APK menggunakan Gradle
       - name: Build Android APK
         run: |
           cd android
+          gradle wrapper
           chmod +x gradlew
-          ./gradlew assembleDebug --stacktrace
+          ./gradlew assembleDebug
 
-      # 14. Upload APK
+      # 8. Upload Hasil APK (Menggunakan v4 untuk menghindari Deprecation Error)
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:

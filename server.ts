@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { createServer as createViteServer } from "vite";
 
 const app = express();
@@ -155,6 +156,59 @@ app.post("/api/profile/active", (req, res) => {
     daemonState.logLines.push(`[PROFILE] Dynamic active app transition observed: Profile active -> [${profileId}]`);
   }
   res.json({ success: true, activeProfileId });
+});
+
+const PROFILES_PATH = path.join(process.cwd(), 'profiles.json');
+
+// Helper to read profiles
+function readProfiles() {
+  try {
+    if (fs.existsSync(PROFILES_PATH)) {
+      const data = fs.readFileSync(PROFILES_PATH, 'utf-8');
+      return JSON.parse(data);
+    }
+  } catch (err) {
+    console.error('Error reading profiles:', err);
+  }
+  return {};
+}
+
+// Helper to write profiles
+function writeProfiles(profiles: any) {
+  try {
+    fs.writeFileSync(PROFILES_PATH, JSON.stringify(profiles, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Error writing profiles:', err);
+  }
+}
+
+// endpoints:
+app.post('/api/profile/save', (req, res) => {
+  try {
+    const { profileId, mappings, joystick } = req.body;
+    if (!profileId) {
+      return res.status(400).json({ success: false, message: 'profileId is required' });
+    }
+    const profiles = readProfiles();
+    profiles[profileId] = { mappings, joystick };
+    writeProfiles(profiles);
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+app.get('/api/profile/:id', (req, res) => {
+  if (req.params.id === 'active') return; // Skip if active endpoint
+  try {
+    const profiles = readProfiles();
+    const profile = profiles[req.params.id] || { mappings: [], joystick: { centerX: 250, centerY: 500, radius: 150 } };
+    res.json(profile);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
 });
 
 // API: AI Integration Tunnel status

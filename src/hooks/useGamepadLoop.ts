@@ -28,17 +28,17 @@ export function useGamepadLoop(mapProfile: any, active: boolean) {
       
       const magnitude = Math.sqrt(lx * lx + ly * ly);
       
-      // Default to 500,500 if not found, but we should use mapProfile features
-      let centerX = 500;
+      // Default coordinates
+      let centerX = 250;
       let centerY = 500;
-      let radius = 200;
+      let radius = 150;
 
       // Find joystick mapping if it exists
-      const joystickNode = mapProfile?.joystickNode;
-      if (joystickNode) {
-        centerX = joystickNode.centerX ?? centerX;
-        centerY = joystickNode.centerY ?? centerY;
-        radius = joystickNode.radius ?? radius;
+      const joystick = mapProfile?.joystick;
+      if (joystick) {
+        centerX = joystick.centerX ?? centerX;
+        centerY = joystick.centerY ?? centerY;
+        radius = joystick.radius ?? radius;
       }
       
       const pointerId = 1; // Arbitrary pointer ID for left joystick

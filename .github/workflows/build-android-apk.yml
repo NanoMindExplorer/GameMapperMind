@@ -86,23 +86,20 @@ jobs:
             exit 0
           fi
 
-          echo "Cleaning old launcher icons and splash PNGs..."
-          rm -rf android/app/src/main/res/mipmap-ldpi
-          rm -rf android/app/src/main/res/mipmap-mdpi
-          rm -rf android/app/src/main/res/mipmap-hdpi
-          rm -rf android/app/src/main/res/mipmap-xhdpi
-          rm -rf android/app/src/main/res/mipmap-xxhdpi
-          rm -rf android/app/src/main/res/mipmap-xxxhdpi
-          rm -rf android/app/src/main/res/drawable-port-night-ldpi
-          rm -rf android/app/src/main/res/drawable-land-ldpi
-          rm -rf android/app/src/main/res/drawable-port-ldpi
-          rm -rf android/app/src/main/res/drawable/splash.png
+          echo "Cleaning ALL old launcher icons and splash PNGs..."
+          # Delete ALL mipmap folders (will regenerate clean)
+          rm -rf android/app/src/main/res/mipmap-*
+          # Delete ALL drawable folders that contain splash.png (ldpi/mdpi/hdpi/etc, port/land, day/night)
+          rm -rf android/app/src/main/res/drawable-*
+          # Delete drawable (single) — will recreate with one splash
+          rm -rf android/app/src/main/res/drawable
 
           mkdir -p android/app/src/main/res/mipmap-mdpi
           mkdir -p android/app/src/main/res/mipmap-hdpi
           mkdir -p android/app/src/main/res/mipmap-xhdpi
           mkdir -p android/app/src/main/res/mipmap-xxhdpi
           mkdir -p android/app/src/main/res/mipmap-xxxhdpi
+          mkdir -p android/app/src/main/res/mipmap-anydpi-v26
           mkdir -p android/app/src/main/res/drawable
 
           echo "Generating launcher icons from icon.svg..."

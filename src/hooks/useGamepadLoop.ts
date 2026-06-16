@@ -1,67 +1,101 @@
-import { useRef } from 'react';
-import ShizukuBridge from '../plugins/ShizukuBridge';
-import { useGamepad } from './useGamepad';
+import { useEffect, useRef } from 'react';
+import TouchInjection from '../plugins/TouchInjection';
+
+interface PointerState {
+  id: number;
+  isActive: boolean;
+  type: 'analog' | 'button';
+  virtualKey?: string;
+}
 
 export function useGamepadLoop(mapProfile: any, active: boolean) {
   const lastState = useRef<Record<string, boolean>>({});
-  const isAnalogActive = useRef(false);
+  const pointers = useRef<PointerState[]>([
+    { id: 0, isActive: false, type: 'analog' }, // Reserved for left stick
+    { id: 1, isActive: false, type: 'analog' }, // Reserved for right stick
+    // IDs 2-9 for buttons
+    ...Array.from({ length: 8 }, (_, i) => ({ id: i + 2, isActive: false, type: 'button' as const }))
+  ]);
 
-  useGamepad(
-    async (buttonName, isPressed, value) => {
-      if (!active) return;
+  useEffect(() => {
+    if (!active) return;
 
-      const mapping = mapProfile?.mappings?.find((m: any) => m.hardwareKey === buttonName);
-      
-      if (mapping && isPressed && !lastState.current[buttonName]) {
-        // Single tap or start of hold
-        await ShizukuBridge.injectTap({ x: mapping.x, y: mapping.y });
-      }
+    let buttonListener: any;
+    let axisListener: any;
 
-      lastState.current[buttonName] = isPressed;
-    },
-    async (axes) => {
-      if (!active) return;
-      
-      const lx = axes[0] || 0;
-      const ly = axes[1] || 0;
-      const deadzone = 0.15;
-      
-      const magnitude = Math.sqrt(lx * lx + ly * ly);
-      
-      // Default coordinates
-      let centerX = 250;
-      let centerY = 500;
-      let radius = 150;
+    const setupListeners = async () => {
+      // Ensure Shizuku is bound
+      await TouchInjection.bindService().catch(() => {});
+      await TouchInjection.startGamepadListener().catch(() => {});
 
-      // Find joystick mapping if it exists
-      const joystick = mapProfile?.joystick;
-      if (joystick) {
-        centerX = joystick.centerX ?? centerX;
-        centerY = joystick.centerY ?? centerY;
-        radius = joystick.radius ?? radius;
-      }
-      
-      const pointerId = 1; // Arbitrary pointer ID for left joystick
-      
-      try {
-        if (magnitude > deadzone) {
-          const targetX = centerX + Math.round(lx * radius);
-          const targetY = centerY + Math.round(ly * radius);
-          
-          if (!isAnalogActive.current) {
-            isAnalogActive.current = true;
-            await ShizukuBridge.touchDown({ x: centerX, y: centerY, pointerId });
+      buttonListener = await TouchInjection.addListener('onGamepadButton', async ({ buttonName, value }) => {
+        const isPressed = value === 1;
+        const mapping = mapProfile?.mappings?.find((m: any) => m.hardwareKey === buttonName);
+        
+        if (!mapping || !mapping.x || !mapping.y) {
+           lastState.current[buttonName] = isPressed;
+           return;
+        }
+
+        const wasPressed = lastState.current[buttonName];
+
+        if (isPressed && !wasPressed) {
+          // Find free pointer
+          const pointer = pointers.current.find(p => !p.isActive && p.type === 'button');
+          if (pointer) {
+            pointer.isActive = true;
+            pointer.virtualKey = buttonName;
+            await TouchInjection.touchDown({ pointerId: pointer.id, x: mapping.x, y: mapping.y });
           }
-          await ShizukuBridge.touchMove({ x: targetX, y: targetY, pointerId });
-        } else {
-          if (isAnalogActive.current) {
-            isAnalogActive.current = false;
-            await ShizukuBridge.touchUp({ pointerId });
+        } else if (!isPressed && wasPressed) {
+          // Find matching pointer
+          const pointer = pointers.current.find(p => p.isActive && p.type === 'button' && p.virtualKey === buttonName);
+          if (pointer) {
+            pointer.isActive = false;
+            pointer.virtualKey = undefined;
+            await TouchInjection.touchUp({ pointerId: pointer.id });
           }
         }
-      } catch (err) {
-        console.error("Analog touch injection failed via ShizukuBridge", err);
-      }
-    }
-  );
+
+        lastState.current[buttonName] = isPressed;
+      });
+
+      axisListener = await TouchInjection.addListener('onGamepadAxis', async ({ axes }) => {
+        const lx = axes[0] || 0;
+        const ly = axes[1] || 0;
+        const deadzone = 0.15;
+        const magnitude = Math.sqrt(lx * lx + ly * ly);
+
+        // Map config for joystick
+        const centerX = mapProfile?.joystick?.centerX ?? 250;
+        const centerY = mapProfile?.joystick?.centerY ?? 500;
+        const radius = mapProfile?.joystick?.radius ?? 150;
+
+        const stickPointer = pointers.current.find(p => p.id === 0)!;
+
+        if (magnitude > deadzone) {
+          const targetX = centerX + (lx * radius);
+          const targetY = centerY + (ly * radius);
+
+          if (!stickPointer.isActive) {
+            stickPointer.isActive = true;
+            await TouchInjection.touchDown({ pointerId: 0, x: centerX, y: centerY });
+          }
+          await TouchInjection.touchMove({ pointerId: 0, x: targetX, y: targetY });
+        } else {
+          if (stickPointer.isActive) {
+            stickPointer.isActive = false;
+            await TouchInjection.touchUp({ pointerId: 0 });
+          }
+        }
+      });
+    };
+
+    setupListeners();
+
+    return () => {
+      buttonListener?.remove();
+      axisListener?.remove();
+    };
+  }, [mapProfile, active]);
 }

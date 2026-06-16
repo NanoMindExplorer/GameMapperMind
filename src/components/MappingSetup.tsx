@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import ShizukuBridge from '../plugins/ShizukuBridge';
+import TouchInjection from '../plugins/TouchInjection';
 
 interface MappingItem {
   hardwareKey: string;
@@ -68,7 +68,7 @@ export function MappingSetup({ profileId }: { profileId: string }) {
 
   const handleTest = async (x: number, y: number) => {
     try {
-      await ShizukuBridge.injectTap({ x, y });
+      await TouchInjection.injectTap({ x, y });
     } catch (err) {
       console.error("Test tap failed:", err);
     }

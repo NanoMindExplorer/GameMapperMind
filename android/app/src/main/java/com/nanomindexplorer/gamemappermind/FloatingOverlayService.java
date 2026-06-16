@@ -24,24 +24,12 @@ import android.webkit.WebViewClient;
 import androidx.core.app.NotificationCompat;
 import androidx.webkit.WebViewAssetLoader;
 
-import java.io.DataOutputStream;
-
-import android.widget.ImageView;
-import android.graphics.Color;
-import android.view.MotionEvent;
-import android.view.View;
-import android.widget.FrameLayout;
-
 public class FloatingOverlayService extends Service {
     private WindowManager windowManager;
     private WebView webView;
     private WindowManager.LayoutParams webViewParams;
     private static final String CHANNEL_ID = "OverlayServiceChannel";
     private String currentConfigJson = "{}";
-    
-    // Persistent Shizuku Shell for ultra-fast injection
-    private Process shizukuProcess;
-    private DataOutputStream shizukuOut;
 
     public FloatingOverlayService() {
     }
@@ -65,66 +53,11 @@ public class FloatingOverlayService extends Service {
             }
         }
     }
-    
-    private void initShizukuDaemon() {
-        try {
-            if (rikka.shizuku.Shizuku.pingBinder() && rikka.shizuku.Shizuku.checkSelfPermission() == android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                if (shizukuProcess == null) {
-                    Log.d("GameMapper", "Starting persistent Shizuku shell process");
-                    java.lang.reflect.Method method = rikka.shizuku.Shizuku.class.getDeclaredMethod("newProcess", String[].class, String[].class, String.class);
-                    method.setAccessible(true);
-                    shizukuProcess = (Process) method.invoke(null, new Object[]{new String[]{"sh"}, null, null});
-                    shizukuOut = new DataOutputStream(shizukuProcess.getOutputStream());
-                    
-                    // Boot up the TouchDaemon inside the shell using app_process
-                    String apkPath = getApplicationInfo().sourceDir;
-                    shizukuOut.writeBytes("export CLASSPATH=" + apkPath + "\n");
-                    shizukuOut.writeBytes("exec app_process /system/bin com.nanomindexplorer.gamemappermind.TouchDaemon\n");
-                    shizukuOut.flush();
-                    
-                    // Create Background Threads to drain stdout and stderr
-                    new Thread(() -> {
-                        try (java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(shizukuProcess.getInputStream()))) {
-                            while (reader.readLine() != null) {}
-                        } catch (Exception e) {}
-                    }).start();
-
-                    new Thread(() -> {
-                        try (java.io.BufferedReader errReader = new java.io.BufferedReader(new java.io.InputStreamReader(shizukuProcess.getErrorStream()))) {
-                            while (errReader.readLine() != null) {}
-                        } catch (Exception e) {}
-                    }).start();
-                    
-                    Log.d("GameMapper", "Shizuku daemon shell started successfully");
-                }
-            } else {
-                Log.w("GameMapper", "Shizuku not ready or permission denied");
-            }
-        } catch (Exception e) {
-            Log.e("GameMapper", "Failed to init Shizuku daemon", e);
-        }
-    }
-
-    private void injectCommand(String cmd) {
-        if (shizukuOut != null) {
-            try {
-                Log.d("GameMapper", "Injecting fast command: " + cmd);
-                shizukuOut.writeBytes(cmd + "\n");
-                shizukuOut.flush();
-            } catch (Exception e) {
-                Log.e("GameMapper", "Fast injection failed", e);
-                new Handler(Looper.getMainLooper()).post(() -> Toast.makeText(FloatingOverlayService.this, "Shizuku injection failed!", Toast.LENGTH_SHORT).show());
-            }
-        } else {
-            Log.w("GameMapper", "Cannot inject, Shizuku daemon out stream is null");
-        }
-    }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         Log.d("GameMapper", "FloatingOverlayService onStartCommand");
         createNotificationChannel();
-        initShizukuDaemon();
         
         Intent notificationIntent = new Intent(this, MainActivity.class);
         PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, PendingIntent.FLAG_IMMUTABLE);
@@ -214,10 +147,6 @@ public class FloatingOverlayService extends Service {
                 windowManager.addView(webView, webViewParams);
                 webView.requestFocus();
                 
-                // floating disabled based on user preference to avoid screen freezing.
-                // Setup and load the overlay transparent view solely for macro injection
-
-                // Load URL (WebViewAssetLoader uses https://appassets.androidplatform.net/)
                 Log.d("GameMapper", "Loading index.html into Overlay WebView");
                 webView.loadUrl("https://appassets.androidplatform.net/public/index.html?overlay=true");
             });
@@ -239,7 +168,6 @@ public class FloatingOverlayService extends Service {
 
         @JavascriptInterface
         public void onCommand(String command) {
-            injectCommand(command);
         }
 
         @JavascriptInterface
@@ -258,14 +186,6 @@ public class FloatingOverlayService extends Service {
             webView.destroy();
             webView = null;
         }
-        if (shizukuOut != null) {
-            try {
-                shizukuOut.writeBytes("exit\n");
-                shizukuOut.flush();
-                shizukuOut.close();
-            } catch (Exception e) {}
-        }
-        if (shizukuProcess != null) shizukuProcess.destroy();
     }
 }
 

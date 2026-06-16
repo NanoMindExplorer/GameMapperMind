@@ -1,129 +1,92 @@
-import React from 'react';
-import { Capacitor, registerPlugin } from '@capacitor/core';
+import { Capacitor } from '@capacitor/core';
+import TouchInjection from '../plugins/TouchInjection';
 import { ShizukuState } from '../types';
 
-export interface ShizukuPluginInterface {
-  checkStatus(): Promise<{ isRunning: boolean; hasPermission: boolean; error?: string; version?: number }>;
-  requestPermission(): Promise<void>;
-  executeCommand(options: { command: string }): Promise<{ output: string; error: string; exitCode: number }>;
-  startDaemon(): Promise<{ success: boolean }>;
-  stopDaemon(): Promise<{ success: boolean }>;
-  injectInput(options: { command: string }): Promise<{ success: boolean }>;
-  checkBatteryOptimization(): Promise<{ isIgnoring: boolean }>;
-  requestIgnoreBatteryOptimization(): Promise<{ success: boolean }>;
-}
-
-const ShizukuPlugin = registerPlugin<ShizukuPluginInterface>('Shizuku');
-
-export function useShizuku() {
+export const useShizuku = () => {
   const checkShizukuStatus = async (currentState: ShizukuState): Promise<ShizukuState> => {
     if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
       try {
-        const { isRunning, hasPermission, error, version } = await ShizukuPlugin.checkStatus();
-        if (error) {
-           console.error("Shizuku Native Check Error Object:", error);
-        }
+        const { granted } = await TouchInjection.checkPermission();
         return {
           ...currentState,
-          daemonRunning: isRunning,
-          status: hasPermission ? 'CONNECTED_SHIZUKU' : (isRunning ? 'CHECKING' : 'DISCONNECTED')
+          daemonRunning: granted, 
+          status: granted ? 'CONNECTED_SHIZUKU' : 'DISCONNECTED'
         };
       } catch (err) {
-        console.error("Native Shizuku check error", err);
-        return currentState;
+        console.error("Native check error", err);
       }
     }
     return currentState;
   };
 
-  const requestShizukuPermission = async (): Promise<{ success: boolean; error?: string }> => {
+  const bindAndStart = async () => {
     if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
-      try {
-        await ShizukuPlugin.requestPermission();
-        return { success: true };
-      } catch (err: any) {
-        console.error("Native request permission error", err);
-        return { success: false, error: err?.message || String(err) };
-      }
+        try {
+          await TouchInjection.bindService();
+          await TouchInjection.startGamepadListener();
+          return true;
+        } catch(e) {
+          console.error("Bind failed", e);
+        }
     }
-    return { success: false, error: "Not running natively" };
+    return false;
   };
 
-  const executeShizukuCommand = async (command: string): Promise<{ output: string; error: string; exitCode: number } | null> => {
-    if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
-      try {
-        const result = await ShizukuPlugin.executeCommand({ command });
-        return result;
-      } catch (err) {
-        console.error("Native execute command error", err);
-        return null;
-      }
+  const executeShizukuCommand = async (command: string) => {
+    // Stub
+    return { output: 'Legacy command disabled', error: '', exitCode: 0 };
+  };
+
+  const requestShizukuPermission = async (): Promise<{ success: boolean; error?: string }> => {
+    try {
+        const { granted } = await TouchInjection.checkPermission();
+        if (granted) return { success: true };
+        return { success: false, error: "Permission denied" };
+    } catch (e: any) {
+        return { success: false, error: e.message };
     }
-    return null;
   };
 
   const startDaemon = async () => {
-    if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
-      try {
-        const result = await ShizukuPlugin.startDaemon();
-        return result.success;
-      } catch (err) {
-        console.error("Native start daemon error", err);
-        return false;
-      }
-    }
-    return false;
+    return await bindAndStart();
   };
 
   const stopDaemon = async () => {
     if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
+        await TouchInjection.unbindService().catch(()=>{});
+        await TouchInjection.stopGamepadListener().catch(()=>{});
+    }
+    return true;
+  };
+
+  const injectInput = async (cmd: string) => {
+    if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
+      const parts = cmd.split(' ');
+      const action = parts[0];
+      const x = parseFloat(parts[1]);
+      const y = parseFloat(parts[2]);
+      
       try {
-        const result = await ShizukuPlugin.stopDaemon();
-        return result.success;
-      } catch (err) {
-        console.error("Native stop daemon error", err);
-        return false;
+        if (action === 'down') {
+          await TouchInjection.touchDown({ pointerId: 99, x, y });
+        } else if (action === 'move') {
+          await TouchInjection.touchMove({ pointerId: 99, x, y });
+        } else if (action === 'up') {
+          await TouchInjection.touchUp({ pointerId: 99 });
+        } else if (action === 'tap') {
+          await TouchInjection.injectTap({ x, y });
+        }
+        return true;
+      } catch (e) {
+        console.error("Injection error", e);
       }
     }
     return false;
   };
 
-  const injectInput = React.useCallback(async (command: string) => {
-    if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
-      try {
-        const result = await ShizukuPlugin.injectInput({ command });
-        return result.success;
-      } catch (err) {
-        console.error("Native inject input error", err);
-        return false;
-      }
-    }
-    return false;
-  }, []);
-
-  const checkBattery = async () => {
-    if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
-      try {
-        const result = await ShizukuPlugin.checkBatteryOptimization();
-        return result.isIgnoring;
-      } catch (err) {
-        console.error("Native check battery error", err);
-      }
-    }
-    return true; // Assume true on non-android
-  };
-
-  const requestBatteryIgnore = async () => {
-    if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
-      try {
-        const result = await ShizukuPlugin.requestIgnoreBatteryOptimization();
-        return result.success;
-      } catch (err) {
-        console.error("Native request battery drop error", err);
-      }
-    }
-    return false;
-  };
+  const checkBattery = async () => true;
+  const requestBatteryIgnore = async () => false;
 
   return { checkShizukuStatus, requestShizukuPermission, executeShizukuCommand, startDaemon, stopDaemon, injectInput, checkBattery, requestBatteryIgnore };
-}
+};
+

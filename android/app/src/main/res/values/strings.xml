@@ -4,4 +4,5 @@
     <string name="title_activity_main">GameMapperMind</string>
     <string name="package_name">com.nanomindexplorer.gamemappermind</string>
     <string name="custom_url_scheme">com.nanomindexplorer.gamemappermind</string>
+    <string name="accessibility_service_description">GameMapperMind uses Accessibility Services to inject touch input if Shizuku is not available.</string>
 </resources>

@@ -1,10 +1,9 @@
 package com.nanomindexplorer.gamemappermind;
 
 interface ITouchService {
-    void injectTap(int x, int y);
-    void injectSwipe(int x1, int y1, int x2, int y2, int duration);
-    void touchDown(int x, int y, int pointerId);
-    void touchMove(int x, int y, int pointerId);
+    void touchDown(int pointerId, float x, float y);
+    void touchMove(int pointerId, float x, float y);
     void touchUp(int pointerId);
+    void injectTap(float x, float y);
     boolean isAlive();
 }

@@ -13,7 +13,7 @@ import com.getcapacitor.BridgeActivity
 
 class MainActivity : BridgeActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
-        registerPlugin(ShizukuBridgePlugin::class.java)
+        registerPlugin(TouchInjectionPlugin::class.java)
         super.onCreate(savedInstanceState)
         
         // Aktifkan Gamepad API & properti WebView

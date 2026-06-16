@@ -1,137 +1,65 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useRef } from "react";
+
+const BUTTON_MAPPING = [
+  "A", "B", "X", "Y",
+  "LB", "RB", "LT", "RT",
+  "SELECT", "START",
+  "L3", "R3",
+  "UP", "DOWN", "LEFT", "RIGHT"
+];
 
 export function useGamepad(
-  onButtonChange?: (button: string, isPressed: boolean, value?: number) => void,
-  onAxisMove?: (axes: {
-    lx: number;
-    ly: number;
-    rx: number;
-    ry: number;
-  }) => void
+  buttonCallback: (buttonName: string, isPressed: boolean, value: number) => void,
+  axisCallback: (axes: number[]) => void
 ) {
-  const [connectedGamepad, setConnectedGamepad] = useState<Gamepad | null>(
-    null
-  );
-  const previousButtons = useRef<Record<string, boolean>>({});
-  const previousAxes = useRef({ lx: 0, ly: 0, rx: 0, ry: 0 });
-  const lastGamepadId = useRef<string | null>(null);
-
-  const onButtonChangeRef = useRef(onButtonChange);
-  const onAxisMoveRef = useRef(onAxisMove);
+  const requestRef = useRef<number>();
+  const buttonCallbackRef = useRef(buttonCallback);
+  const axisCallbackRef = useRef(axisCallback);
 
   useEffect(() => {
-    onButtonChangeRef.current = onButtonChange;
-    onAxisMoveRef.current = onAxisMove;
-  }, [onButtonChange, onAxisMove]);
+    buttonCallbackRef.current = buttonCallback;
+    axisCallbackRef.current = axisCallback;
+  }, [buttonCallback, axisCallback]);
 
   useEffect(() => {
-    let animationFrameId: number;
-
-    const poll = () => {
+    const update = () => {
       const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
-      let activeGP: Gamepad | null = null;
-
-      for (let i = 0; i < gamepads.length; i++) {
-        if (gamepads[i] && gamepads[i]!.mapping !== "") {
-          // Prefer controllers with known mapping (standard)
-          activeGP = gamepads[i];
+      let activeGamepad: Gamepad | null = null;
+      
+      for (const gp of gamepads) {
+        if (gp) {
+          activeGamepad = gp;
           break;
         }
       }
-      if (!activeGP) {
-        for (let i = 0; i < gamepads.length; i++) {
-          if (gamepads[i]) {
-            activeGP = gamepads[i];
-            break;
-          }
-        }
-      }
 
-      const currentId = activeGP ? activeGP.id : null;
-      if (currentId !== lastGamepadId.current) {
-        lastGamepadId.current = currentId;
-        setConnectedGamepad(activeGP);
-      }
-
-      if (activeGP) {
-        const buttons = activeGP.buttons;
-        const currentButtons: Record<string, boolean> = {};
-
-        const rawMap = [
-          "BUTTON_A", "BUTTON_B", "BUTTON_X", "BUTTON_Y",
-          "BUTTON_L1", "BUTTON_R1", "BUTTON_L2", "BUTTON_R2",
-          "BUTTON_SELECT", "BUTTON_START", "BUTTON_L3", "BUTTON_R3",
-          "DPAD_UP", "DPAD_DOWN", "DPAD_LEFT", "DPAD_RIGHT"
-        ];
-
-        buttons.forEach((btn, idx) => {
-          let btnName = rawMap[idx];
-          
-          if (!btnName) {
-            // M1, M2 macro mapping for obscure extra indices usually starting from 16 to 23
-            if (idx === 16) btnName = "BUTTON_M1"; // Sometimes Home/Mode
-            else if (idx === 17) btnName = "BUTTON_M2"; // Sometimes Capture/Macro
-            else if (idx === 18) btnName = "BUTTON_M3"; 
-            else if (idx === 19) btnName = "BUTTON_M4";
-            else btnName = `BUTTON_EXTRA_${idx}`;
-          }
-
-          let isPressed = btn.pressed;
-
-          // Fix R2 and L2 (analog triggers) which fluctuate. Add actuation point.
-          if (btnName === "BUTTON_L2" || btnName === "BUTTON_R2") {
-            isPressed = btn.value > 0.3;
-          }
-
-          currentButtons[btnName] = isPressed;
-          const wasPressed = !!previousButtons.current[btnName];
-
-          if (isPressed !== wasPressed) {
-            if (onButtonChangeRef.current)
-              onButtonChangeRef.current(btnName, isPressed, btn.value);
+      if (activeGamepad) {
+        activeGamepad.buttons.forEach((button, index) => {
+          const buttonName = BUTTON_MAPPING[index] || `UNKNOWN_${index}`;
+          if (buttonCallbackRef.current) {
+            buttonCallbackRef.current(buttonName, button.pressed, button.value);
           }
         });
 
-        previousButtons.current = currentButtons;
-
-        // Analog polling
-        const axes = activeGP.axes;
-        const lx = axes[0] || 0;
-        const ly = axes[1] || 0;
-        const rx = axes[2] || 0;
-        const ry = axes[3] || 0;
-
-        // Deadzone filter
-        const deadzone = 0.05;
-        const flx = Math.abs(lx) > deadzone ? lx : 0;
-        const fly = Math.abs(ly) > deadzone ? ly : 0;
-        const frx = Math.abs(rx) > deadzone ? rx : 0;
-        const fry = Math.abs(ry) > deadzone ? ry : 0;
-
-        const isNeutral = flx === 0 && fly === 0 && frx === 0 && fry === 0;
-        const hasChanged =
-          Math.abs(flx - previousAxes.current.lx) > 0.002 ||
-          Math.abs(fly - previousAxes.current.ly) > 0.002 ||
-          Math.abs(frx - previousAxes.current.rx) > 0.002 ||
-          Math.abs(fry - previousAxes.current.ry) > 0.002;
-
-        if (hasChanged || !isNeutral) {
-          previousAxes.current = { lx: flx, ly: fly, rx: frx, ry: fry };
-          if (onAxisMoveRef.current) onAxisMoveRef.current(previousAxes.current);
+        if (axisCallbackRef.current && activeGamepad.axes.length >= 4) {
+          axisCallbackRef.current([
+            activeGamepad.axes[0],
+            activeGamepad.axes[1],
+            activeGamepad.axes[2],
+            activeGamepad.axes[3]
+          ]);
         }
-      } else {
-        // No operation, handled by ID tracking
       }
 
-      animationFrameId = requestAnimationFrame(poll);
+      requestRef.current = requestAnimationFrame(update);
     };
 
-    animationFrameId = requestAnimationFrame(poll);
+    requestRef.current = requestAnimationFrame(update);
 
     return () => {
-      cancelAnimationFrame(animationFrameId);
+      if (requestRef.current) {
+        cancelAnimationFrame(requestRef.current);
+      }
     };
   }, []);
-
-  return { connectedGamepad };
 }

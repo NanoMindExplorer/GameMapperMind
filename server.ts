@@ -122,22 +122,25 @@ app.post("/api/daemon/inject", (req, res) => {
   const { command, id, x, y } = req.body;
   
   if (command === "tap") {
-    daemonState.logLines.push(`[INJECT-SIM] Executing physical tap at [${x}, ${y}]`);
+    // DIHAPUS: daemonState.logLines.push(`[INJECT-SIM] Executing physical tap at [${x}, ${y}]`);
+    // DIGANTI: Logging state di sisi server tidak lagi penting karena injeksi native langsung melalui ShizukuBridge di frontend.
+    console.log(`[INFO] Server acknowledged tap request for [${x}, ${y}], but execution is native.`);
   } else if (command === "swipe") {
-    daemonState.logLines.push(`[INJECT-SIM] Executing physical swipe / drag`);
+    // DIHAPUS: daemonState.logLines.push(`[INJECT-SIM] Executing physical swipe / drag`);
+    console.log(`[INFO] Server acknowledged swipe request, but execution is native.`);
   } else if (command === "touch_down") {
-    daemonState.logLines.push(`[UINPUT-EVDEV] ABS_X|ABS_Y Touch DOWN [${id || 'virtual'}] at (${x}, ${y})`);
+    console.log(`[INFO] Server acknowledged touch_down, execution native.`);
   } else if (command === "touch_move") {
-    daemonState.logLines.push(`[UINPUT-EVDEV] ABS_X|ABS_Y Touch DRAG [${id || 'virtual'}] to (${x}, ${y})`);
+    console.log(`[INFO] Server acknowledged touch_move, execution native.`);
   } else if (command === "touch_up") {
-    daemonState.logLines.push(`[UINPUT-EVDEV] EV_KEY BTN_TOUCH UP [${id || 'virtual'}]`);
+    console.log(`[INFO] Server acknowledged touch_up, execution native.`);
   } else if (command === "key") {
-    daemonState.logLines.push(`[INJECT-SIM] Executing macro key press`);
+    console.log(`[INFO] Server acknowledged macro key, execution native.`);
   }
   
   if (daemonState.logLines.length > 50) daemonState.logLines.shift();
   
-  res.json({ success: true, status: "injected_simulated" });
+  res.json({ success: true, status: "delegated_to_native" });
 });
 
 // API Get/Set Active Profile ID

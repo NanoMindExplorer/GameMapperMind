@@ -1,7 +1,6 @@
 package com.nanomindexplorer.gamemappermind
 
 import android.content.ComponentName
-import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.os.IBinder
@@ -17,65 +16,6 @@ import android.content.pm.PackageManager
 @CapacitorPlugin(name = "TouchInjection")
 class TouchInjectionPlugin : Plugin() {
 
-    companion object {
-        // @JvmField makes `instance` accessible as a plain field from Java code
-        // (FloatingOverlayService.java needs this for forwarding overlay touch events).
-        @JvmField
-        var instance: TouchInjectionPlugin? = null
-
-        @JvmStatic
-        fun emitGamepadButton(buttonName: String, value: Int, pressure: Float) {
-            val data = JSObject()
-            data.put("buttonName", buttonName)
-            data.put("value", value)
-            data.put("pressure", pressure)
-            instance?.notifyListeners("onGamepadButton", data)
-        }
-
-        @JvmStatic
-        fun emitGamepadAxis(axes: FloatArray) {
-            val data = JSObject()
-            val jsArray = com.getcapacitor.JSArray()
-            axes.forEach { jsArray.put(it.toDouble()) }
-            data.put("axes", jsArray)
-            instance?.notifyListeners("onGamepadAxis", data)
-        }
-
-        @JvmStatic
-        fun emitGyroData(x: Float, y: Float, z: Float, timestamp: Long) {
-            val data = JSObject()
-            data.put("x", x.toDouble())
-            data.put("y", y.toDouble())
-            data.put("z", z.toDouble())
-            data.put("timestamp", timestamp)
-            instance?.notifyListeners("onGyroData", data)
-        }
-
-        @JvmStatic
-        fun emitForegroundAppChanged(packageName: String) {
-            val data = JSObject()
-            data.put("packageName", packageName)
-            data.put("timestamp", System.currentTimeMillis())
-            instance?.notifyListeners("onForegroundAppChanged", data)
-        }
-
-        @JvmStatic
-        fun emitMacroCapture(
-            action: String, pointerId: Int, x: Float, y: Float,
-            pressure: Float, size: Float, timestamp: Long
-        ) {
-            val data = JSObject()
-            data.put("action", action)
-            data.put("pointerId", pointerId)
-            data.put("x", x.toDouble())
-            data.put("y", y.toDouble())
-            data.put("pressure", pressure.toDouble())
-            data.put("size", size.toDouble())
-            data.put("timestamp", timestamp)
-            instance?.notifyListeners("onMacroCapture", data)
-        }
-    }
-
     private var touchService: ITouchService? = null
     private val USER_SERVICE_ARGS = Shizuku.UserServiceArgs(
         ComponentName("com.nanomindexplorer.gamemappermind", TouchDaemonService::class.java.name)
@@ -86,7 +26,6 @@ class TouchInjectionPlugin : Plugin() {
             touchService = ITouchService.Stub.asInterface(binder)
             Log.d("GameMapper", "Shizuku Touch Service connected")
         }
-
         override fun onServiceDisconnected(componentName: ComponentName) {
             touchService = null
             Log.d("GameMapper", "Shizuku Touch Service disconnected")
@@ -257,31 +196,89 @@ class TouchInjectionPlugin : Plugin() {
         }
     }
 
-    // ============================================================
-    // Public overlay-facing helpers (used by FloatingOverlayService)
-    // — made @JvmStatic for cleaner Java interop
-    // ============================================================
-    @JvmStatic
-    fun injectTouchDown(pointerId: Int, x: Float, y: Float) {
-        try { touchService?.touchDown(pointerId, x, y) }
-        catch (e: Exception) { Log.e("GameMapper", "overlay touchDown failed", e) }
-    }
+    companion object {
+        // @JvmField makes `instance` accessible as a plain field from Java code
+        @JvmField
+        var instance: TouchInjectionPlugin? = null
 
-    @JvmStatic
-    fun injectTouchMove(pointerId: Int, x: Float, y: Float) {
-        try { touchService?.touchMove(pointerId, x, y) }
-        catch (e: Exception) { Log.e("GameMapper", "overlay touchMove failed", e) }
-    }
+        @JvmStatic
+        fun emitGamepadButton(buttonName: String, value: Int, pressure: Float) {
+            val data = JSObject()
+            data.put("buttonName", buttonName)
+            data.put("value", value)
+            data.put("pressure", pressure)
+            instance?.notifyListeners("onGamepadButton", data)
+        }
 
-    @JvmStatic
-    fun injectTouchUp(pointerId: Int) {
-        try { touchService?.touchUp(pointerId) }
-        catch (e: Exception) { Log.e("GameMapper", "overlay touchUp failed", e) }
-    }
+        @JvmStatic
+        fun emitGamepadAxis(axes: FloatArray) {
+            val data = JSObject()
+            val jsArray = com.getcapacitor.JSArray()
+            axes.forEach { jsArray.put(it.toDouble()) }
+            data.put("axes", jsArray)
+            instance?.notifyListeners("onGamepadAxis", data)
+        }
 
-    @JvmStatic
-    fun injectTapFromOverlay(x: Float, y: Float) {
-        try { touchService?.injectTap(x, y) }
-        catch (e: Exception) { Log.e("GameMapper", "overlay tap failed", e) }
+        @JvmStatic
+        fun emitGyroData(x: Float, y: Float, z: Float, timestamp: Long) {
+            val data = JSObject()
+            data.put("x", x.toDouble())
+            data.put("y", y.toDouble())
+            data.put("z", z.toDouble())
+            data.put("timestamp", timestamp)
+            instance?.notifyListeners("onGyroData", data)
+        }
+
+        @JvmStatic
+        fun emitForegroundAppChanged(packageName: String) {
+            val data = JSObject()
+            data.put("packageName", packageName)
+            data.put("timestamp", System.currentTimeMillis())
+            instance?.notifyListeners("onForegroundAppChanged", data)
+        }
+
+        @JvmStatic
+        fun emitMacroCapture(
+            action: String, pointerId: Int, x: Float, y: Float,
+            pressure: Float, size: Float, timestamp: Long
+        ) {
+            val data = JSObject()
+            data.put("action", action)
+            data.put("pointerId", pointerId)
+            data.put("x", x.toDouble())
+            data.put("y", y.toDouble())
+            data.put("pressure", pressure.toDouble())
+            data.put("size", size.toDouble())
+            data.put("timestamp", timestamp)
+            instance?.notifyListeners("onMacroCapture", data)
+        }
+
+        // ============================================================
+        // Public overlay-facing helpers (used by FloatingOverlayService)
+        // — @JvmStatic so Java can call them as TouchInjectionPlugin.injectTouchDown(...)
+        // ============================================================
+        @JvmStatic
+        fun injectTouchDown(pointerId: Int, x: Float, y: Float) {
+            try { instance?.touchService?.touchDown(pointerId, x, y) }
+            catch (e: Exception) { Log.e("GameMapper", "overlay touchDown failed", e) }
+        }
+
+        @JvmStatic
+        fun injectTouchMove(pointerId: Int, x: Float, y: Float) {
+            try { instance?.touchService?.touchMove(pointerId, x, y) }
+            catch (e: Exception) { Log.e("GameMapper", "overlay touchMove failed", e) }
+        }
+
+        @JvmStatic
+        fun injectTouchUp(pointerId: Int) {
+            try { instance?.touchService?.touchUp(pointerId) }
+            catch (e: Exception) { Log.e("GameMapper", "overlay touchUp failed", e) }
+        }
+
+        @JvmStatic
+        fun injectTapFromOverlay(x: Float, y: Float) {
+            try { instance?.touchService?.injectTap(x, y) }
+            catch (e: Exception) { Log.e("GameMapper", "overlay tap failed", e) }
+        }
     }
 }

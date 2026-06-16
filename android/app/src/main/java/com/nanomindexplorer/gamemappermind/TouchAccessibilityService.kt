@@ -6,7 +6,6 @@ import android.graphics.Path
 import android.os.Build
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
-import android.view.MotionEvent
 import java.util.concurrent.ConcurrentHashMap
 
 class TouchAccessibilityService : AccessibilityService() {
@@ -14,8 +13,6 @@ class TouchAccessibilityService : AccessibilityService() {
     companion object {
         var instance: TouchAccessibilityService? = null
 
-        // Macro capture state — when enabled, MotionEvents are forwarded
-        // to JS via TouchInjectionPlugin.emitMacroCapture.
         @Volatile private var macroCaptureEnabled: Boolean = false
         @Volatile private var macroCaptureStart: Long = 0L
 
@@ -43,10 +40,7 @@ class TouchAccessibilityService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
-        // ============================================================
         // Auto-start game detection — listen for window state changes
-        // and notify JS with the foreground package name.
-        // ============================================================
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             val pkg = event.packageName?.toString() ?: return
             if (pkg.isNotEmpty() && pkg != "com.nanomindexplorer.gamemappermind") {
@@ -66,33 +60,14 @@ class TouchAccessibilityService : AccessibilityService() {
         return super.onUnbind(intent)
     }
 
-    // ============================================================
-    // Real macro capture — Android 9+ allows AccessibilityService
-    // to override onTouchEvent to observe MotionEvents on screen.
-    // We forward them to JS while capture is active.
-    // ============================================================
-    override fun onTouchEvent(event: MotionEvent?) {
-        super.onTouchEvent(event)
-        if (!macroCaptureEnabled || event == null) return
-
-        val action = when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> "down"
-            MotionEvent.ACTION_MOVE -> "move"
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP, MotionEvent.ACTION_CANCEL -> "up"
-            else -> return
-        }
-
-        // Use the actionIndex to identify which pointer is moving.
-        val pointerIndex = event.actionIndex
-        val pointerId = event.getPointerId(pointerIndex)
-        val x = event.getX(pointerIndex)
-        val y = event.getY(pointerIndex)
-        val pressure = event.getPressure(pointerIndex)
-        val size = event.getSize(pointerIndex)
-        val ts = if (macroCaptureStart > 0) System.currentTimeMillis() - macroCaptureStart else 0L
-
-        TouchInjectionPlugin.emitMacroCapture(action, pointerId, x, y, pressure, size, ts)
-    }
+    // NOTE: AccessibilityService does NOT override onTouchEvent.
+    // Real macro capture via MotionEvents requires either:
+    //   1. A custom WindowManager overlay that captures touch events
+    //   2. Using dispatchGesture with GestureResultCallback for synthetic capture
+    //   3. Root access + InputManager event observation
+    // For now, macro capture is UI-driven (manual coordinate input).
+    // Real MotionEvent capture will be implemented in a future version via
+    // an overlay-based interceptor.
 
     fun dispatchTouchDown(pointerId: Int, x: Float, y: Float) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

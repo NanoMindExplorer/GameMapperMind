@@ -4,27 +4,20 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
-import android.content.Context
 import android.content.Intent
-import android.graphics.PixelFormat
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
-import android.view.Gravity
-import android.view.InputDevice
-import android.view.KeyEvent
-import android.view.MotionEvent
-import android.view.View
-import android.view.WindowManager
 import androidx.core.app.NotificationCompat
+import java.io.BufferedReader
+import java.io.InputStreamReader
 
 class GamepadListenerService : Service() {
 
-    private lateinit var windowManager: WindowManager
-    private lateinit var overlayView: View
     private val CHANNEL_ID = "GamepadListenerChannel"
+    private var evdevProcess: Process? = null
+    private var isListening = false
 
-    // Singleton instance to allow starting/stopping from plugin easily
     companion object {
         var isRunning = false
     }
@@ -36,14 +29,14 @@ class GamepadListenerService : Service() {
         Log.d("GameMapper", "GamepadListenerService: onCreate")
         createNotificationChannel()
         startForegroundService()
-        setupOverlay()
+        startGetEventCapture()
         isRunning = true
     }
 
     private fun startForegroundService() {
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Gamepad Listener Active")
-            .setContentText("Listening for gamepad inputs...")
+            .setContentText("Listening for raw evdev inputs (No-Focus-Steal)")
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .build()
         if (Build.VERSION.SDK_INT >= 34) {
@@ -61,96 +54,92 @@ class GamepadListenerService : Service() {
         }
     }
 
-    private fun setupOverlay() {
-        windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        overlayView = object : View(this) {
-            override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-                if (event.source and InputDevice.SOURCE_GAMEPAD == InputDevice.SOURCE_GAMEPAD || 
-                    event.source and InputDevice.SOURCE_JOYSTICK == InputDevice.SOURCE_JOYSTICK) {
-                    
-                    val action = if (event.action == KeyEvent.ACTION_DOWN) 1 else 0
-                    // Map keycodes to simple names for JS
-                    val buttonName = mapKeyCodeToName(event.keyCode)
-                    TouchInjectionPlugin.emitGamepadButton(buttonName, action, 1.0f)
-                    return true
+    private fun startGetEventCapture() {
+        isListening = true
+        Thread {
+            try {
+                // Menjalankan getevent untuk membaca input mentah dari dev/input tanpa MENCURI FOKUS!
+                // Uses Shizuku to get process with root/shell privileges!
+                evdevProcess = rikka.shizuku.Shizuku.newProcess(arrayOf("sh", "-c", "getevent -l"), null, null)
+                val reader = BufferedReader(InputStreamReader(evdevProcess!!.inputStream))
+                var line: String?
+                
+                var lStickX = 0f
+                var lStickY = 0f
+                var rStickX = 0f
+                var rStickY = 0f
+                
+                while (isListening && reader.readLine().also { line = it } != null) {
+                    line?.let {
+                        if (it.contains("EV_KEY")) {
+                            val parts = it.split(Regex("\\s+"))
+                            if (parts.size >= 4) {
+                                val btnRaw = parts[2]
+                                val stateStr = parts[3]
+                                val isDown = if (stateStr == "DOWN") 1 else 0
+                                
+                                val btnMap = mapEvdevToButton(btnRaw)
+                                if (btnMap != "UNKNOWN") {
+                                    TouchInjectionPlugin.emitGamepadButton(btnMap, isDown, 1.0f)
+                                }
+                            }
+                        } else if (it.contains("EV_ABS")) {
+                            val parts = it.split(Regex("\\s+"))
+                            if (parts.size >= 4) {
+                                val axisType = parts[2]
+                                val valueHex = parts[3]
+                                try {
+                                    val valueInt = java.lang.Long.parseLong(valueHex, 16).toInt()
+                                    // Normalize value (-1 to 1 depends on controller type)
+                                    // Approx scale for standard controllers max 32767
+                                    val finalVal = (valueInt.toFloat() - 128f) / 128f // Placeholder scale
+                                    
+                                    when (axisType) {
+                                        "ABS_X" -> lStickX = finalVal
+                                        "ABS_Y" -> lStickY = finalVal
+                                        "ABS_Z" -> rStickX = finalVal // Right stick X is often Z
+                                        "ABS_RZ" -> rStickY = finalVal // Right stick Y is often RZ
+                                    }
+                                    
+                                    TouchInjectionPlugin.emitGamepadAxis(floatArrayOf(lStickX, lStickY, rStickX, rStickY))
+                                } catch (e: Exception) {}
+                            }
+                        }
+                    }
                 }
-                return super.dispatchKeyEvent(event)
+            } catch (e: Exception) {
+                Log.e("GameMapper", "getevent loop failed", e)
             }
-
-            override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
-                if (event.source and InputDevice.SOURCE_JOYSTICK == InputDevice.SOURCE_JOYSTICK && event.action == MotionEvent.ACTION_MOVE) {
-                    val axisX = applyDeadzone(event.getAxisValue(MotionEvent.AXIS_X))
-                    val axisY = applyDeadzone(event.getAxisValue(MotionEvent.AXIS_Y))
-                    val axisZ = applyDeadzone(event.getAxisValue(MotionEvent.AXIS_Z))
-                    val axisRZ = applyDeadzone(event.getAxisValue(MotionEvent.AXIS_RZ))
-
-                    val axes = floatArrayOf(axisX, axisY, axisZ, axisRZ)
-                    TouchInjectionPlugin.emitGamepadAxis(axes)
-                    return true
-                }
-                return super.dispatchGenericMotionEvent(event)
-            }
-        }
-
-        // We make it 1x1 pixel, transparent.
-        // It must NOT have FLAG_NOT_FOCUSABLE, so it receives key/joystick events globally.
-        // It has FLAG_NOT_TOUCH_MODAL | FLAG_NOT_TOUCHABLE so touches pass down to the game.
-        // # PERLU VERIFIKASI DEVICE: Apakah pendekatan unfocusing game ini menghentikan game rendering? 
-        // Sebagian besar game tetap jalan, namun beberapa bisa auto-pause.
-        val params = WindowManager.LayoutParams(
-            1, 1,
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            else
-                WindowManager.LayoutParams.TYPE_PHONE,
-            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL 
-                    or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE 
-                    or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-            PixelFormat.TRANSLUCENT
-        )
-        params.gravity = Gravity.TOP or Gravity.START
-        params.x = 0
-        params.y = 0
-
-        overlayView.isFocusable = true
-        overlayView.isFocusableInTouchMode = true
-        
-        windowManager.addView(overlayView, params)
-        overlayView.requestFocus()
+        }.start()
     }
 
-    private fun mapKeyCodeToName(keyCode: Int): String {
-        return when (keyCode) {
-            KeyEvent.KEYCODE_BUTTON_A -> "A"
-            KeyEvent.KEYCODE_BUTTON_B -> "B"
-            KeyEvent.KEYCODE_BUTTON_X -> "X"
-            KeyEvent.KEYCODE_BUTTON_Y -> "Y"
-            KeyEvent.KEYCODE_BUTTON_L1 -> "LB"
-            KeyEvent.KEYCODE_BUTTON_R1 -> "RB"
-            KeyEvent.KEYCODE_BUTTON_L2 -> "LT"
-            KeyEvent.KEYCODE_BUTTON_R2 -> "RT"
-            KeyEvent.KEYCODE_BUTTON_THUMBL -> "L3"
-            KeyEvent.KEYCODE_BUTTON_THUMBR -> "R3"
-            KeyEvent.KEYCODE_BUTTON_START -> "START"
-            KeyEvent.KEYCODE_BUTTON_SELECT -> "SELECT"
-            KeyEvent.KEYCODE_DPAD_UP -> "UP"
-            KeyEvent.KEYCODE_DPAD_DOWN -> "DOWN"
-            KeyEvent.KEYCODE_DPAD_LEFT -> "LEFT"
-            KeyEvent.KEYCODE_DPAD_RIGHT -> "RIGHT"
-            else -> "UNKNOWN_$keyCode"
+    private fun mapEvdevToButton(evdevName: String): String {
+        return when {
+            evdevName.contains("BTN_A") || evdevName.contains("BTN_SOUTH") -> "A"
+            evdevName.contains("BTN_B") || evdevName.contains("BTN_EAST") -> "B"
+            evdevName.contains("BTN_X") || evdevName.contains("BTN_NORTH") -> "X"
+            evdevName.contains("BTN_Y") || evdevName.contains("BTN_WEST") -> "Y"
+            evdevName.contains("BTN_TL") || evdevName.contains("BTN_L1") -> "LB"
+            evdevName.contains("BTN_TR") || evdevName.contains("BTN_R1") -> "RB"
+            evdevName.contains("BTN_TL2") || evdevName.contains("BTN_L2") -> "LT"
+            evdevName.contains("BTN_TR2") || evdevName.contains("BTN_R2") -> "RT"
+            evdevName.contains("BTN_THUMBL") -> "L3"
+            evdevName.contains("BTN_THUMBR") -> "R3"
+            evdevName.contains("BTN_START") -> "START"
+            evdevName.contains("BTN_SELECT") -> "SELECT"
+            evdevName.contains("ABS_HAT0Y") -> "DPAD" // Need handling down/up
+            evdevName.contains("ABS_HAT0X") -> "DPAD" // Need handling left/right
+            else -> "UNKNOWN"
         }
-    }
-
-    private fun applyDeadzone(value: Float, deadzone: Float = 0.15f): Float {
-        return if (Math.abs(value) > deadzone) value else 0f
     }
 
     override fun onDestroy() {
         super.onDestroy()
         Log.d("GameMapper", "GamepadListenerService: onDestroy")
         isRunning = false
-        if (::overlayView.isInitialized) {
-            windowManager.removeView(overlayView)
-        }
+        isListening = false
+        try {
+            evdevProcess?.destroy()
+        } catch (e: Exception) {}
     }
 }

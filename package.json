@@ -20,7 +20,6 @@
     "@capacitor/screen-orientation": "^8.0.1",
     "@capacitor/status-bar": "^8.0.2",
     "@fontsource-variable/geist": "^5.2.9",
-    "@google/genai": "^2.4.0",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
     "class-variance-authority": "^0.7.1",

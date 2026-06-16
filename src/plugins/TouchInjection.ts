@@ -6,6 +6,8 @@ export interface TouchInjectionPluginType {
   unbindService(): Promise<void>;
   startGamepadListener(): Promise<void>;
   stopGamepadListener(): Promise<void>;
+  startOverlay(options: { profile: any }): Promise<void>;
+  stopOverlay(): Promise<void>;
   checkPermission(): Promise<{ granted: boolean }>;
   
   touchDown(options: { pointerId: number; x: number; y: number }): Promise<void>;

@@ -1,13 +1,42 @@
 package com.nanomindexplorer.gamemappermind
 
+import android.content.Intent
 import android.hardware.input.InputManager
+import android.os.IBinder
 import android.os.SystemClock
 import android.util.Log
 import android.util.SparseArray
 import android.view.InputDevice
 import android.view.MotionEvent
+import rikka.shizuku.Shizuku
 
-class TouchDaemonService : ITouchService.Stub() {
+class TouchDaemonService : Shizuku.UserService() {
+
+    private val touchStub = object : ITouchService.Stub() {
+        override fun touchDown(pointerId: Int, x: Float, y: Float) {
+            this@TouchDaemonService.touchDown(pointerId, x, y)
+        }
+
+        override fun touchMove(pointerId: Int, x: Float, y: Float) {
+            this@TouchDaemonService.touchMove(pointerId, x, y)
+        }
+
+        override fun touchUp(pointerId: Int) {
+            this@TouchDaemonService.touchUp(pointerId)
+        }
+
+        override fun injectTap(x: Float, y: Float) {
+            this@TouchDaemonService.injectTap(x, y)
+        }
+
+        override fun isAlive(): Boolean {
+            return true
+        }
+    }
+
+    override fun onBind(intent: Intent?): IBinder {
+        return touchStub
+    }
 
     private val inputManager: InputManager? by lazy {
         try {
@@ -132,7 +161,7 @@ class TouchDaemonService : ITouchService.Stub() {
         event.recycle()
     }
 
-    override fun touchDown(pointerId: Int, x: Float, y: Float) {
+    fun touchDown(pointerId: Int, x: Float, y: Float) {
         var state = pointers.get(pointerId)
         if (state == null) {
             state = PointerState()
@@ -155,7 +184,7 @@ class TouchDaemonService : ITouchService.Stub() {
         }
     }
 
-    override fun touchMove(pointerId: Int, x: Float, y: Float) {
+    fun touchMove(pointerId: Int, x: Float, y: Float) {
         val state = pointers.get(pointerId) ?: return
         state.x = x
         state.y = y
@@ -164,7 +193,7 @@ class TouchDaemonService : ITouchService.Stub() {
         }
     }
 
-    override fun touchUp(pointerId: Int) {
+    fun touchUp(pointerId: Int) {
         val state = pointers.get(pointerId) ?: return
         state.isDown = false
 
@@ -182,14 +211,14 @@ class TouchDaemonService : ITouchService.Stub() {
         }
     }
 
-    override fun injectTap(x: Float, y: Float) {
+    fun injectTap(x: Float, y: Float) {
         val id = 99 // Reserved ID for simple taps
         touchDown(id, x, y)
         Thread.sleep(20)
         touchUp(id)
     }
 
-    override fun isAlive(): Boolean {
+    fun isAlive(): Boolean {
         return true
     }
 }

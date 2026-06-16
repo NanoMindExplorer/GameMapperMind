@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import OverlayWysiwyg from './components/OverlayWysiwyg';
 import { GamepadProfile } from './types';
-import { INITIAL_PROFILES } from './mockData';
+import { INITIAL_PROFILES } from './defaults';
 import { useGamepad } from './hooks/useGamepad';
 
 // Declare native interface

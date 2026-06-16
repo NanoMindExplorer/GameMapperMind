@@ -96,6 +96,24 @@ class TouchInjectionPlugin : Plugin() {
     }
 
     @PluginMethod
+    fun startOverlay(call: PluginCall) {
+        val intent = Intent(context, FloatingOverlayService::class.java)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            context.startForegroundService(intent)
+        } else {
+            context.startService(intent)
+        }
+        call.resolve()
+    }
+
+    @PluginMethod
+    fun stopOverlay(call: PluginCall) {
+        val intent = Intent(context, FloatingOverlayService::class.java)
+        context.stopService(intent)
+        call.resolve()
+    }
+
+    @PluginMethod
     fun stopGamepadListener(call: PluginCall) {
         val intent = Intent(context, GamepadListenerService::class.java)
         context.stopService(intent)

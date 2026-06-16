@@ -19,3 +19,13 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# GameMapper Shizuku & AIDL rules
+-keep class rikka.shizuku.** { *; }
+-keep interface rikka.shizuku.** { *; }
+-keep class com.nanomindexplorer.gamemappermind.ITouchService** { *; }
+-keep class com.nanomindexplorer.gamemappermind.TouchDaemonService** { *; }
+-keep class com.nanomindexplorer.gamemappermind.TouchInjectionPlugin** { *; }
+-keepclassmembers class * extends com.getcapacitor.Plugin {
+    public <methods>;
+}

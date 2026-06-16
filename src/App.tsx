@@ -8,15 +8,13 @@ import React from 'react';
 import { 
   GamepadProfile, GamepadMacro, ShizukuState 
 } from './types';
-import { INITIAL_PROFILES, INITIAL_MACROS } from './mockData';
+import { INITIAL_PROFILES, INITIAL_MACROS } from './defaults';
 import ShizukuPanel from './components/ShizukuPanel';
 import OverlayWysiwyg from './components/OverlayWysiwyg';
 import MacroEngine from './components/MacroEngine';
 import GamepadTester from './components/GamepadTester';
 import GameSelector from './components/GameSelector';
 import CreditsPanel from './components/CreditsPanel';
-import { registerPlugin } from '@capacitor/core';
-const OverlayPlugin = registerPlugin('Overlay');
 
 import { 
   Terminal, Shield, Settings, Activity, Compass, Cpu, HelpCircle, 
@@ -718,10 +716,15 @@ export default function App() {
 
       {/* Corporate Technical Footer */}
       <footer className="border-t border-slate-900 py-6 bg-slate-950 mt-auto text-center text-[10px] font-mono text-slate-500">
-        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row justify-between items-center gap-3">
-          <span>🎮 Gamepad Mapper Mind – Nexion Orchestrator Platform</span>
-          <span className="text-indigo-400/80">Author Signature: @author NanoMind Explorer</span>
-          <span>© 2026 NanoMind Systems Inc.</span>
+        <div className="max-w-7xl mx-auto px-4 flex flex-col items-center gap-3">
+          <div className="flex flex-col sm:flex-row justify-between items-center w-full gap-3">
+             <span>🎮 Gamepad Mapper Mind – Nexion Orchestrator Platform</span>
+             <span className="text-indigo-400/80">Author Signature: @author NanoMind Explorer</span>
+             <span>© 2026 NanoMind Systems Inc.</span>
+          </div>
+          <div className="text-amber-500/80 font-semibold px-4 py-1.5 bg-amber-950/30 rounded border border-amber-900/50">
+            DISCLAIMER: Gunakan hanya di mode yang mengizinkan controller. Uji di akun alt terlebih dahulu. Kami tidak bertanggung jawab atas akun yang di-banned.
+          </div>
         </div>
       </footer>
 

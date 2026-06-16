@@ -10,7 +10,7 @@ import {
   Zap, Compass, ShieldCheck, HelpCircle, Eye, RefreshCw, Layers, CheckCircle2, AlertTriangle, Crosshair, ChevronRight,
   TrendingUp, Activity, Cpu
 } from 'lucide-react';
-import { DEVICE_RAW_NODES } from '../mockData';
+import { DEVICE_RAW_NODES } from '../defaults';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, ReferenceLine, CartesianGrid } from 'recharts';
 
 interface GamepadTesterProps {

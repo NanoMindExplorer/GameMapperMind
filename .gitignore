@@ -12,3 +12,9 @@ dist/*
 !dist/.gitkeep
 android/app/src/main/assets/public/*
 !android/app/src/main/assets/public/.gitkeep
+
+# Release signing keystore — NEVER commit (contains private key)
+*.keystore
+*.jks
+android/app/game-mapper-mind.keystore
+android/keystore.properties

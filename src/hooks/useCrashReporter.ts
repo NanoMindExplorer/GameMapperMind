@@ -103,7 +103,7 @@ export function useCrashReporter(): CrashReporterApi {
 
     (async () => {
       try {
-        const handle = await App.addListener('app:error', (payload: unknown) => {
+        const handle = await App.addListener('app:error' as any, (payload: unknown) => {
           if (cancelled) return;
           const report = sanitizeNativePayload(payload);
           if (!report) return;

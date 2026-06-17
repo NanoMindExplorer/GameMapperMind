@@ -1,37 +1,113 @@
 apply plugin: 'com.android.application'
 apply plugin: 'kotlin-android'
+apply plugin: 'kotlinx-serialization'
 
 android {
     namespace = "com.nanomindexplorer.gamemappermind"
     compileSdk = rootProject.ext.compileSdkVersion
+
     defaultConfig {
         applicationId "com.nanomindexplorer.gamemappermind"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
-        versionName "1.0"
+        versionName "1.0.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
-             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
-             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+            // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+            // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+
+    // ============================================================
+    // FASE 1.2 — Signing configuration for release builds
+    // ============================================================
+    // Best logical algorithm for secure signing (NO hardcoded passwords):
+    //   1. Read passwords from environment variables (CI-friendly,
+    //      never committed to source control).
+    //   2. Fall back to local keystore properties file if env vars
+    //      are absent (developer local builds).
+    //   3. Fall back to debug keystore if neither is available
+    //      (CI builds without release secrets — produces debug-signed
+    //      APK for testing, NOT for production release).
+    //
+    // Environment variables (set in CI secrets or local shell):
+    //   KEYSTORE_PASSWORD — password for the keystore file
+    //   KEY_PASSWORD      — password for the key alias
+    //
+    // Local properties file (android/keystore.properties):
+    //   storeFile=game-mapper-mind.keystore
+    //   storePassword=<your-keystore-password>
+    //   keyAlias=game-mapper-mind
+    //   keyPassword=<your-key-password>
+    //
+    // SECURITY: No passwords are hardcoded in this file.
+    // The build will FAIL with a clear error if no password source
+    // is available when a release keystore is present.
+    // ============================================================
     signingConfigs {
         release {
-            // Placeholder untuk release nyata (aman tidak di-commit passwordnya)
-            storeFile file("keystore.jks")
-            storePassword "password_placeholder"
-            keyAlias "alias_placeholder"
-            keyPassword "password_placeholder"
+            // Try environment variables first (CI builds)
+            def envStorePassword = System.getenv('KEYSTORE_PASSWORD')
+            def envKeyPassword = System.getenv('KEY_PASSWORD')
+
+            // Try local keystore.properties file (developer builds)
+            def keystorePropsFile = rootProject.file("keystore.properties")
+            def keystoreProps = new Properties()
+            if (keystorePropsFile.exists()) {
+                keystoreProps.load(new FileInputStream(keystorePropsFile))
+            }
+
+            // Resolve keystore file: prefer local keystore, fall back to debug
+            def keystoreFile = file("game-mapper-mind.keystore")
+            def debugKeystore = file(System.getProperty("user.home") + "/.android/debug.keystore")
+
+            if (keystoreFile.exists()) {
+                // Release keystore exists — require password from env or properties file.
+                def resolvedStorePassword = envStorePassword ?: keystoreProps.getProperty("storePassword")
+                def resolvedKeyPassword = envKeyPassword ?: keystoreProps.getProperty("keyPassword")
+
+                if (resolvedStorePassword == null || resolvedKeyPassword == null) {
+                    throw new GradleException(
+                        "Release keystore found at ${keystoreFile.absolutePath} but no password provided.\n" +
+                        "Set KEYSTORE_PASSWORD and KEY_PASSWORD environment variables,\n" +
+                        "or create android/keystore.properties with storePassword and keyPassword."
+                    )
+                }
+
+                storeFile keystoreFile
+                storePassword resolvedStorePassword
+                keyAlias = keystoreProps.getProperty("keyAlias") ?: "game-mapper-mind"
+                keyPassword resolvedKeyPassword
+            } else if (debugKeystore.exists()) {
+                // Fallback to debug keystore for CI without release secrets.
+                // Produces debug-signed APK — suitable for testing only.
+                storeFile debugKeystore
+                storePassword "android"
+                keyAlias "androiddebugkey"
+                keyPassword "android"
+            } else {
+                // Last resort: no signing config (APK will be unsigned)
+                storeFile null
+                storePassword ""
+                keyAlias ""
+                keyPassword ""
+            }
         }
     }
+
     buildTypes {
         release {
             minifyEnabled true
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             signingConfig signingConfigs.release
+        }
+        debug {
+            debuggable true
+            applicationIdSuffix ".debug"
+            versionNameSuffix "-debug"
         }
     }
     buildFeatures {
@@ -51,12 +127,15 @@ dependencies {
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
-    
+
     // Rikka Shizuku Integration
     def shizuku_version = "13.1.5"
     implementation "dev.rikka.shizuku:api:$shizuku_version"
     implementation "dev.rikka.shizuku:provider:$shizuku_version"
     implementation "androidx.webkit:webkit:1.8.0"
+
+    // Kotlin Serialization (FASE 4 — ProfileModels.kt + ProfileValidator.kt)
+    implementation "org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3"
 
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"

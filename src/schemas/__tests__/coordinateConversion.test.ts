@@ -59,13 +59,13 @@ function mockSafeArea(left: number, top: number, right: number, bottom: number) 
   // getComputedStyle returns a CSSStyleDeclaration. We stub it to return
   // the safe-area inset values for left/top/right/bottom properties.
   const original = window.getComputedStyle;
-  window.getComputedStyle = vi.fn(((_elt: Element) => {
+  window.getComputedStyle = vi.fn(((_elt: Element): CSSStyleDeclaration => {
     return {
       left: left ? `${left}px` : '0px',
       top: top ? `${top}px` : '0px',
       right: right ? `${right}px` : '0px',
       bottom: bottom ? `${bottom}px` : '0px',
-    } as unknown as CSSStyleDeclaration);
+    } as unknown as CSSStyleDeclaration;
   }) as typeof window.getComputedStyle);
   return () => { window.getComputedStyle = original; };
 }

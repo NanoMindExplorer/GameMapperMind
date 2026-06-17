@@ -125,8 +125,13 @@ jobs:
 
           echo "Icons generated successfully"
 
-      - name: Capacitor Sync
-        run: npx cap sync android
+      - name: Clean stale assets + Capacitor Sync
+        run: |
+          rm -rf android/app/src/main/assets/public/*
+          npx cap sync android
+          echo "=== Verifying synced assets ==="
+          ls -la android/app/src/main/assets/public/
+          cat android/app/src/main/assets/public/index.html | head -5
 
       - name: Patch build.gradle to use debug signing for release (no keystore in CI)
         run: |

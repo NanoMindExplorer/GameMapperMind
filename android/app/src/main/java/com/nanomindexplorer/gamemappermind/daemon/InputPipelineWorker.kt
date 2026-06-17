@@ -180,7 +180,7 @@ class InputPipelineWorker(
             }
 
             activeProfile = profile
-            Log.i(TAG, "Profile set: ${profile.packageName} (${buttonMappings.size} buttons, ${mappingLookup.size()} mapped) running=$running")
+            Log.i(TAG, "Profile set: ${profile.packageName} (${buttonMappings.size} buttons, ${mappingLookup.size} mapped) running=$running")
             return true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to parse profile JSON: ${e.message}", e)

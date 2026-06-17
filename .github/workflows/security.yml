@@ -116,8 +116,26 @@ jobs:
           npx vite build
           npx cap sync android
 
-      - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
+      - name: Regenerate launcher icons from SVG
+        if: matrix.language == 'java-kotlin'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq librsvg2-bin
+          if [ -f "icon.svg" ]; then
+            echo "Generating icons from icon.svg..."
+            rsvg-convert -w 48 -h 48 icon.svg -o android/app/src/main/res/mipmap-mdpi/ic_launcher.png
+            rsvg-convert -w 72 -h 72 icon.svg -o android/app/src/main/res/mipmap-hdpi/ic_launcher.png
+            rsvg-convert -w 96 -h 96 icon.svg -o android/app/src/main/res/mipmap-xhdpi/ic_launcher.png
+            rsvg-convert -w 144 -h 144 icon.svg -o android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png
+            rsvg-convert -w 192 -h 192 icon.svg -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
+          fi
+
+      - name: Build (manual, replaces autobuild)
+        if: matrix.language == 'java-kotlin'
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon -Dorg.gradle.java.home=${JAVA_HOME}
+        env:
+          JAVA_HOME: ${{ env.JAVA_HOME }}
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3

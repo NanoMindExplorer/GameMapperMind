@@ -5,7 +5,9 @@ import { Capacitor } from '@capacitor/core';
 /**
  * useGamepadLoop — Pushes gamepad profile + anti-ban config to native pipeline.
  *
- * FIX #1: Removed dual injection path (Path A — JS-side injection).
+ * FIX #1 (Audit #1): Removed dual injection path (Path A — JS-side injection).
+ * FIX #16 (Audit #2): Updated stale comments to reflect current behavior.
+ *
  * All touch injection is now handled EXCLUSIVELY by native pipeline (Path B):
  *   evdev → GameMapperUserService → forwardEventToPipeline
  *   → GameMapperPluginImpl.onGamepadButton → InputPipelineWorker.onButtonEvent
@@ -15,11 +17,11 @@ import { Capacitor } from '@capacitor/core';
  *   1. Pushes profile JSON to native pipeline when profile changes
  *   2. Pushes anti-ban config to native pipeline when profile changes
  *
- * It NO LONGER:
- *   - Listens to onGamepadButton/onGamepadAxis events for injection
- *   - Calls GameMapper.injectTap/injectSwipe/injectTouchUp
- *   - Manages pointer IDs in JavaScript
- *   - Handles button press logic (native pipeline does this)
+ * It does NOT:
+ *   - Listen to onGamepadButton/onGamepadAxis events for injection
+ *   - Call GameMapper.injectTap/injectSwipe/injectTouchUp
+ *   - Manage pointer IDs in JavaScript
+ *   - Handle button press logic (native pipeline does this)
  *
  * The native pipeline (Path B) handles ALL gamepad-to-touch injection:
  *   - Button press → InputPipelineWorker.onButtonEvent → TouchInjector.analogMove/touchUp

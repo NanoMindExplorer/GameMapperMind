@@ -9,6 +9,8 @@ import { GamepadMacro, MacroAction, MacroCaptureEvent } from '../types';
 import { Play, Square, RefreshCcw, Activity, Plus, FastForward, Check, Trash2, ArrowDownCircle, Info, Edit2, Circle, Radio } from 'lucide-react';
 import { useShizuku } from '../hooks/useShizuku';
 import { useMacroCapture } from '../hooks/useMacroCapture';
+import { Capacitor } from '@capacitor/core';
+import GameMapper from '../plugins/GameMapper';
 
 interface MacroEngineProps {
   macros: GamepadMacro[];
@@ -18,6 +20,24 @@ interface MacroEngineProps {
 
 export default function MacroEngineComponent({ macros, onUpdateMacros, onLogMessage }: MacroEngineProps) {
   const { injectInput } = useShizuku();
+  const [isShizukuConnected, setIsShizukuConnected] = React.useState(false);
+
+  // Track Shizuku connection status to prevent dual injection
+  React.useEffect(() => {
+    const checkStatus = async () => {
+      if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
+        try {
+          const status = await GameMapper.checkShizukuStatus();
+          setIsShizukuConnected(status.granted && (status.binderAlive ?? false));
+        } catch {
+          setIsShizukuConnected(false);
+        }
+      }
+    };
+    checkStatus();
+    const interval = setInterval(checkStatus, 3000);
+    return () => clearInterval(interval);
+  }, []);
   const [selectedMacroId, setSelectedMacroId] = React.useState<string>(macros[0]?.id || '');
   const [isRecording, setIsRecording] = React.useState(false);
   const [isPlaying, setIsPlaying] = React.useState(false);
@@ -130,8 +150,15 @@ export default function MacroEngineComponent({ macros, onUpdateMacros, onLogMess
       const action = selectedMacro.actions[tickCount];
       const cmd = buildCommand(action);
       if (cmd) {
-        onLogMessage(`[EVDEV INJECTION] ${action.type} ptr=${action.pointerId} x=${action.x ?? 0} y=${action.y ?? 0}`);
-        injectInput(cmd).catch(() => onLogMessage(`Macro Engine Error: action ${tickCount + 1} failed.`));
+        onLogMessage(`[MACRO INJECTION] ${action.type} ptr=${action.pointerId} x=${action.x ?? 0} y=${action.y ?? 0}`);
+        // FIX #12: Only use JS-side injection if Shizuku is NOT connected.
+        // When Shizuku IS connected, the native pipeline (Path B) handles
+        // all injection. JS-side injection (Path A) is for fallback/dev mode only.
+        if (!isShizukuConnected) {
+          injectInput(cmd).catch(() => onLogMessage(`Macro Engine Error: action ${tickCount + 1} failed.`));
+        } else {
+          onLogMessage(`[MACRO] Skipped JS injection — Shizuku native pipeline active. Macro playback is visual-only when Shizuku is connected.`);
+        }
       }
 
       tickCount++;

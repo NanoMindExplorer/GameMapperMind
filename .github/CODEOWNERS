@@ -1,31 +1,28 @@
-# CODEOWNERS — Protect critical files
+# ============================================================
+# CODEOWNERS — File protection rules
 # ============================================================
 # This file ensures that the repository owner must approve
-# any changes to critical files. Contributors can freely
-# modify files in src/communityProfiles/ without approval,
-# but ALL other files require owner review.
+# any changes to critical files.
 #
-# Syntax:
-#   <pattern>  @username
+# Contributors can freely add game profiles in:
+#   src/communityProfiles/
 #
+# ALL other files require explicit owner approval.
 # The LAST matching pattern wins.
 # ============================================================
 
-# === Default: Owner must review ALL changes ===
-*                           @NanoMindExplorer
-
-# === Exception: Community profiles are open for PR ===
-# Contributors can modify these without owner approval
-/src/communityProfiles/     @NanoMindExplorer
-
-# === Critical files — STRICT owner-only review ===
-# These files control app security, build, and core logic
+# === CRITICAL: These files are OWNER-ONLY ===
+# Any PR touching these requires @NanoMindExplorer to review
 /.github/                   @NanoMindExplorer
 /android/                   @NanoMindExplorer
 /src/App.tsx                @NanoMindExplorer
+/src/OverlayApp.tsx         @NanoMindExplorer
+/src/main.tsx               @NanoMindExplorer
 /src/types.ts               @NanoMindExplorer
 /src/defaults.ts            @NanoMindExplorer
+/src/constants.ts           @NanoMindExplorer
 /src/gameProfiles.ts        @NanoMindExplorer
+/src/index.css              @NanoMindExplorer
 /src/hooks/                 @NanoMindExplorer
 /src/plugins/               @NanoMindExplorer
 /src/components/            @NanoMindExplorer
@@ -34,3 +31,15 @@
 /tsconfig.json              @NanoMindExplorer
 /package.json               @NanoMindExplorer
 /package-lock.json          @NanoMindExplorer
+/index.html                 @NanoMindExplorer
+/icon.svg                   @NanoMindExplorer
+/CONTRIBUTING.md            @NanoMindExplorer
+/README.md                  @NanoMindExplorer
+/LICENSE                    @NanoMindExplorer
+
+# === DEFAULT: Everything else requires owner too ===
+*                           @NanoMindExplorer
+
+# === EXCEPTION: Only communityProfiles is open ===
+# Contributors can add/modify profile files here
+/src/communityProfiles/     @NanoMindExplorer

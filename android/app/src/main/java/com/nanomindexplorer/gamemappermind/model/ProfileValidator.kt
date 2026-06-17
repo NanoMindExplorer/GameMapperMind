@@ -1,10 +1,12 @@
 package com.nanomindexplorer.gamemappermind.model
 
+import android.util.Log
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonException
+import org.json.JSONObject
 
 /**
- * FASE 3.4 — Profile parser + cross-field validator.
+ * FASE 3.4 + FASE 4.1 — Profile parser + cross-field validator.
  *
  * Path di repo:
  *   android/app/src/main/java/com.nanomindexplorer.gamemappermind/model/ProfileValidator.kt
@@ -13,11 +15,37 @@ import kotlinx.serialization.json.JsonException
  *   1) Parse a JSON string into a GameProfile using kotlinx.serialization.
  *   2) Validate semantic invariants that the @Serializable classes can't express.
  *   3) Return a structured ValidationResult (never throws).
+ *   4) Provide a simple Boolean validateProfile(JSONObject) overload (FASE 4.1)
+ *      for callers that only need pass/fail without error details.
  *
  * The validation rules here mirror the Zod `.superRefine()` checks on the
  * TypeScript side. If you add a rule there, add it here too.
  *
+ * Schema sync contract (FASE 4.1):
+ *   - schemas/game_profile.schema.json (canonical)
+ *   - src/schemas/gameProfile.ts (Zod mirror)
+ *   - ProfileModels.kt + ProfileValidator.kt (Kotlin mirror)
+ *
+ * All three enforce identical rules:
+ *   - schemaVersion: semver regex + supported=1.0.0
+ *   - profileId: kebab-case regex + max 64 chars
+ *   - packageName: Android package regex
+ *   - screenSize: width 1..7680, height 1..4320
+ *   - orientation: enum {landscape, portrait, auto}
+ *   - deadzone: 0.0..0.5
+ *   - sensitivity: 0.1..5.0
+ *   - mappings: max 50, id 0..89, buttonCode 0..1023, xPercent/yPercent 0..1,
+ *               durationMs 16..5000, pressure 0..1, action enum,
+ *               swipe requires endXPercent/endYPercent, no dup ids,
+ *               no dup buttonCodes
+ *   - swipeTriggers: max 20, buttonCode 0..1023, direction enum,
+ *                    durationMs 16..2000, span 0.1..1.0,
+ *                    no collision with mappings.buttonCode
+ *   - metadata: author 1..64, version semver, createdAt/updatedAt ISO-8601,
+ *               notes max 512, tags max 10 each max 32 chars
+ *
  * Usage:
+ *   // Detailed validation (returns errors list):
  *   val result = ProfileValidator.parseAndValidate(jsonString)
  *   if (result is ValidationResult.Ok) {
  *       val profile = result.profile
@@ -25,9 +53,17 @@ import kotlinx.serialization.json.JsonException
  *   } else {
  *       Log.e(TAG, result.errors.joinToString("; "))
  *   }
+ *
+ *   // Simple Boolean check (FASE 4.1):
+ *   val jsonObject = JSONObject(jsonString)
+ *   if (ProfileValidator.validateProfile(jsonObject)) {
+ *       // proceed with confidence
+ *   }
  */
 
 object ProfileValidator {
+
+    private const val TAG = "GameMapper_ERROR"
 
     /**
      * Configured JSON parser.
@@ -35,6 +71,7 @@ object ProfileValidator {
      * - `explicitNulls = false`     : missing fields use defaults from @Serializable.
      * - `isLenient = true`          : allow trailing commas, unquoted strings where unambiguous.
      * - `coerceInputValues = true`  : coerce numeric strings to numbers where the target is numeric.
+     * - `encodeDefaults = true`     : serialize() writes defaults too (canonical round-trip).
      */
     private val json: Json = Json {
         ignoreUnknownKeys = true
@@ -51,13 +88,103 @@ object ProfileValidator {
         }
     }
 
+    // ═══════════════════════════════════════════════════════════════════
+    // FASE 4.1 — Public Boolean validateProfile(JSONObject)
+    // ═══════════════════════════════════════════════════════════════════
+    //
+    // Simple pass/fail entry point for callers that don't need error
+    // details. Internally delegates to parseAndValidate() and returns
+    // true only if validation succeeded without errors.
+    //
+    // This overload accepts a JSONObject (Android's org.json.JSONObject)
+    // which is the type returned by PluginCall.getData() and most
+    // Capacitor bridge code. It converts to a JSON string before
+    // delegating, because kotlinx.serialization operates on String
+    // input (not JSONObject).
+    //
+    // Anti-crash: any Throwable during conversion or validation is
+    // caught and logged with TAG "GameMapper_ERROR", returning false.
+    // The caller never sees an exception.
+
+    /**
+     * Validate a JSONObject as a GameProfile.
+     *
+     * @param profile The JSONObject to validate. Must not be null.
+     * @return true if the profile is valid, false otherwise.
+     *         On any Throwable, logs the error and returns false
+     *         (never throws to caller).
+     */
+    fun validateProfile(profile: JSONObject): Boolean {
+        if (profile == null) {
+            Log.e(TAG, "validateProfile(JSONObject): profile is null")
+            return false
+        }
+        return try {
+            val jsonStr = profile.toString()
+            validateProfile(jsonStr)
+        } catch (t: Throwable) {
+            Log.e(TAG, "validateProfile(JSONObject): conversion failed", t)
+            false
+        }
+    }
+
+    /**
+     * Validate a JSON string as a GameProfile.
+     *
+     * @param jsonStr The JSON string to validate. Must not be null or empty.
+     * @return true if the profile is valid, false otherwise.
+     *         On any Throwable, logs the error and returns false
+     *         (never throws to caller).
+     */
+    fun validateProfile(jsonStr: String): Boolean {
+        if (jsonStr.isEmpty()) {
+            Log.e(TAG, "validateProfile(String): jsonStr is empty")
+            return false
+        }
+        return try {
+            when (val result = parseAndValidate(jsonStr)) {
+                is ValidationResult.Ok -> true
+                is ValidationResult.Err -> {
+                    Log.w(TAG, "validateProfile: validation failed — ${result.joined()}")
+                    false
+                }
+            }
+        } catch (t: Throwable) {
+            Log.e(TAG, "validateProfile(String): unexpected error", t)
+            false
+        }
+    }
+
+    /**
+     * Validate an already-parsed GameProfile object.
+     *
+     * @param profile The GameProfile to validate.
+     * @return true if the profile is valid, false otherwise.
+     */
+    fun validateProfile(profile: GameProfile): Boolean {
+        return try {
+            when (validate(profile)) {
+                is ValidationResult.Ok -> true
+                is ValidationResult.Err -> {
+                    Log.w(TAG, "validateProfile(GameProfile): validation failed — ${(it as ValidationResult.Err).joined()}")
+                    false
+                }
+            }
+        } catch (t: Throwable) {
+            Log.e(TAG, "validateProfile(GameProfile): unexpected error", t)
+            false
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Detailed validation (returns errors list)
+    // ═══════════════════════════════════════════════════════════════════
+
     /**
      * Parse a JSON string into a GameProfile, then run all semantic validators.
      * Returns Ok(profile) or Err(list of error messages). Never throws.
      */
     fun parseAndValidate(jsonStr: String): ValidationResult {
-        val parseErrors = mutableListOf<String>()
-
         // 1) Deserialize.
         val profile: GameProfile = try {
             json.decodeFromString(GameProfile.serializer(), jsonStr)

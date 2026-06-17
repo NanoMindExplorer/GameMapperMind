@@ -50,7 +50,7 @@ permissions:
   actions: read
 
 env:
-  NODE_VERSION: '22'
+  NODE_VERSION: '24'
   JAVA_VERSION: '21'
   JAVA_DISTRO: 'zulu'
 

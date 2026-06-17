@@ -23,5 +23,6 @@
     "allowImportingTsExtensions": true,
     "noEmit": true
   },
-  "include": ["src/**/*", "src/**/*.d.ts", "vite.config.ts"]
+  "include": ["src/**/*", "src/**/*.d.ts", "vite.config.ts"],
+  "exclude": ["src/communityProfiles/_template.ts"]
 }

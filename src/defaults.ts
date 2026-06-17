@@ -153,8 +153,13 @@ export function getButtonMappingForMode(mode: ControllerMode): string[] {
 
 // Import comprehensive preset profiles for 7 popular mobile games
 import { PRESET_PROFILES } from './gameProfiles';
+// Import community-contributed profiles (safe: returns [] if no profiles added yet)
+import { COMMUNITY_PROFILES } from './communityProfiles/index';
 
-export const INITIAL_PROFILES: GamepadProfile[] = PRESET_PROFILES;
+export const INITIAL_PROFILES: GamepadProfile[] = [
+  ...PRESET_PROFILES,
+  ...COMMUNITY_PROFILES,
+];
 
 export const INITIAL_MACROS: GamepadMacro[] = [];
 

@@ -332,7 +332,7 @@ class TouchDaemonService : ITouchService.Stub {
                 pb.redirectErrorStream(true)
                 evdevProcess = pb.start()
                 val reader = BufferedReader(InputStreamReader(evdevProcess!!.inputStream))
-                var line: String?
+                var line: String? = null
 
                 var lStickX = 0f; var lStickY = 0f
                 var rStickX = 0f; var rStickY = 0f

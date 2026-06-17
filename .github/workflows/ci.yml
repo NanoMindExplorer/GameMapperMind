@@ -247,7 +247,7 @@ jobs:
       - name: Generate JaCoCo report
         if: always() && success()
         working-directory: android
-        run: ./gradlew :app:jacocoTestReport || echo "::warning::JaCoCo not configured yet"
+        run: ./gradlew :app:jacocoTestReport || echo "::warning::JaCoCo not configured — skipping"
 
       - name: Check coverage thresholds
         if: always() && success()

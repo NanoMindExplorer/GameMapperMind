@@ -52,6 +52,16 @@
         </service>
 
         <service
+            android:name=".daemon.MapperDaemonService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Gamepad Mapping Daemon"
+            />
+        </service>
+
+        <service
             android:name=".TouchAccessibilityService"
             android:exported="false"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">

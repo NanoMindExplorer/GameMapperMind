@@ -1,19 +1,20 @@
 package com.nanomindexplorer.gamemappermind
 
-import android.content.Intent
-import android.net.Uri
-import android.os.Build
 import android.os.Bundle
-import android.provider.Settings
 import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import com.getcapacitor.BridgeActivity
+import com.nanomindexplorer.gamemappermind.plugin.GameMapperPlugin
 
 class MainActivity : BridgeActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Register BOTH plugins during transition period
+        // Old plugin (TouchInjectionPlugin) keeps existing JS code working
+        // New plugin (GameMapperPlugin) is the rewritten version per contract
         registerPlugin(TouchInjectionPlugin::class.java)
+        registerPlugin(GameMapperPlugin::class.java)
         super.onCreate(savedInstanceState)
         
         // Aktifkan Gamepad API & properti WebView

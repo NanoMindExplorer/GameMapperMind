@@ -70,6 +70,21 @@ interface IGameMapperService {
     ) = 10;
 
     // ============================================================
+    // Profile Management — set active profile for pipeline
+    // ============================================================
+
+    // Set active profile from JSON string
+    // JSON contains: packageName, screenWidth, screenHeight, displayId,
+    // buttons[], leftStick{}, rightStick{}
+    boolean setProfile(String profileJson) = 12;
+
+    // Update swipe trigger for a specific button
+    // hardwareKey: "A", "B", "X", "Y", "LB", "RB", etc.
+    // direction: "UP", "DOWN", "LEFT", "RIGHT"
+    // touchX, touchY: relative coordinates (0.0 - 1.0)
+    void updateSwipeTrigger(String hardwareKey, String direction, float touchX, float touchY) = 13;
+
+    // ============================================================
     // Status
     // ============================================================
     boolean isAlive() = 11;

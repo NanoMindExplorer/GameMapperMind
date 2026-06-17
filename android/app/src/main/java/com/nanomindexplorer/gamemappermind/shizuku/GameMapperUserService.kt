@@ -8,6 +8,7 @@ import android.view.InputDevice
 import android.view.MotionEvent
 import androidx.annotation.Keep
 import com.nanomindexplorer.gamemappermind.input.TouchInjector
+import com.nanomindexplorer.gamemappermind.plugin.GameMapperPluginImpl
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import kotlin.math.cos
@@ -44,6 +45,7 @@ class GameMapperUserService : IGameMapperService.Stub {
     }
 
     private val touchInjector: TouchInjector = TouchInjector()
+    private val pluginImpl: GameMapperPluginImpl = GameMapperPluginImpl(null as Context?)
 
     // ============================================================
     // Anti-ban configuration
@@ -85,10 +87,33 @@ class GameMapperUserService : IGameMapperService.Stub {
     override fun destroy() {
         Log.i(TAG, "destroy() called — cleaning up and exiting")
         stopGamepadRead()
+        pluginImpl.cleanup()
         System.exit(0)
     }
 
     override fun isAlive(): Boolean = true
+
+    // ============================================================
+    // Profile Management (Tahap 3 sync)
+    // ============================================================
+
+    override fun setProfile(profileJson: String?): Boolean {
+        if (profileJson == null) {
+            Log.w(TAG, "setProfile: json is null")
+            return false
+        }
+        val success = pluginImpl.setProfile(profileJson)
+        Log.i(TAG, "Profile set: success=$success")
+        return success
+    }
+
+    override fun updateSwipeTrigger(hardwareKey: String?, direction: String?, touchX: Float, touchY: Float) {
+        if (hardwareKey == null || direction == null) {
+            Log.w(TAG, "updateSwipeTrigger: hardwareKey or direction is null")
+            return
+        }
+        pluginImpl.updateSwipeTrigger(hardwareKey, direction, touchX, touchY)
+    }
 
     // ============================================================
     // Touch Injection — delegates to TouchInjector
@@ -221,6 +246,30 @@ class GameMapperUserService : IGameMapperService.Stub {
         eventCallback = cb
     }
 
+    // ============================================================
+    // Internal event forwarding to PluginImpl
+    // ============================================================
+    private fun forwardEventToPipeline(eventType: String, buttonName: String, value: Int) {
+        when (eventType) {
+            "BUTTON" -> pluginImpl.onGamepadButton(buttonName, value)
+            "AXIS" -> {
+                // Parse axis string: "lx,ly,rx,ry,l2,r2"
+                val parts = buttonName.split(",")
+                if (parts.size >= 6) {
+                    val axes = FloatArray(6)
+                    for (i in 0 until 6) {
+                        axes[i] = parts[i].toFloatOrNull() ?: 0f
+                    }
+                    pluginImpl.onGamepadAxis(axes)
+                }
+            }
+            "CONTROLLER_ID" -> {
+                // Forward controller detection to JS via static method
+                com.nanomindexplorer.gamemappermind.plugin.GameMapperPlugin.emitGamepadButton("CONTROLLER_ID:$buttonName", 1, 1.0f)
+            }
+        }
+    }
+
     override fun startGamepadRead(): Boolean {
         if (evdevListening) {
             Log.d(TAG, "Gamepad read already running")
@@ -229,6 +278,34 @@ class GameMapperUserService : IGameMapperService.Stub {
 
         Log.i(TAG, "Starting evdev gamepad reader (shell privilege)...")
         evdevListening = true
+
+        // Start pipeline for processing gamepad events
+        pluginImpl.startPipeline()
+
+        // Set event callback to forward events to BOTH pipeline (for touch injection)
+        // AND JS (for UI feedback)
+        eventCallback = { eventType, buttonName, value ->
+            // 1. Forward to pipeline for touch injection
+            forwardEventToPipeline(eventType, buttonName, value)
+            // 2. Emit to JS for UI feedback (button + controller events only)
+            if (eventType == "BUTTON") {
+                if (buttonName.startsWith("CONTROLLER_ID:")) {
+                    com.nanomindexplorer.gamemappermind.plugin.GameMapperPlugin.emitGamepadButton(buttonName, value, 1.0f)
+                } else {
+                    com.nanomindexplorer.gamemappermind.plugin.GameMapperPlugin.emitGamepadButton(buttonName, value, 1.0f)
+                }
+            } else if (eventType == "AXIS") {
+                // Parse axis string and emit to JS
+                val parts = buttonName.split(",")
+                if (parts.size >= 6) {
+                    val axes = FloatArray(6)
+                    for (i in 0 until 6) {
+                        axes[i] = parts[i].toFloatOrNull() ?: 0f
+                    }
+                    com.nanomindexplorer.gamemappermind.plugin.GameMapperPlugin.emitGamepadAxis(axes)
+                }
+            }
+        }
 
         evdevThread = Thread {
             try {
@@ -341,6 +418,8 @@ class GameMapperUserService : IGameMapperService.Stub {
         try { evdevThread?.join(1000) } catch (_: InterruptedException) {}
         evdevProcess = null
         evdevThread = null
+        // Stop pipeline
+        pluginImpl.stopPipeline()
         return true
     }
 

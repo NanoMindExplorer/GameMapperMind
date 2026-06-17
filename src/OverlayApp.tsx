@@ -37,8 +37,8 @@ export default function OverlayApp() {
     });
   }, []);
 
-  const handleGamepadAxis = React.useCallback((axes: { lx: number, ly: number, rx: number, ry: number }) => {
-    setActiveAxes(axes);
+  const handleGamepadAxis = React.useCallback((axes: number[]) => {
+    setActiveAxes({ lx: axes[0] || 0, ly: axes[1] || 0, rx: axes[2] || 0, ry: axes[3] || 0 });
   }, []);
 
   useGamepad(handleGamepadPress, handleGamepadAxis);

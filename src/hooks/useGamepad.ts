@@ -13,7 +13,7 @@ export function useGamepad(
   axisCallback: (axes: number[]) => void
 ) {
   const [connectedGamepad, setConnectedGamepad] = useState<Gamepad | null>(null);
-  const requestRef = useRef<number>();
+  const requestRef = useRef<number | undefined>(undefined);
   const buttonCallbackRef = useRef(buttonCallback);
   const axisCallbackRef = useRef(axisCallback);
 

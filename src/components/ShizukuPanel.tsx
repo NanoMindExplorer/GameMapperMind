@@ -189,7 +189,6 @@ export default function ShizukuPanel({ shizukuState, setShizukuState, onLogMessa
 
       setTimeout(() => {
         if (action === 'toggle_mode') {
-          setShizukuState(prev => ({ ...prev, mode: mode || prev.mode }));
           onLogMessage(`Daemon mode switched: ${mode || 'current mode'} (Visual Check only)`);
         }
         setIsLoading(false);

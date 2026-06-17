@@ -88,8 +88,24 @@ export function useGamepadLoop(mapProfile: any, active: boolean) {
 
         const isPressed = value === 1;
 
-        // Look up mapping by raw hardware key (e.g., "A", "B", "LB")
-        const mapping = mapProfile?.mappings?.find((m: any) => m.hardwareKey === buttonName);
+        // Normalize button names to match profile hardwareKey format
+        // Evdev may emit LB/RB, but profiles use L1/R1 (or vice versa)
+        // Also handle LT/RT → L2/R2 (already fixed in evdev, but keep for safety)
+        const buttonAliases: Record<string, string> = {
+          'LB': 'L1', 'RB': 'R1',
+          'LT': 'L2', 'RT': 'R2',
+          'L1': 'LB', 'R1': 'RB',
+          'L2': 'LT', 'R2': 'RT',
+        };
+        // Try original name first, then alias
+        let mapping = mapProfile?.mappings?.find((m: any) => m.hardwareKey === buttonName);
+        if (!mapping && buttonAliases[buttonName]) {
+          mapping = mapProfile?.mappings?.find((m: any) => m.hardwareKey === buttonAliases[buttonName]);
+        }
+        // Also try with BUTTON_ prefix
+        if (!mapping) {
+          mapping = mapProfile?.mappings?.find((m: any) => m.hardwareKey === 'BUTTON_' + buttonName);
+        }
 
         if (!mapping || !mapping.x || !mapping.y) {
           lastState.current[buttonName] = isPressed;
@@ -174,7 +190,7 @@ export function useGamepadLoop(mapProfile: any, active: boolean) {
         // ============================================================
         // 3. L2 (Analog to Button)
         // ============================================================
-        const mapL2 = mapProfile?.mappings?.find((m: any) => m.hardwareKey === 'L2');
+        const mapL2 = mapProfile?.mappings?.find((m: any) => m.hardwareKey === 'L2') || mapProfile?.mappings?.find((m: any) => m.hardwareKey === 'LT');
         if (mapL2 && mapL2.x && mapL2.y) {
            const isL2Pressed = l2Analog > 0.0;
            const wasL2Pressed = lastState.current['L2_ANALOG'];
@@ -197,7 +213,7 @@ export function useGamepadLoop(mapProfile: any, active: boolean) {
         // ============================================================
         // 4. R2 (Analog to Button)
         // ============================================================
-        const mapR2 = mapProfile?.mappings?.find((m: any) => m.hardwareKey === 'R2');
+        const mapR2 = mapProfile?.mappings?.find((m: any) => m.hardwareKey === 'R2') || mapProfile?.mappings?.find((m: any) => m.hardwareKey === 'RT');
         if (mapR2 && mapR2.x && mapR2.y) {
            const isR2Pressed = r2Analog > 0.0;
            const wasR2Pressed = lastState.current['R2_ANALOG'];

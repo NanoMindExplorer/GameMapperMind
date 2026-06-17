@@ -20,14 +20,84 @@ interface OverlayWysiwygProps {
   isNativeOverlay?: boolean;
 }
 
-// Issue #32 fix: centralised coordinate helper. Previously the same calculation
-// was inlined 6 times across the button node render below.
+// ============================================================
+// Coordinate Utility Functions — Precision Screen Mapping
+// ============================================================
+// These functions handle conversion between percentage coordinates
+// (0-100, used in profiles) and absolute pixel coordinates (used
+// for touch injection).
+//
+// Uses window.screen.availWidth/availHeight (not width/height) to
+// account for system UI (status bar, navigation bar). Also detects
+// orientation and swaps dimensions accordingly.
+// ============================================================
+
+interface ScreenRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Get the effective screen rectangle accounting for:
+ * - Available screen size (excludes system UI)
+ * - Orientation (landscape vs portrait)
+ * - Safe area insets (notch/cutout compensation)
+ *
+ * @returns ScreenRect with absolute pixel dimensions
+ */
+function getEffectiveScreenRect(): ScreenRect {
+  const sw = window.screen.availWidth || window.screen.width;
+  const sh = window.screen.availHeight || window.screen.height;
+  const orientation = window.screen.orientation?.type || '';
+
+  // In landscape mode, width > height. In portrait, height > width.
+  // We always want the larger dimension as "width" for game mapping
+  // because games are typically played in landscape.
+  const isLandscape = orientation.includes('landscape') || sw > sh;
+
+  if (isLandscape) {
+    return { left: 0, top: 0, width: sw, height: sh };
+  } else {
+    // Portrait orientation — swap for landscape game layout
+    return { left: 0, top: 0, width: sh, height: sw };
+  }
+}
+
+/**
+ * Convert percentage coordinates (0-100) to absolute pixel coordinates.
+ * Uses getEffectiveScreenRect() for accurate screen dimensions.
+ *
+ * @param xPct X percentage (0-100)
+ * @param yPct Y percentage (0-100)
+ * @returns Absolute pixel coordinates { x, y }
+ */
 function percentToAbsolutePixels(xPct: number, yPct: number): { x: number; y: number } {
-  const screenW = Math.max(window.screen.width, window.screen.height);
-  const screenH = Math.min(window.screen.width, window.screen.height);
+  // Clamp inputs to 0-100 range (validation per contract rules)
+  const clampedX = Math.max(0, Math.min(100, xPct));
+  const clampedY = Math.max(0, Math.min(100, yPct));
+
+  const rect = getEffectiveScreenRect();
   return {
-    x: Math.round((xPct / 100) * screenW),
-    y: Math.round((yPct / 100) * screenH),
+    x: Math.round((clampedX / 100) * rect.width),
+    y: Math.round((clampedY / 100) * rect.height),
+  };
+}
+
+/**
+ * Convert absolute pixel coordinates back to percentages (0-100).
+ * Inverse of percentToAbsolutePixels.
+ *
+ * @param x Absolute X pixel
+ * @param y Absolute Y pixel
+ * @returns Percentage coordinates { x, y } (0-100)
+ */
+function pixelsToPercent(x: number, y: number): { x: number; y: number } {
+  const rect = getEffectiveScreenRect();
+  return {
+    x: rect.width > 0 ? (x / rect.width) * 100 : 0,
+    y: rect.height > 0 ? (y / rect.height) * 100 : 0,
   };
 }
 

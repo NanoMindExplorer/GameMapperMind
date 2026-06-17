@@ -74,6 +74,9 @@ export interface GameMapperPluginType {
   startOverlay(): Promise<void>;
   stopOverlay(): Promise<void>;
 
+  // Shell command execution via Shizuku
+  executeShellCommand(options: { command: string }): Promise<{ output: string; error?: string; exitCode: number }>;
+
   // Listeners — Shizuku lifecycle
   addListener(
     eventName: 'onShizukuBinderReceived',

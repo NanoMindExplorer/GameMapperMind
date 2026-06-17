@@ -15,6 +15,9 @@ import com.nanomindexplorer.gamemappermind.daemon.MapperDaemonService
 import com.nanomindexplorer.gamemappermind.shizuku.IGameMapperService
 import com.nanomindexplorer.gamemappermind.shizuku.ShizukuHelper
 import org.json.JSONObject
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import rikka.shizuku.Shizuku
 
 @CapacitorPlugin(name = "GameMapper")
 class GameMapperPlugin : Plugin() {
@@ -120,6 +123,76 @@ class GameMapperPlugin : Plugin() {
 
     @PluginMethod fun stopOverlay(call: PluginCall) {
         try { context.stopService(Intent(context, com.nanomindexplorer.gamemappermind.FloatingOverlayService::class.java)); call.resolve() } catch (e: Exception) { call.reject("Failed: ${e.message}") }
+    }
+
+    /**
+     * Execute a shell command via Shizuku (shell privilege).
+     * Uses Shizuku.newProcess() which runs the command with UID 2000 (shell).
+     *
+     * Options:
+     *   command (string): Shell command to execute
+     *
+     * Returns:
+     * {
+     *   "output": string,    // stdout from command
+     *   "exitCode": number   // exit code (0 = success)
+     * }
+     *
+     * NOTE: Shizuku.newProcess() is deprecated in v13.1.1 but still
+     * functional in v13.1.5. The recommended replacement is UserService,
+     * but for simple commands this is sufficient.
+     */
+    @PluginMethod
+    fun executeShellCommand(call: PluginCall) {
+        val command = call.getString("command")
+        if (command == null || command.isEmpty()) {
+            call.reject("command is required and must not be empty")
+            return
+        }
+
+        val helper = shizukuHelper
+        if (helper == null || !helper.isBinderAlive()) {
+            call.reject("Shizuku is not running. Please start Shizuku app first.")
+            return
+        }
+
+        if (!helper.checkPermission()) {
+            call.reject("Shizuku permission not granted. Call requestShizukuPermission first.")
+            return
+        }
+
+        try {
+            // Run command via Shizuku's shell process (UID 2000)
+            val process = Shizuku.newProcess(arrayOf("sh", "-c", command), null, null)
+            val reader = BufferedReader(InputStreamReader(process.inputStream))
+            val errorReader = BufferedReader(InputStreamReader(process.errorStream))
+            val output = StringBuilder()
+            val errorOutput = StringBuilder()
+            var line: String?
+
+            while (reader.readLine().also { line = it } != null) {
+                output.append(line).append("\n")
+            }
+            while (errorReader.readLine().also { line = it } != null) {
+                errorOutput.append(line).append("\n")
+            }
+
+            val exitCode = process.waitFor()
+            reader.close()
+            errorReader.close()
+            process.destroy()
+
+            val data = JSObject()
+            data.put("output", output.toString().trim())
+            data.put("error", errorOutput.toString().trim())
+            data.put("exitCode", exitCode)
+            call.resolve(data)
+
+            Log.d(TAG, "Shell command executed: '$command' → exitCode=$exitCode")
+        } catch (e: Exception) {
+            Log.e(TAG, "executeShellCommand failed", e)
+            call.reject("Command execution failed: ${e.message}")
+        }
     }
 
     private fun emitToJS(eventName: String, data: JSObject) { try { notifyListeners(eventName, data) } catch (e: Exception) { Log.e(TAG, "Emit failed: $eventName", e) } }

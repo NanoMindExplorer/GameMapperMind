@@ -11,9 +11,8 @@ import com.nanomindexplorer.gamemappermind.plugin.GameMapperPlugin
 class MainActivity : BridgeActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         // Register BOTH plugins during transition period
-        // Old plugin (TouchInjectionPlugin) keeps existing JS code working
-        // New plugin (GameMapperPlugin) is the rewritten version per contract
-        registerPlugin(TouchInjectionPlugin::class.java)
+        
+        
         registerPlugin(GameMapperPlugin::class.java)
         super.onCreate(savedInstanceState)
         

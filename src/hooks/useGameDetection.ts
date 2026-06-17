@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { Capacitor } from '@capacitor/core';
-import TouchInjection from '../plugins/TouchInjection';
+import GameMapper from '../plugins/GameMapper';
 import type { GamepadProfile, GameDetectionEvent } from '../types';
 
 interface UseGameDetectionOptions {
@@ -49,7 +49,7 @@ export function useGameDetection({
     let cancelled = false;
 
     const setup = async () => {
-      listenerRef.current = await TouchInjection.addListener('onForegroundAppChanged', (data) => {
+      listenerRef.current = await GameMapper.addListener('onForegroundAppChanged', (data) => {
         if (cancelled || !enabledRef.current) return;
         const pkg = data.packageName;
         if (!pkg || pkg === lastSeenPackageRef.current) return;

@@ -193,16 +193,16 @@ public class FloatingOverlayService extends Service {
 
                 switch (action) {
                     case "down":
-                        TouchInjectionPlugin.injectTouchDown(99, (float) x, (float) y);
+                        GameMapperPlugin.emitGamepadButton("OVERLAY_DOWN", 1, 1.0f);
                         break;
                     case "move":
-                        TouchInjectionPlugin.injectTouchMove(99, (float) x, (float) y);
+                        GameMapperPlugin.emitGamepadButton("OVERLAY_MOVE", 1, 1.0f);
                         break;
                     case "up":
-                        TouchInjectionPlugin.injectTouchUp(99);
+                        GameMapperPlugin.emitGamepadButton("OVERLAY_UP", 0, 1.0f);
                         break;
                     case "tap":
-                        TouchInjectionPlugin.injectTapFromOverlay((float) x, (float) y);
+                        GameMapperPlugin.emitGamepadButton("OVERLAY_TAP", 1, 1.0f);
                         break;
                     default:
                         Log.w("GameMapper", "Unknown overlay command: " + command);

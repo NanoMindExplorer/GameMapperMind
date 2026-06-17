@@ -224,8 +224,8 @@ export default function ShizukuPanel({ shizukuState, setShizukuState, onLogMessa
   // Listen for async permission result (when user approves Shizuku dialog)
   React.useEffect(() => {
     let listener: any;
-    import('../plugins/TouchInjection').then(({ default: TouchInjection }) => {
-      TouchInjection.addListener('onShizukuPermissionResult', (data: any) => {
+    import('../plugins/GameMapper').then(({ default: GameMapper }) => {
+      GameMapper.addListener('onShizukuPermissionGranted', (data: any) => {
         if (data.granted) {
           onLogMessage('[sh] ✅ Shizuku permission granted via dialog! Auto-starting daemon...');
           startDaemon().then(() => {

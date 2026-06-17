@@ -45,7 +45,7 @@ class TouchAccessibilityService : AccessibilityService() {
             val pkg = event.packageName?.toString() ?: return
             if (pkg.isNotEmpty() && pkg != "com.nanomindexplorer.gamemappermind") {
                 Log.d("GameMapper", "Foreground app changed: $pkg")
-                TouchInjectionPlugin.emitForegroundAppChanged(pkg)
+                GameMapperPlugin.emitForegroundAppChanged(pkg)
             }
         }
     }

@@ -109,10 +109,11 @@ jobs:
         with:
           packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
 
-      - name: Install npm dependencies + sync Capacitor
+      - name: Build web assets + sync Capacitor
         if: matrix.language == 'java-kotlin'
         run: |
           npm ci
+          npx vite build
           npx cap sync android
 
       - name: Autobuild

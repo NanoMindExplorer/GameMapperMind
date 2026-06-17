@@ -23,6 +23,7 @@ import android.os.Looper;
 import androidx.core.app.NotificationCompat;
 import androidx.webkit.WebViewAssetLoader;
 import org.json.JSONObject;
+import com.nanomindexplorer.gamemappermind.plugin.GameMapperPlugin;
 
 import java.util.Arrays;
 import java.util.HashSet;

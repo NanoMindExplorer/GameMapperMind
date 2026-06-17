@@ -1,27 +1,30 @@
-# Validate PR — Ensure contributors only modify profile files
 # ============================================================
-# This workflow runs on every Pull Request and checks:
-# 1. PR only modifies files in src/communityProfiles/
-# 2. PR does not touch critical files (android/, .github/, etc)
-# 3. Profile file follows the correct TypeScript schema
+# Validate PR — Security gate for all Pull Requests
+# ============================================================
+# This workflow runs on EVERY Pull Request and enforces:
+# 1. Contributors can ONLY modify files in src/communityProfiles/
+# 2. ANY modification to critical files (android/, src/, .github/, etc)
+#    by non-owner contributors is automatically BLOCKED
+# 3. Profile files must pass TypeScript type-check
+# 4. Profile IDs must not duplicate existing profiles
 #
-# If validation fails, the PR is automatically blocked.
+# Only the repository owner (@NanoMindExplorer) can bypass this check.
 # ============================================================
-name: Validate Profile PR
+name: Validate PR
 
 on:
   pull_request:
-    paths:
-      - 'src/communityProfiles/**'
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
   pull-requests: write
+  checks: write
 
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
 
     steps:
       - name: Checkout PR code
@@ -29,53 +32,117 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Check which files were modified
-        id: changed-files
+      # ============================================================
+      # STEP 1: Identify PR author — owner gets bypass
+      # ============================================================
+      - name: Check if PR author is repository owner
+        id: owner-check
+        env:
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          echo "PR author: $PR_AUTHOR"
+          if [ "$PR_AUTHOR" = "NanoMindExplorer" ]; then
+            echo "is_owner=true" >> $GITHUB_OUTPUT
+            echo "✓ PR by owner — security check bypassed"
+          else
+            echo "is_owner=false" >> $GITHUB_OUTPUT
+            echo "⚠ PR by external contributor — full security check required"
+          fi
+
+      # ============================================================
+      # STEP 2: Check which files were modified
+      # (Only for non-owner contributors)
+      # ============================================================
+      - name: Check modified files are within allowed paths
+        if: steps.owner-check.outputs.is_owner != 'true'
+        id: file-check
         run: |
           echo "=== Files changed in this PR ==="
           git diff --name-only origin/main...HEAD > /tmp/changed_files.txt
           cat /tmp/changed_files.txt
           echo ""
 
-          # Check if any file is OUTSIDE src/communityProfiles/
-          NON_PROFILE_FILES=$(grep -v '^src/communityProfiles/' /tmp/changed_files.txt || true)
+          # Allowed paths for contributors:
+          # - src/communityProfiles/ (game profiles)
+          # - .gitkeep (folder placeholders)
+          # Allowed file patterns:
+          ALLOWED_PATTERN="^src/communityProfiles/"
+          VIOLATIONS=""
+          HAS_PROFILE_CHANGES=false
 
-          if [ -n "$NON_PROFILE_FILES" ]; then
-            echo "::error::PR contains changes to files outside src/communityProfiles/"
-            echo "::error::Offending files:"
-            echo "$NON_PROFILE_FILES"
+          while IFS= read -r file; do
+            # Skip empty lines
+            [ -z "$file" ] && continue
+
+            # Check if file is in allowed path
+            if echo "$file" | grep -qE "$ALLOWED_PATTERN"; then
+              echo "✓ ALLOWED: $file"
+              HAS_PROFILE_CHANGES=true
+            else
+              echo "✗ BLOCKED: $file"
+              VIOLATIONS="$VIOLATIONS\n  - $file"
+            fi
+          done < /tmp/changed_files.txt
+
+          if [ -n "$VIOLATIONS" ]; then
             echo ""
-            echo "For security reasons, contributors can only modify files in:"
-            echo "  src/communityProfiles/"
+            echo "::error::🚫 SECURITY VIOLATION: PR contains changes to PROTECTED files!"
+            echo "::error::The following files are outside the allowed contribution area:"
+            echo -e "$VIOLATIONS"
             echo ""
-            echo "If you need to change other files, please contact the repository owner."
+            echo "::error::Contributors can ONLY modify files in:"
+            echo "::error::  src/communityProfiles/"
+            echo ""
+            echo "::error::If you need to change other files, please contact the repository owner."
+            exit 1
+          fi
+
+          if [ "$HAS_PROFILE_CHANGES" = false ]; then
+            echo "::error::No profile changes detected. Please add a profile file in src/communityProfiles/"
             exit 1
           fi
 
           echo "✓ All changes are within src/communityProfiles/"
-          echo "changed_files_valid=true" >> $GITHUB_OUTPUT
+          echo "file_check_passed=true" >> $GITHUB_OUTPUT
 
+      # ============================================================
+      # STEP 3: Setup Node.js for type checking
+      # (Only for non-owner contributors with valid file changes)
+      # ============================================================
       - name: Setup Node.js
-        if: steps.changed-files.outputs.changed_files_valid == 'true'
+        if: |
+          steps.owner-check.outputs.is_owner != 'true' &&
+          steps.file-check.outputs.file_check_passed == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: 'npm'
 
       - name: Install dependencies
-        if: steps.changed-files.outputs.changed_files_valid == 'true'
+        if: |
+          steps.owner-check.outputs.is_owner != 'true' &&
+          steps.file-check.outputs.file_check_passed == 'true'
         run: npm ci
 
-      - name: Validate TypeScript types
-        if: steps.changed-files.outputs.changed_files_valid == 'true'
+      # ============================================================
+      # STEP 4: TypeScript type-check — profile must be valid
+      # ============================================================
+      - name: TypeScript type-check
+        if: |
+          steps.owner-check.outputs.is_owner != 'true' &&
+          steps.file-check.outputs.file_check_passed == 'true'
         run: npx tsc --noEmit
 
+      # ============================================================
+      # STEP 5: Validate profile structure
+      # ============================================================
       - name: Validate profile structure
-        if: steps.changed-files.outputs.changed_files_valid == 'true'
+        if: |
+          steps.owner-check.outputs.is_owner != 'true' &&
+          steps.file-check.outputs.file_check_passed == 'true'
         run: |
           echo "=== Validating community profile files ==="
 
-          # Check each .ts file in communityProfiles (except index.ts and _template.ts)
           for file in src/communityProfiles/*.ts; do
             filename=$(basename "$file")
 
@@ -93,48 +160,46 @@ jobs:
               exit 1
             fi
 
-            # Check if profile has required fields
-            if ! grep -q "id:" "$file"; then
-              echo "::error::$file missing required field: id"
-              exit 1
-            fi
+            # Check required fields
+            for field in "id:" "name:" "packageName:" "buttons:"; do
+              if ! grep -q "$field" "$file"; then
+                echo "::error::$file missing required field: $field"
+                exit 1
+              fi
+            done
 
-            if ! grep -q "name:" "$file"; then
-              echo "::error::$file missing required field: name"
-              exit 1
-            fi
-
-            if ! grep -q "packageName:" "$file"; then
-              echo "::error::$file missing required field: packageName"
-              exit 1
-            fi
-
-            if ! grep -q "buttons:" "$file"; then
-              echo "::error::$file missing required field: buttons"
-              exit 1
+            # Check packageName format (should look like com.xxx.xxx)
+            PKG=$(grep -oP "packageName:\s*'[^']+'" "$file" | sed "s/packageName:\s*'//;s/'//")
+            if ! echo "$PKG" | grep -qE '^[a-z][a-z0-9.]*\.[a-z][a-z0-9.]*'; then
+              echo "::warning::$file packageName '$PKG' doesn't look like a valid Android package name"
             fi
 
             echo "  ✓ $filename is valid"
           done
 
           echo ""
-          echo "✓ All community profiles are valid!"
+          echo "✓ All community profiles are structurally valid!"
 
+      # ============================================================
+      # STEP 6: Check for duplicate profile IDs
+      # ============================================================
       - name: Check for duplicate profile IDs
-        if: steps.changed-files.outputs.changed_files_valid == 'true'
+        if: |
+          steps.owner-check.outputs.is_owner != 'true' &&
+          steps.file-check.outputs.file_check_passed == 'true'
         run: |
           echo "=== Checking for duplicate profile IDs ==="
 
           # Extract all profile IDs from community profiles
-          grep -ohP "id:\s*'[^']+'" src/communityProfiles/*.ts | \
-            sed "s/id:\s*'//;s/'//" | sort > /tmp/community_ids.txt
+          grep -ohP "id:\s*'[^']+'" src/communityProfiles/*.ts 2>/dev/null | \
+            sed "s/id:\s*'//;s/'//" | sort > /tmp/community_ids.txt || true
 
           # Extract all profile IDs from official profiles
           grep -ohP "id:\s*'[^']+'" src/gameProfiles.ts | \
             sed "s/id:\s*'//;s/'//" | sort > /tmp/official_ids.txt
 
           # Check for duplicates within community profiles
-          DUPES=$(uniq -d /tmp/community_ids.txt)
+          DUPES=$(uniq -d /tmp/community_ids.txt 2>/dev/null || true)
           if [ -n "$DUPES" ]; then
             echo "::error::Duplicate profile IDs found in community profiles:"
             echo "$DUPES"
@@ -142,7 +207,7 @@ jobs:
           fi
 
           # Check for duplicates with official profiles
-          OVERLAP=$(comm -12 /tmp/community_ids.txt /tmp/official_ids.txt)
+          OVERLAP=$(comm -12 /tmp/community_ids.txt /tmp/official_ids.txt 2>/dev/null || true)
           if [ -n "$OVERLAP" ]; then
             echo "::error::Community profile IDs conflict with official profiles:"
             echo "$OVERLAP"
@@ -152,15 +217,25 @@ jobs:
 
           echo "✓ No duplicate profile IDs found"
 
-      - name: Comment on PR with validation result
+      # ============================================================
+      # STEP 7: Post validation result as PR comment
+      # ============================================================
+      - name: Comment on PR
         if: always()
         uses: actions/github-script@v7
         with:
           script: |
-            const status = '${{ job.status }}';
-            const message = status === 'success'
-              ? '✅ **Profile validation passed!** Your game profile has been validated and is ready for review. The repository owner will review and merge your PR.'
-              : '❌ **Profile validation failed.** Please check the errors above and fix them. Only files in `src/communityProfiles/` can be modified.';
+            const isOwner = '${{ steps.owner-check.outputs.is_owner }}' === 'true';
+            const jobStatus = '${{ job.status }}';
+
+            let message;
+            if (isOwner) {
+              message = '👑 **Owner PR** — Security validation bypassed. Owner can modify any file.';
+            } else if (jobStatus === 'success') {
+              message = '✅ **Profile validation passed!**\n\nYour game profile has been validated:\n- ✓ File is in src/communityProfiles/\n- ✓ TypeScript type-check passed\n- ✓ Profile structure is valid\n- ✓ No duplicate profile IDs\n\nThe repository owner will review and merge your PR.';
+            } else {
+              message = '❌ **Validation FAILED**\n\nPlease fix the errors above:\n- Only files in `src/communityProfiles/` can be modified\n- Profile must follow the TypeScript schema\n- Profile ID must be unique\n\nSee [CONTRIBUTING.md](../blob/main/CONTRIBUTING.md) for instructions.';
+            }
 
             github.rest.issues.createComment({
               issue_number: context.issue.number,

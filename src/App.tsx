@@ -30,13 +30,85 @@ import { useInputInjector } from './hooks/useInputInjector';
 import { useGameDetection } from './hooks/useGameDetection';
 import { Capacitor } from '@capacitor/core';
 
-// Helper: detect landscape orientation so coordinate math stays correct in
-// portrait too. (Issue #15 fix.)
+/**
+ * Detect effective screen size accounting for:
+ * - System UI (status bar, nav bar) via availWidth/availHeight
+ * - Orientation via window.screen.orientation.type
+ * - Safe area insets (notch, cutout) via CSS env() computation
+ *
+ * Returns landscape-normalized dimensions so coordinate math stays
+ * correct regardless of device rotation. Safe-area insets are subtracted
+ * from the available dimensions to ensure touch injection never targets
+ * pixels hidden under notches or system bars.
+ *
+ * Best logical algorithm:
+ *   1. Read availWidth/availHeight (excludes system UI; falls back to
+ *      width/height on browsers that don't support avail*).
+ *   2. Detect orientation via the standard Orientation API, with a
+ *      dimension-comparison fallback for older browsers.
+ *   3. Probe CSS env(safe-area-inset-*) by inserting a hidden element
+ *      and reading its computed style. The browser resolves env() only
+ *      in a layout context, so we MUST mount the probe to the DOM.
+ *   4. Normalize to landscape dimensions (width = larger axis) so game
+ *      profiles always use a consistent coordinate system.
+ *   5. Subtract safe-area insets from the normalized dimensions to get
+ *      the effective drawable area.
+ */
 function getEffectiveScreenSize() {
-  const w = window.screen.width;
-  const h = window.screen.height;
-  if (w >= h) return { screenW: w, screenH: h, isLandscape: true };
-  return { screenW: h, screenH: w, isLandscape: false };
+  // Step 1: Available dimensions (excludes system UI).
+  const availW = window.screen.availWidth || window.screen.width;
+  const availH = window.screen.availHeight || window.screen.height;
+
+  // Step 2: Orientation detection with fallback.
+  const orientationType =
+    (typeof window.screen.orientation !== 'undefined' && window.screen.orientation && window.screen.orientation.type) || '';
+  const isLandscape = orientationType.indexOf('landscape') !== -1 || availW > availH;
+
+  // Step 3: Probe CSS env(safe-area-inset-*) values.
+  let safeLeft = 0;
+  let safeTop = 0;
+  let safeRight = 0;
+  let safeBottom = 0;
+  try {
+    const probe = document.createElement('div');
+    probe.style.position = 'fixed';
+    probe.style.left = 'env(safe-area-inset-left)';
+    probe.style.top = 'env(safe-area-inset-top)';
+    probe.style.right = 'env(safe-area-inset-right)';
+    probe.style.bottom = 'env(safe-area-inset-bottom)';
+    probe.style.visibility = 'hidden';
+    probe.style.pointerEvents = 'none';
+    probe.style.width = '0';
+    probe.style.height = '0';
+    document.body.appendChild(probe);
+    const cs = window.getComputedStyle(probe);
+    safeLeft = parseFloat(cs.left) || 0;
+    safeTop = parseFloat(cs.top) || 0;
+    safeRight = parseFloat(cs.right) || 0;
+    safeBottom = parseFloat(cs.bottom) || 0;
+    document.body.removeChild(probe);
+  } catch (e) {
+    // env() not supported (older browsers, headless test env) — fall back to zero insets.
+    safeLeft = 0;
+    safeTop = 0;
+    safeRight = 0;
+    safeBottom = 0;
+  }
+
+  // Step 4: Normalize to landscape dimensions.
+  const rawW = isLandscape ? Math.max(availW, availH) : Math.min(availW, availH);
+  const rawH = isLandscape ? Math.min(availW, availH) : Math.max(availW, availH);
+
+  // Step 5: Subtract safe-area insets to get the effective drawable area.
+  const effectiveW = Math.max(0, rawW - safeLeft - safeRight);
+  const effectiveH = Math.max(0, rawH - safeTop - safeBottom);
+
+  return {
+    screenW: effectiveW,
+    screenH: effectiveH,
+    isLandscape,
+    safeArea: { left: safeLeft, top: safeTop, right: safeRight, bottom: safeBottom },
+  };
 }
 
 export default function App() {

@@ -153,28 +153,10 @@ jobs:
           echo "Patched build.gradle to use debug signing for release builds"
           grep -A5 "signingConfigs" build.gradle || true
 
-      - name: Verify and repair Gradle wrapper
+      - name: Make gradlew executable
         run: |
           cd android
-          if [ ! -f "./gradlew" ]; then
-            echo "::error::gradlew file not found"
-            exit 1
-          fi
           chmod +x gradlew
-
-          if ! unzip -l gradle/wrapper/gradle-wrapper.jar > /dev/null 2>&1; then
-            echo "::warning::gradle-wrapper.jar is corrupt or invalid - regenerating with Gradle 8.14.3..."
-            GRADLE_VERSION="8.14.3"
-            GRADLE_DIST="gradle-${GRADLE_VERSION}-bin.zip"
-            wget -q "https://services.gradle.org/distributions/${GRADLE_DIST}" -O /tmp/${GRADLE_DIST}
-            unzip -q /tmp/${GRADLE_DIST} -d /tmp/
-            /tmp/gradle-${GRADLE_VERSION}/bin/gradle wrapper --gradle-version ${GRADLE_VERSION} --distribution-type all
-            chmod +x gradlew
-            rm -rf /tmp/${GRADLE_DIST} /tmp/gradle-${GRADLE_VERSION}
-            echo "Gradle wrapper regenerated"
-          else
-            echo "Gradle wrapper OK"
-          fi
           ls -la gradlew gradle/wrapper/gradle-wrapper.jar
 
       - name: Build Debug APK

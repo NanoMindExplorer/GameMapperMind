@@ -1,6 +1,10 @@
 package com.nanomindexplorer.gamemappermind;
 
 interface ITouchService {
+    // Reserved destroy method (Shizuku UserService lifecycle)
+    void destroy() = 16777114;
+
+    // Touch injection methods
     void touchDown(int pointerId, float x, float y);
     void touchMove(int pointerId, float x, float y);
     void touchUp(int pointerId);
@@ -19,4 +23,10 @@ interface ITouchService {
         float microPauseProbability,
         int microPauseMaxMs
     );
+
+    // Evdev capture — runs inside UserService (shell privilege)
+    // Starts a background thread that reads /dev/input/event* via getevent
+    // and emits results to JS via TouchInjectionPlugin.emitGamepadButton/Axis
+    boolean startEvdevCapture();
+    boolean stopEvdevCapture();
 }

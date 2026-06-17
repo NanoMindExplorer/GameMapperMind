@@ -1,7 +1,6 @@
 package com.nanomindexplorer.gamemappermind
 
-import android.app.Service
-import android.content.Intent
+import android.content.Context
 import android.hardware.input.InputManager
 import android.os.IBinder
 import android.os.SystemClock
@@ -9,14 +8,27 @@ import android.util.Log
 import android.util.SparseArray
 import android.view.InputDevice
 import android.view.MotionEvent
+import androidx.annotation.Keep
+import java.io.BufferedReader
+import java.io.InputStreamReader
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.random.Random
 
-// TouchDaemonService runs as a Shizuku UserService (shell-privilege process).
-// In Shizuku API v13.1.5, UserService is NOT a class you extend — you write
-// a regular Android Service and bind to it via Shizuku.bindUserService().
-class TouchDaemonService : Service() {
+// ============================================================
+// TouchDaemonService — runs as a Shizuku UserService
+// (shell-privilege process, UID 2000 or UID 0 for root).
+//
+// Per Shizuku-API documentation:
+//   "The service class must implement IBinder interface.
+//    The usual usage is `public class YourService extends
+//    IYouAidlInterface.Stub`."
+//
+// So this class extends ITouchService.Stub directly — NOT
+// android.app.Service. Shizuku starts the process and binds
+// to the IBinder returned by the Stub.
+// ============================================================
+class TouchDaemonService : ITouchService.Stub {
 
     data class AntiBanConfig(
         var enabled: Boolean = false,
@@ -31,41 +43,37 @@ class TouchDaemonService : Service() {
 
     @Volatile private var antiBan = AntiBanConfig()
 
-    private val touchStub = object : ITouchService.Stub() {
-        override fun touchDown(pointerId: Int, x: Float, y: Float) {
-            this@TouchDaemonService.touchDown(pointerId, x, y)
-        }
-        override fun touchMove(pointerId: Int, x: Float, y: Float) {
-            this@TouchDaemonService.touchMove(pointerId, x, y)
-        }
-        override fun touchUp(pointerId: Int) {
-            this@TouchDaemonService.touchUp(pointerId)
-        }
-        override fun injectTap(x: Float, y: Float) {
-            this@TouchDaemonService.injectTap(x, y)
-        }
-        override fun isAlive(): Boolean = true
-
-        override fun setAntiBanConfig(
-            enabled: Boolean,
-            coordinateJitter: Float,
-            timingJitter: Int,
-            pressureVariance: Float,
-            sizeVariance: Float,
-            strokeDurationJitter: Int,
-            microPauseProbability: Float,
-            microPauseMaxMs: Int
-        ) {
-            antiBan = AntiBanConfig(
-                enabled, coordinateJitter, timingJitter, pressureVariance,
-                sizeVariance, strokeDurationJitter, microPauseProbability, microPauseMaxMs
-            )
-            Log.d("GameMapper", "Anti-ban config updated: enabled=$enabled jitter=${coordinateJitter}px")
-        }
+    // ============================================================
+    // Constructors — Shizuku v13+ tries Context constructor first.
+    // @Keep prevents ProGuard from removing it.
+    // ============================================================
+    constructor() {
+        Log.i("GameMapper", "TouchDaemonService: default constructor")
     }
 
-    override fun onBind(intent: Intent?): IBinder? = touchStub
+    @Keep
+    constructor(context: Context) {
+        Log.i("GameMapper", "TouchDaemonService: constructor with Context: $context")
+    }
 
+    // ============================================================
+    // Reserved destroy method — Shizuku calls this when unbindUserService
+    // is called with remove=true. We MUST System.exit() to kill the
+    // process (Shizuku does NOT kill it automatically).
+    // ============================================================
+    override fun destroy() {
+        Log.i("GameMapper", "TouchDaemonService: destroy")
+        stopEvdevCapture()
+        System.exit(0)
+    }
+
+    override fun isAlive(): Boolean = true
+
+    // ============================================================
+    // InputManager — obtained via reflection (hidden API).
+    // Works in UserService process because non-SDK API restrictions
+    // do not apply there.
+    // ============================================================
     private val inputManager: InputManager? by lazy {
         try {
             InputManager::class.java.getMethod("getInstance").invoke(null) as InputManager
@@ -98,6 +106,9 @@ class TouchDaemonService : Service() {
     private var baseDownTime: Long = 0L
     private val rng = Random(System.currentTimeMillis())
 
+    // ============================================================
+    // Anti-ban helpers
+    // ============================================================
     private fun applyCoordinateJitter(x: Float, y: Float): Pair<Float, Float> {
         if (!antiBan.enabled || antiBan.coordinateJitter <= 0f) return Pair(x, y)
         val angle = rng.nextFloat() * 2f * Math.PI.toFloat()
@@ -131,6 +142,9 @@ class TouchDaemonService : Service() {
         }
     }
 
+    // ============================================================
+    // Touch injection (MotionEvent via InputManager.injectInputEvent)
+    // ============================================================
     private fun injectMotionEvent(action: Int, actionIndex: Int) {
         val downTime = baseDownTime
         val eventTime = SystemClock.uptimeMillis()
@@ -200,7 +214,7 @@ class TouchDaemonService : Service() {
         event.recycle()
     }
 
-    fun touchDown(pointerId: Int, x: Float, y: Float) {
+    override fun touchDown(pointerId: Int, x: Float, y: Float) {
         maybeMicroPause()
         applyTimingJitter()
 
@@ -228,7 +242,7 @@ class TouchDaemonService : Service() {
         }
     }
 
-    fun touchMove(pointerId: Int, x: Float, y: Float) {
+    override fun touchMove(pointerId: Int, x: Float, y: Float) {
         applyTimingJitter()
         val state = pointers.get(pointerId) ?: return
         state.x = x
@@ -242,7 +256,7 @@ class TouchDaemonService : Service() {
         }
     }
 
-    fun touchUp(pointerId: Int) {
+    override fun touchUp(pointerId: Int) {
         applyTimingJitter()
         val state = pointers.get(pointerId) ?: return
 
@@ -262,7 +276,7 @@ class TouchDaemonService : Service() {
         }
     }
 
-    fun injectTap(x: Float, y: Float) {
+    override fun injectTap(x: Float, y: Float) {
         val duration = if (antiBan.enabled) {
             (20 + rng.nextInt(0, antiBan.strokeDurationJitter * 2) - antiBan.strokeDurationJitter)
                 .coerceAtLeast(8).toLong()
@@ -273,5 +287,184 @@ class TouchDaemonService : Service() {
         touchUp(id)
     }
 
-    fun isAlive(): Boolean = true
+    override fun setAntiBanConfig(
+        enabled: Boolean,
+        coordinateJitter: Float,
+        timingJitter: Int,
+        pressureVariance: Float,
+        sizeVariance: Float,
+        strokeDurationJitter: Int,
+        microPauseProbability: Float,
+        microPauseMaxMs: Int
+    ) {
+        antiBan = AntiBanConfig(
+            enabled, coordinateJitter, timingJitter, pressureVariance,
+            sizeVariance, strokeDurationJitter, microPauseProbability, microPauseMaxMs
+        )
+        Log.d("GameMapper", "Anti-ban config updated: enabled=$enabled jitter=${coordinateJitter}px")
+    }
+
+    // ============================================================
+    // Evdev capture — runs in THIS process (shell privilege).
+    // We read /dev/input/event* via `getevent -l` (which requires
+    // shell privilege to access input devices).
+    // Results are forwarded to TouchInjectionPlugin which then
+    // emits them to JS via notifyListeners().
+    // ============================================================
+    @Volatile private var evdevThread: Thread? = null
+    @Volatile private var evdevProcess: Process? = null
+    @Volatile private var evdevListening = false
+
+    override fun startEvdevCapture(): Boolean {
+        if (evdevListening) {
+            Log.d("GameMapper", "Evdev capture already running")
+            return true
+        }
+
+        Log.i("GameMapper", "Starting evdev capture (shell privilege)...")
+        evdevListening = true
+        evdevThread = Thread {
+            try {
+                // getevent -l reads raw input events from /dev/input/event*
+                // Requires shell (UID 2000) or root (UID 0) privilege.
+                // UserService runs with this privilege, so this works.
+                val pb = ProcessBuilder("sh", "-c", "getevent -l")
+                pb.redirectErrorStream(true)
+                evdevProcess = pb.start()
+                val reader = BufferedReader(InputStreamReader(evdevProcess!!.inputStream))
+                var line: String?
+
+                var lStickX = 0f; var lStickY = 0f
+                var rStickX = 0f; var rStickY = 0f
+                var l2Analog = -1f; var r2Analog = -1f
+                var gyroX = 0f; var gyroY = 0f; var gyroZ = 0f
+
+                while (evdevListening && reader.readLine().also { line = it } != null) {
+                    val raw = line ?: continue
+                    try {
+                        if (raw.startsWith("add device")) {
+                            continue
+                        }
+                        if (raw.trim().startsWith("name:")) {
+                            val name = raw.trim().removePrefix("name:").trim().trim('"')
+                            if (name.isNotEmpty()) {
+                                TouchInjectionPlugin.emitGamepadButton("CONTROLLER_ID:$name", 1, 1.0f)
+                            }
+                            continue
+                        }
+
+                        if (raw.contains("EV_ABS")) {
+                            val parts = raw.split(Regex("\\s+")).filter { it.isNotBlank() }
+                            if (parts.size >= 4) {
+                                val axisType = parts[2]
+                                val valueHex = parts[3]
+                                val valueInt = java.lang.Long.parseLong(valueHex, 16).toInt()
+                                val normalized = normalizeAxis(axisType, valueInt)
+
+                                when (axisType) {
+                                    "ABS_X" -> lStickX = normalized
+                                    "ABS_Y" -> lStickY = normalized
+                                    "ABS_Z", "ABS_RX" -> rStickX = normalized
+                                    "ABS_RZ", "ABS_RY" -> rStickY = normalized
+                                    "ABS_BRAKE" -> l2Analog = (normalized + 1f) / 2f
+                                    "ABS_GAS"   -> r2Analog = (normalized + 1f) / 2f
+                                    "ABS_HAT0X", "ABS_HAT0Y" -> {
+                                        val isDown = valueInt != 0
+                                        val btnName = when {
+                                            axisType == "ABS_HAT0X" && valueInt < 0 -> "LEFT"
+                                            axisType == "ABS_HAT0X" && valueInt > 0 -> "RIGHT"
+                                            axisType == "ABS_HAT0Y" && valueInt < 0 -> "UP"
+                                            axisType == "ABS_HAT0Y" && valueInt > 0 -> "DOWN"
+                                            else -> ""
+                                        }
+                                        if (btnName.isNotEmpty()) {
+                                            TouchInjectionPlugin.emitGamepadButton(btnName, if (isDown) 1 else 0, 1.0f)
+                                        }
+                                    }
+                                    "ABS_RX2", "ABS_RY2", "ABS_RZ2" -> {
+                                        when (axisType) {
+                                            "ABS_RX2" -> gyroX = normalized
+                                            "ABS_RY2" -> gyroY = normalized
+                                            "ABS_RZ2" -> gyroZ = normalized
+                                        }
+                                        TouchInjectionPlugin.emitGyroData(gyroX, gyroY, gyroZ, System.currentTimeMillis())
+                                    }
+                                }
+                                TouchInjectionPlugin.emitGamepadAxis(
+                                    floatArrayOf(lStickX, lStickY, rStickX, rStickY, l2Analog, r2Analog)
+                                )
+                            }
+                        } else if (raw.contains("EV_KEY")) {
+                            val parts = raw.split(Regex("\\s+")).filter { it.isNotBlank() }
+                            if (parts.size >= 4) {
+                                val btnRaw = parts[2]
+                                val stateStr = parts[3]
+                                val isDown = if (stateStr == "DOWN") 1 else 0
+                                val btnMap = mapEvdevToButton(btnRaw)
+                                if (btnMap != "UNKNOWN") {
+                                    TouchInjectionPlugin.emitGamepadButton(btnMap, isDown, 1.0f)
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        // ignore parse errors on individual lines
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("GameMapper", "Evdev capture failed", e)
+            } finally {
+                evdevListening = false
+                try { evdevProcess?.destroy() } catch (_: Exception) {}
+            }
+        }.also { it.isDaemon = true }
+        evdevThread?.start()
+        return true
+    }
+
+    override fun stopEvdevCapture(): Boolean {
+        Log.i("GameMapper", "Stopping evdev capture")
+        evdevListening = false
+        try { evdevProcess?.destroy() } catch (_: Exception) {}
+        try { evdevThread?.join(1000) } catch (_: InterruptedException) {}
+        evdevProcess = null
+        evdevThread = null
+        return true
+    }
+
+    // Axis ranges for normalization (auto-expand on first event)
+    private val axisRanges = mutableMapOf<String, IntArray>()
+
+    private fun normalizeAxis(axisName: String, rawValue: Int): Float {
+        var min = 0
+        var max = 255
+        val range = axisRanges[axisName]
+        if (range != null) { min = range[0]; max = range[1] }
+        if (rawValue < min) { min = rawValue; axisRanges[axisName] = intArrayOf(min, max) }
+        if (rawValue > max) { max = rawValue; axisRanges[axisName] = intArrayOf(min, max) }
+        val span = (max - min).coerceAtLeast(1)
+        return ((rawValue - min).toFloat() / span) * 2f - 1f
+    }
+
+    private fun mapEvdevToButton(evdevName: String): String {
+        return when {
+            evdevName.contains("BTN_SOUTH") || evdevName.contains("BTN_A") || evdevName.contains("BTN_GAMEPAD") -> "A"
+            evdevName.contains("BTN_EAST")  || evdevName.contains("BTN_B")  -> "B"
+            evdevName.contains("BTN_NORTH") || evdevName.contains("BTN_X")  -> "X"
+            evdevName.contains("BTN_WEST")  || evdevName.contains("BTN_Y")  -> "Y"
+            evdevName.contains("BTN_TL")    || evdevName.contains("BTN_L1") -> "LB"
+            evdevName.contains("BTN_TR")    || evdevName.contains("BTN_R1") -> "RB"
+            evdevName.contains("BTN_TL2")   || evdevName.contains("BTN_LT") -> "LT"
+            evdevName.contains("BTN_TR2")   || evdevName.contains("BTN_RT") -> "RT"
+            evdevName.contains("BTN_THUMBL") -> "L3"
+            evdevName.contains("BTN_THUMBR") -> "R3"
+            evdevName.contains("BTN_START")  -> "START"
+            evdevName.contains("BTN_SELECT") -> "SELECT"
+            evdevName.contains("BTN_MODE")   -> "MODE"
+            evdevName.contains("BTN_DPAD_UP")    -> "UP"
+            evdevName.contains("BTN_DPAD_DOWN")  -> "DOWN"
+            evdevName.contains("BTN_DPAD_LEFT")  -> "LEFT"
+            evdevName.contains("BTN_DPAD_RIGHT") -> "RIGHT"
+            else -> "UNKNOWN"
+        }
+    }
 }

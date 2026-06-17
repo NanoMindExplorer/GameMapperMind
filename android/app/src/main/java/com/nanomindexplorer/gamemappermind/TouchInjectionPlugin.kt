@@ -17,18 +17,34 @@ import android.content.pm.PackageManager
 class TouchInjectionPlugin : Plugin() {
 
     private var touchService: ITouchService? = null
+
+    // UserServiceArgs — per Shizuku-API documentation, this is the
+    // "Intent" equivalent for UserService. ComponentName points to
+    // the class that extends IYourAidlInterface.Stub (TouchDaemonService).
     private val USER_SERVICE_ARGS = Shizuku.UserServiceArgs(
-        ComponentName("com.nanomindexplorer.gamemappermind", TouchDaemonService::class.java.name)
+        ComponentName("com.nanomindexplorer.gamemappermind", "com.nanomindexplorer.gamemappermind.TouchDaemonService")
     ).daemon(false).processNameSuffix("touch_daemon").version(1)
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(componentName: ComponentName, binder: IBinder) {
-            touchService = ITouchService.Stub.asInterface(binder)
-            Log.d("GameMapper", "Shizuku Touch Service connected")
+            Log.d("GameMapper", "Shizuku UserService connected: ${componentName.className}")
+            if (binder != null && binder.pingBinder()) {
+                touchService = ITouchService.Stub.asInterface(binder)
+                // Start evdev capture inside the UserService (shell privilege)
+                try {
+                    val ok = touchService?.startEvdevCapture() ?: false
+                    Log.d("GameMapper", "Evdev capture started: $ok")
+                } catch (e: Exception) {
+                    Log.e("GameMapper", "Failed to start evdev capture", e)
+                }
+            } else {
+                Log.e("GameMapper", "Invalid binder received for UserService")
+            }
         }
+
         override fun onServiceDisconnected(componentName: ComponentName) {
+            Log.d("GameMapper", "Shizuku UserService disconnected")
             touchService = null
-            Log.d("GameMapper", "Shizuku Touch Service disconnected")
         }
     }
 
@@ -44,7 +60,7 @@ class TouchInjectionPlugin : Plugin() {
                 Shizuku.bindUserService(USER_SERVICE_ARGS, serviceConnection)
                 call.resolve()
             } catch (e: Exception) {
-                Log.e("GameMapper", "Failed to bind Shizuku user service", e)
+                Log.e("GameMapper", "Failed to bind Shizuku UserService", e)
                 call.reject(e.localizedMessage)
             }
         } else {
@@ -55,7 +71,9 @@ class TouchInjectionPlugin : Plugin() {
     @PluginMethod
     fun unbindService(call: PluginCall) {
         try {
+            touchService?.stopEvdevCapture()
             Shizuku.unbindUserService(USER_SERVICE_ARGS, serviceConnection, true)
+            touchService = null
             call.resolve()
         } catch (e: Exception) {
             call.reject(e.localizedMessage)
@@ -70,6 +88,13 @@ class TouchInjectionPlugin : Plugin() {
         } else {
             context.startService(intent)
         }
+        call.resolve()
+    }
+
+    @PluginMethod
+    fun stopGamepadListener(call: PluginCall) {
+        val intent = Intent(context, GamepadListenerService::class.java)
+        context.stopService(intent)
         call.resolve()
     }
 
@@ -92,15 +117,12 @@ class TouchInjectionPlugin : Plugin() {
     }
 
     @PluginMethod
-    fun stopGamepadListener(call: PluginCall) {
-        val intent = Intent(context, GamepadListenerService::class.java)
-        context.stopService(intent)
-        call.resolve()
-    }
-
-    @PluginMethod
     fun checkPermission(call: PluginCall) {
-        val granted = Shizuku.pingBinder() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+        val granted = try {
+            Shizuku.pingBinder() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+        } catch (e: Exception) {
+            false
+        }
         val data = JSObject()
         data.put("granted", granted)
         call.resolve(data)
@@ -112,7 +134,10 @@ class TouchInjectionPlugin : Plugin() {
         val x = call.getFloat("x") ?: 0f
         val y = call.getFloat("y") ?: 0f
         try {
-            touchService?.touchDown(id, x, y)
+            touchService?.touchDown(id, x, y) ?: run {
+                call.reject("Touch service not bound")
+                return
+            }
             call.resolve()
         } catch (e: Exception) {
             call.reject("Injection failed: ${e.message}")
@@ -125,7 +150,10 @@ class TouchInjectionPlugin : Plugin() {
         val x = call.getFloat("x") ?: 0f
         val y = call.getFloat("y") ?: 0f
         try {
-            touchService?.touchMove(id, x, y)
+            touchService?.touchMove(id, x, y) ?: run {
+                call.reject("Touch service not bound")
+                return
+            }
             call.resolve()
         } catch (e: Exception) {
             call.reject("Injection failed: ${e.message}")
@@ -136,7 +164,10 @@ class TouchInjectionPlugin : Plugin() {
     fun touchUp(call: PluginCall) {
         val id = call.getInt("pointerId") ?: 0
         try {
-            touchService?.touchUp(id)
+            touchService?.touchUp(id) ?: run {
+                call.reject("Touch service not bound")
+                return
+            }
             call.resolve()
         } catch (e: Exception) {
             call.reject("Injection failed: ${e.message}")
@@ -148,7 +179,10 @@ class TouchInjectionPlugin : Plugin() {
         val x = call.getFloat("x") ?: 0f
         val y = call.getFloat("y") ?: 0f
         try {
-            touchService?.injectTap(x, y)
+            touchService?.injectTap(x, y) ?: run {
+                call.reject("Touch service not bound")
+                return
+            }
             call.resolve()
         } catch (e: Exception) {
             call.reject("Injection failed: ${e.message}")
@@ -197,7 +231,6 @@ class TouchInjectionPlugin : Plugin() {
     }
 
     companion object {
-        // @JvmField makes `instance` accessible as a plain field from Java code
         @JvmField
         var instance: TouchInjectionPlugin? = null
 
@@ -253,10 +286,6 @@ class TouchInjectionPlugin : Plugin() {
             instance?.notifyListeners("onMacroCapture", data)
         }
 
-        // ============================================================
-        // Public overlay-facing helpers (used by FloatingOverlayService)
-        // — @JvmStatic so Java can call them as TouchInjectionPlugin.injectTouchDown(...)
-        // ============================================================
         @JvmStatic
         fun injectTouchDown(pointerId: Int, x: Float, y: Float) {
             try { instance?.touchService?.touchDown(pointerId, x, y) }

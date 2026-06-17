@@ -553,11 +553,83 @@ class GameMapperUserService : IGameMapperService.Stub {
                 fis = FileInputStream(devicePath)
                 Log.i(TAG, "Opened $devicePath for binary evdev read")
 
-                // Detect struct size based on arch
-                val is64Bit = System.getProperty("os.arch")?.contains("64") == true
-                val structSize = if (is64Bit) INPUT_EVENT_SIZE_64BIT else INPUT_EVENT_SIZE_32BIT
-                val buffer = ByteArray(structSize)
-                val bb = ByteBuffer.wrap(buffer).order(ByteOrder.nativeOrder())
+                // ============================================================
+                // Runtime struct size auto-detection (Step [2] fix)
+                //
+                // Algorithm:
+                //   1. Read 24 bytes (max possible struct size)
+                //   2. Try parsing as 64-bit (24 bytes): skip 16-byte timeval, read type
+                //   3. If type ∉ [0x00..0x1F], try 32-bit (16 bytes): skip 8-byte timeval
+                //   4. Lock onto whichever produces valid evdev type
+                //
+                // Mathematical proof of validity check:
+                //   Linux kernel defines EV_SYN=0, EV_KEY=1, EV_REL=2, EV_ABS=3,
+                //   EV_MSC=4, EV_SW=5, EV_LED=17, EV_SND=18, EV_REP=20, ...
+                //   Maximum defined event type = 0x1F (31).
+                //   Any value > 0x1F means the struct boundary is wrong.
+                //
+                // Complexity: O(1) — single probe read + 2 parse attempts
+                // ============================================================
+
+                val probeBuf = ByteArray(INPUT_EVENT_SIZE_64BIT)
+                val probeRead = readFully(fis, probeBuf, 0, INPUT_EVENT_SIZE_64BIT)
+                if (probeRead < INPUT_EVENT_SIZE_32BIT) {
+                    Log.w(TAG, "Insufficient data for struct probe ($probeRead bytes) on $devicePath, falling back to getevent")
+                    return@Thread
+                }
+
+                var structSize = 0
+                var is64Bit = false
+                var firstType = -1
+                var firstCode = -1
+                var firstValue = 0
+
+                // Try 64-bit (24 bytes): timeval = 16 bytes (2×long=8+8)
+                if (probeRead >= INPUT_EVENT_SIZE_64BIT) {
+                    val bb = ByteBuffer.wrap(probeBuf, 0, INPUT_EVENT_SIZE_64BIT)
+                        .order(ByteOrder.nativeOrder())
+                    bb.long // tv_sec (8 bytes)
+                    bb.long // tv_usec (8 bytes)
+                    val type = bb.short.toInt() and 0xFFFF
+                    val code = bb.short.toInt() and 0xFFFF
+                    val value = bb.int
+                    if (type in 0..0x1F) {
+                        structSize = INPUT_EVENT_SIZE_64BIT
+                        is64Bit = true
+                        firstType = type
+                        firstCode = code
+                        firstValue = value
+                        Log.i(TAG, "Detected 64-bit input_event (24 bytes) on $devicePath: type=0x${type.toString(16)} code=0x${code.toString(16)} value=$value")
+                    }
+                }
+
+                // If 64-bit didn't match, try 32-bit (16 bytes): timeval = 8 bytes (2×int=4+4)
+                if (structSize == 0) {
+                    val bb = ByteBuffer.wrap(probeBuf, 0, INPUT_EVENT_SIZE_32BIT)
+                        .order(ByteOrder.nativeOrder())
+                    bb.int // tv_sec (4 bytes)
+                    bb.int // tv_usec (4 bytes)
+                    val type = bb.short.toInt() and 0xFFFF
+                    val code = bb.short.toInt() and 0xFFFF
+                    val value = bb.int
+                    if (type in 0..0x1F) {
+                        structSize = INPUT_EVENT_SIZE_32BIT
+                        is64Bit = false
+                        firstType = type
+                        firstCode = code
+                        firstValue = value
+                        Log.i(TAG, "Detected 32-bit input_event (16 bytes) on $devicePath: type=0x${type.toString(16)} code=0x${code.toString(16)} value=$value")
+                    }
+                }
+
+                if (structSize == 0) {
+                    Log.w(TAG, "Could not detect struct size on $devicePath (probe type out of range), falling back to getevent")
+                    return@Thread
+                }
+
+                // ============================================================
+                // Process first event (already read during probe)
+                // ============================================================
 
                 // Axis state tracking
                 var lStickX = 0f
@@ -567,8 +639,42 @@ class GameMapperUserService : IGameMapperService.Stub {
                 var l2Analog = -1f
                 var r2Analog = -1f
 
+                val buffer = ByteArray(structSize)
+                val bb = ByteBuffer.wrap(buffer).order(ByteOrder.nativeOrder())
+
+                // Process the first event from probe data
+                processEvdevEvent(firstType, firstCode, firstValue,
+                    { btn, v -> eventCallback?.invoke("BUTTON", btn, v) },
+                    { evCode, normalized, rawValue ->
+                        when (evCode) {
+                            ABS_X -> { lStickX = normalized; emitAxis(lStickX, lStickY, rStickX, rStickY, l2Analog, r2Analog) }
+                            ABS_Y -> { lStickY = normalized; emitAxis(lStickX, lStickY, rStickX, rStickY, l2Analog, r2Analog) }
+                            ABS_Z, ABS_RX -> { rStickX = normalized; emitAxis(lStickX, lStickY, rStickX, rStickY, l2Analog, r2Analog) }
+                            ABS_RZ, ABS_RY -> { rStickY = normalized; emitAxis(lStickX, lStickY, rStickX, rStickY, l2Analog, r2Analog) }
+                            ABS_BRAKE -> { l2Analog = (normalized + 1f) / 2f; emitAxis(lStickX, lStickY, rStickX, rStickY, l2Analog, r2Analog) }
+                            ABS_GAS -> { r2Analog = (normalized + 1f) / 2f; emitAxis(lStickX, lStickY, rStickX, rStickY, l2Analog, r2Analog) }
+                            ABS_HAT0X, ABS_HAT0Y -> {
+                                val btnName = when {
+                                    evCode == ABS_HAT0X && rawValue < 0 -> "LEFT"
+                                    evCode == ABS_HAT0X && rawValue > 0 -> "RIGHT"
+                                    evCode == ABS_HAT0Y && rawValue < 0 -> "UP"
+                                    evCode == ABS_HAT0Y && rawValue > 0 -> "DOWN"
+                                    else -> ""
+                                }
+                                if (btnName.isNotEmpty()) {
+                                    eventCallback?.invoke("BUTTON", btnName, if (rawValue != 0) 1 else 0)
+                                }
+                            }
+                        }
+                    },
+                    axisRanges
+                )
+
+                // ============================================================
+                // Main read loop — uses detected structSize
+                // ============================================================
                 while (evdevListening) {
-                    val bytesRead = fis.read(buffer)
+                    val bytesRead = readFully(fis, buffer, 0, structSize)
                     if (bytesRead < structSize) continue
 
                     bb.rewind()
@@ -586,27 +692,10 @@ class GameMapperUserService : IGameMapperService.Stub {
                     val code = bb.short.toInt() and 0xFFFF
                     val value = bb.int
 
-                    when (type) {
-                        EV_KEY -> {
-                            val btnName = mapEvdevCodeToButton(code)
-                            if (btnName != "UNKNOWN") {
-                                eventCallback?.invoke("BUTTON", btnName, value)
-                            }
-                        }
-
-                        EV_ABS -> {
-                            // Normalize axis value to [-1, 1] using auto-calibrated range
-                            val axisName = "ABS_$code"
-                            var min = 0
-                            var max = 255
-                            val range = axisRanges[axisName]
-                            if (range != null) { min = range[0]; max = range[1] }
-                            if (value < min) { min = value; axisRanges[axisName] = intArrayOf(min, max) }
-                            if (value > max) { max = value; axisRanges[axisName] = intArrayOf(min, max) }
-                            val span = (max - min).coerceAtLeast(1)
-                            val normalized = ((value - min).toFloat() / span) * 2f - 1f
-
-                            when (code) {
+                    processEvdevEvent(type, code, value,
+                        { btn, v -> eventCallback?.invoke("BUTTON", btn, v) },
+                        { evCode, normalized, rawValue ->
+                            when (evCode) {
                                 ABS_X -> { lStickX = normalized; emitAxis(lStickX, lStickY, rStickX, rStickY, l2Analog, r2Analog) }
                                 ABS_Y -> { lStickY = normalized; emitAxis(lStickX, lStickY, rStickX, rStickY, l2Analog, r2Analog) }
                                 ABS_Z, ABS_RX -> { rStickX = normalized; emitAxis(lStickX, lStickY, rStickX, rStickY, l2Analog, r2Analog) }
@@ -615,23 +704,20 @@ class GameMapperUserService : IGameMapperService.Stub {
                                 ABS_GAS -> { r2Analog = (normalized + 1f) / 2f; emitAxis(lStickX, lStickY, rStickX, rStickY, l2Analog, r2Analog) }
                                 ABS_HAT0X, ABS_HAT0Y -> {
                                     val btnName = when {
-                                        code == ABS_HAT0X && value < 0 -> "LEFT"
-                                        code == ABS_HAT0X && value > 0 -> "RIGHT"
-                                        code == ABS_HAT0Y && value < 0 -> "UP"
-                                        code == ABS_HAT0Y && value > 0 -> "DOWN"
+                                        evCode == ABS_HAT0X && rawValue < 0 -> "LEFT"
+                                        evCode == ABS_HAT0X && rawValue > 0 -> "RIGHT"
+                                        evCode == ABS_HAT0Y && rawValue < 0 -> "UP"
+                                        evCode == ABS_HAT0Y && rawValue > 0 -> "DOWN"
                                         else -> ""
                                     }
                                     if (btnName.isNotEmpty()) {
-                                        eventCallback?.invoke("BUTTON", btnName, if (value != 0) 1 else 0)
+                                        eventCallback?.invoke("BUTTON", btnName, if (rawValue != 0) 1 else 0)
                                     }
                                 }
                             }
-                        }
-
-                        EV_SYN -> {
-                            // Sync event — frame complete, no action needed
-                        }
-                    }
+                        },
+                        axisRanges
+                    )
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Binary evdev read failed for $devicePath: ${e.message}")
@@ -754,6 +840,76 @@ class GameMapperUserService : IGameMapperService.Stub {
     private fun emitAxis(lx: Float, ly: Float, rx: Float, ry: Float, l2: Float, r2: Float) {
         val axisStr = "$lx,$ly,$rx,$ry,$l2,$r2"
         eventCallback?.invoke("AXIS", axisStr, 0)
+    }
+
+    /**
+     * Read exactly `len` bytes from FileInputStream into buffer.
+     * Blocks until all bytes are read or EOF.
+     *
+     * FileInputStream.read() may return fewer bytes than requested
+     * even when more data is available. This helper ensures we get
+     * a complete struct every time.
+     *
+     * Complexity: O(n) where n = len
+     * Thread safety: called from dedicated device thread only
+     *
+     * @return Total bytes read, or -1 on EOF
+     */
+    private fun readFully(fis: FileInputStream, buf: ByteArray, off: Int, len: Int): Int {
+        var total = 0
+        while (total < len) {
+            val read = fis.read(buf, off + total, len - total)
+            if (read < 0) return if (total > 0) total else -1
+            total += read
+        }
+        return total
+    }
+
+    /**
+     * Process a single parsed evdev event.
+     *
+     * @param type Evdev event type (EV_KEY=0x01, EV_ABS=0x03, EV_SYN=0x00)
+     * @param code Evdev event code (BTN_SOUTH=0x130, ABS_X=0x00, etc.)
+     * @param value Event value (1=press, 0=release for keys; raw axis value for ABS)
+     * @param onButton Callback for button events: (buttonName, value)
+     * @param onAxis Callback for axis events: (evdevCode, normalizedValue, rawValue)
+     * @param ranges Mutable map for axis auto-calibration
+     */
+    private fun processEvdevEvent(
+        type: Int,
+        code: Int,
+        value: Int,
+        onButton: (String, Int) -> Unit,
+        onAxis: (Int, Float, Int) -> Unit,
+        ranges: MutableMap<String, IntArray>
+    ) {
+        when (type) {
+            EV_KEY -> {
+                val btnName = mapEvdevCodeToButton(code)
+                if (btnName != "UNKNOWN") {
+                    onButton(btnName, value)
+                }
+            }
+
+            EV_ABS -> {
+                // Normalize axis value to [-1, 1] using auto-calibrated range
+                // Formula: normalized = ((value - min) / (max - min)) * 2 - 1
+                val axisName = "ABS_$code"
+                var min = 0
+                var max = 255
+                val range = ranges[axisName]
+                if (range != null) { min = range[0]; max = range[1] }
+                if (value < min) { min = value; ranges[axisName] = intArrayOf(min, max) }
+                if (value > max) { max = value; ranges[axisName] = intArrayOf(min, max) }
+                val span = (max - min).coerceAtLeast(1)
+                val normalized = ((value - min).toFloat() / span) * 2f - 1f
+                onAxis(code, normalized, value)
+            }
+
+            EV_SYN -> {
+                // Sync event — frame complete, no action needed
+            }
+        }
     }
 
     override fun stopGamepadRead(): Boolean {

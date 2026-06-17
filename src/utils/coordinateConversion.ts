@@ -78,9 +78,11 @@ export function getEffectiveScreenRect(): ScreenRect {
     safeBottom = 0;
   }
 
-  // Step 4: Normalize to landscape dimensions.
-  const rawW = isLandscape ? Math.max(availW, availH) : Math.min(availW, availH);
-  const rawH = isLandscape ? Math.min(availW, availH) : Math.max(availW, availH);
+  // Step 4: Always normalize to landscape dimensions (width = larger axis).
+  // Game profiles always use landscape coordinate system regardless of device
+  // orientation, so we swap dimensions when in portrait mode.
+  const rawW = Math.max(availW, availH);
+  const rawH = Math.min(availW, availH);
 
   // Step 5: Apply safe-area insets — shrink drawable area and offset origin.
   const width = Math.max(0, rawW - safeLeft - safeRight);

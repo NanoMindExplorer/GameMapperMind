@@ -96,8 +96,8 @@ function getEffectiveScreenSize() {
   }
 
   // Step 4: Normalize to landscape dimensions.
-  const rawW = isLandscape ? Math.max(availW, availH) : Math.min(availW, availH);
-  const rawH = isLandscape ? Math.min(availW, availH) : Math.max(availW, availH);
+  const rawW = Math.max(availW, availH);
+  const rawH = Math.min(availW, availH);
 
   // Step 5: Subtract safe-area insets to get the effective drawable area.
   const effectiveW = Math.max(0, rawW - safeLeft - safeRight);

@@ -72,12 +72,27 @@ export const useShizuku = () => {
   const checkShizukuStatus = async (currentState: ShizukuState): Promise<ShizukuState> => {
     if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
       try {
-        const { granted } = await TouchInjection.checkPermission();
-        return {
-          ...currentState,
-          daemonRunning: granted,
-          status: granted ? 'CONNECTED_SHIZUKU' : 'DISCONNECTED'
-        };
+        const result = await TouchInjection.checkPermission();
+        if (result.granted) {
+          return {
+            ...currentState,
+            daemonRunning: true,
+            status: 'CONNECTED_SHIZUKU'
+          };
+        } else if (result.binderAlive === false) {
+          return {
+            ...currentState,
+            daemonRunning: false,
+            status: 'DISCONNECTED'
+          };
+        } else {
+          // Binder alive but permission not granted
+          return {
+            ...currentState,
+            daemonRunning: false,
+            status: 'DISCONNECTED'
+          };
+        }
       } catch (err) {
         console.error("Native check error", err);
       }
@@ -104,9 +119,19 @@ export const useShizuku = () => {
 
   const requestShizukuPermission = async (): Promise<{ success: boolean; error?: string }> => {
     try {
-        const { granted } = await TouchInjection.checkPermission();
-        if (granted) return { success: true };
-        return { success: false, error: "Permission denied" };
+        // First check if already granted
+        const checkResult = await TouchInjection.checkPermission();
+        if (checkResult.granted) return { success: true };
+
+        // If binder not alive, Shizuku app is not running
+        if (checkResult.binderAlive === false) {
+            return { success: false, error: "Shizuku app is not running. Please open Shizuku and start the service." };
+        }
+
+        // Actually request permission — this shows the Shizuku dialog
+        const result = await TouchInjection.requestPermission();
+        if (result.granted) return { success: true };
+        return { success: false, error: result.message || "Permission not granted. Please approve in Shizuku dialog." };
     } catch (e: any) {
         return { success: false, error: e.message };
     }

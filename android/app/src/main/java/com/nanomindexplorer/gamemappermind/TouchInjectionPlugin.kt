@@ -3,6 +3,7 @@ package com.nanomindexplorer.gamemappermind
 import android.content.ComponentName
 import android.content.Intent
 import android.content.ServiceConnection
+import android.content.pm.PackageManager
 import android.os.IBinder
 import android.util.Log
 import com.getcapacitor.JSObject
@@ -11,16 +12,13 @@ import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
 import rikka.shizuku.Shizuku
-import android.content.pm.PackageManager
 
 @CapacitorPlugin(name = "TouchInjection")
 class TouchInjectionPlugin : Plugin() {
 
     private var touchService: ITouchService? = null
+    private val REQUEST_CODE_SHIZUKU = 1001
 
-    // UserServiceArgs — per Shizuku-API documentation, this is the
-    // "Intent" equivalent for UserService. ComponentName points to
-    // the class that extends IYourAidlInterface.Stub (TouchDaemonService).
     private val USER_SERVICE_ARGS = Shizuku.UserServiceArgs(
         ComponentName("com.nanomindexplorer.gamemappermind", "com.nanomindexplorer.gamemappermind.TouchDaemonService")
     ).daemon(false).processNameSuffix("touch_daemon").version(1)
@@ -30,13 +28,16 @@ class TouchInjectionPlugin : Plugin() {
             Log.d("GameMapper", "Shizuku UserService connected: ${componentName.className}")
             if (binder != null && binder.pingBinder()) {
                 touchService = ITouchService.Stub.asInterface(binder)
-                // Start evdev capture inside the UserService (shell privilege)
                 try {
                     val ok = touchService?.startEvdevCapture() ?: false
                     Log.d("GameMapper", "Evdev capture started: $ok")
                 } catch (e: Exception) {
                     Log.e("GameMapper", "Failed to start evdev capture", e)
                 }
+                // Notify JS that service is connected
+                val data = JSObject()
+                data.put("connected", true)
+                notifyListeners("onShizukuServiceConnected", data)
             } else {
                 Log.e("GameMapper", "Invalid binder received for UserService")
             }
@@ -45,26 +46,163 @@ class TouchInjectionPlugin : Plugin() {
         override fun onServiceDisconnected(componentName: ComponentName) {
             Log.d("GameMapper", "Shizuku UserService disconnected")
             touchService = null
+            val data = JSObject()
+            data.put("connected", false)
+            notifyListeners("onShizukuServiceDisconnected", data)
         }
+    }
+
+    // ============================================================
+    // Shizuku binder lifecycle listeners
+    // ============================================================
+    private val binderReceivedListener = Shizuku.OnBinderReceivedListener {
+        Log.d("GameMapper", "Shizuku binder received")
+        val data = JSObject()
+        data.put("binderAlive", true)
+        notifyListeners("onShizukuBinderReceived", data)
+    }
+
+    private val binderDeadListener = Shizuku.OnBinderDeadListener {
+        Log.d("GameMapper", "Shizuku binder dead")
+        val data = JSObject()
+        data.put("binderAlive", false)
+        notifyListeners("onShizukuBinderDead", data)
+    }
+
+    // ============================================================
+    // Permission result listener
+    // ============================================================
+    private val requestPermissionResultListener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
+        Log.d("GameMapper", "Shizuku permission result: requestCode=$requestCode grantResult=$grantResult")
+        val granted = grantResult == PackageManager.PERMISSION_GRANTED
+        val data = JSObject()
+        data.put("granted", granted)
+        data.put("requestCode", requestCode)
+        notifyListeners("onShizukuPermissionResult", data)
     }
 
     override fun load() {
         super.load()
         instance = this
+
+        // Register Shizuku listeners
+        try {
+            Shizuku.addBinderReceivedListenerSticky(binderReceivedListener)
+            Shizuku.addBinderDeadListener(binderDeadListener)
+            Shizuku.addRequestPermissionResultListener(requestPermissionResultListener)
+            Log.d("GameMapper", "Shizuku listeners registered")
+        } catch (e: Exception) {
+            Log.e("GameMapper", "Failed to register Shizuku listeners", e)
+        }
+    }
+
+    override fun handleOnDestroy() {
+        super.handleOnDestroy()
+        try {
+            Shizuku.removeBinderReceivedListener(binderReceivedListener)
+            Shizuku.removeBinderDeadListener(binderDeadListener)
+            Shizuku.removeRequestPermissionResultListener(requestPermissionResultListener)
+        } catch (e: Exception) {
+            Log.e("GameMapper", "Failed to remove Shizuku listeners", e)
+        }
+    }
+
+    // ============================================================
+    // checkPermission — checks if Shizuku is running AND permission is granted
+    // ============================================================
+    @PluginMethod
+    fun checkPermission(call: PluginCall) {
+        val data = JSObject()
+        try {
+            val binderAlive = Shizuku.pingBinder()
+            data.put("binderAlive", binderAlive)
+
+            if (!binderAlive) {
+                data.put("granted", false)
+                data.put("reason", "Shizuku binder not alive — Shizuku app may not be running")
+                call.resolve(data)
+                return
+            }
+
+            if (Shizuku.isPreV11()) {
+                data.put("granted", false)
+                data.put("reason", "Shizuku version too old (pre-v11). Please update Shizuku.")
+                call.resolve(data)
+                return
+            }
+
+            val granted = Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+            data.put("granted", granted)
+            if (!granted) {
+                data.put("reason", "Permission not granted. Call requestPermission().")
+            }
+            call.resolve(data)
+        } catch (e: Exception) {
+            Log.e("GameMapper", "checkPermission error", e)
+            data.put("granted", false)
+            data.put("reason", "Error: ${e.message}")
+            call.resolve(data)
+        }
+    }
+
+    // ============================================================
+    // requestPermission — shows Shizuku permission dialog to user
+    // ============================================================
+    @PluginMethod
+    fun requestPermission(call: PluginCall) {
+        try {
+            // Check if binder is alive first
+            if (!Shizuku.pingBinder()) {
+                call.reject("Shizuku is not running. Please start Shizuku app first.")
+                return
+            }
+
+            // Check if already granted
+            if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
+                val data = JSObject()
+                data.put("granted", true)
+                data.put("message", "Permission already granted")
+                call.resolve(data)
+                return
+            }
+
+            // Check if we should show rationale
+            if (Shizuku.shouldShowRequestPermissionRationale()) {
+                call.reject("User denied permission previously. Please grant manually in Shizuku app.")
+                return
+            }
+
+            // Request permission — this shows the system dialog
+            Shizuku.requestPermission(REQUEST_CODE_SHIZUKU)
+
+            val data = JSObject()
+            data.put("granted", false)
+            data.put("message", "Permission request sent. Check Shizuku dialog.")
+            call.resolve(data)
+        } catch (e: Exception) {
+            Log.e("GameMapper", "requestPermission error", e)
+            call.reject("Failed to request permission: ${e.message}")
+        }
     }
 
     @PluginMethod
     fun bindService(call: PluginCall) {
-        if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
-            try {
-                Shizuku.bindUserService(USER_SERVICE_ARGS, serviceConnection)
-                call.resolve()
-            } catch (e: Exception) {
-                Log.e("GameMapper", "Failed to bind Shizuku UserService", e)
-                call.reject(e.localizedMessage)
+        try {
+            if (!Shizuku.pingBinder()) {
+                call.reject("Shizuku binder not alive")
+                return
             }
-        } else {
-            call.reject("Shizuku permission not granted")
+
+            if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
+                call.reject("Shizuku permission not granted. Call requestPermission first.")
+                return
+            }
+
+            Shizuku.bindUserService(USER_SERVICE_ARGS, serviceConnection)
+            call.resolve()
+        } catch (e: Exception) {
+            Log.e("GameMapper", "Failed to bind Shizuku UserService", e)
+            call.reject(e.localizedMessage)
         }
     }
 
@@ -114,18 +252,6 @@ class TouchInjectionPlugin : Plugin() {
         val intent = Intent(context, FloatingOverlayService::class.java)
         context.stopService(intent)
         call.resolve()
-    }
-
-    @PluginMethod
-    fun checkPermission(call: PluginCall) {
-        val granted = try {
-            Shizuku.pingBinder() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
-        } catch (e: Exception) {
-            false
-        }
-        val data = JSObject()
-        data.put("granted", granted)
-        call.resolve(data)
     }
 
     @PluginMethod

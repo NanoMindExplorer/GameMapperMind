@@ -24,6 +24,8 @@ import androidx.core.app.NotificationCompat;
 import androidx.webkit.WebViewAssetLoader;
 import org.json.JSONObject;
 import com.nanomindexplorer.gamemappermind.plugin.GameMapperPlugin;
+import com.nanomindexplorer.gamemappermind.shizuku.IGameMapperService;
+import com.nanomindexplorer.gamemappermind.shizuku.ShizukuHelper;
 
 import java.util.Arrays;
 import java.util.HashSet;
@@ -436,23 +438,48 @@ public class FloatingOverlayService extends Service {
             }
 
             // Step 9: Dispatch to plugin.
+            // FIX #13: Previously emitted "OVERLAY_DOWN" etc. which no JS listener
+            // handles. Now routes directly to UserService injection via AIDL,
+            // matching the pattern used by useShizuku.injectInput().
             try {
-                switch (action) {
-                    case "down":
-                        GameMapperPlugin.emitGamepadButton("OVERLAY_DOWN", 1, 1.0f);
-                        break;
-                    case "move":
-                        GameMapperPlugin.emitGamepadButton("OVERLAY_MOVE", 1, 1.0f);
-                        break;
-                    case "up":
-                        GameMapperPlugin.emitGamepadButton("OVERLAY_UP", 0, 1.0f);
-                        break;
-                    case "tap":
-                        GameMapperPlugin.emitGamepadButton("OVERLAY_TAP", 1, 1.0f);
-                        break;
-                    default:
-                        // Unreachable due to whitelist check above, but defensive.
-                        Log.w(TAG, "onCommand: unreachable action: " + action);
+                IGameMapperService service = GameMapperPlugin.instance != null
+                    ? getGameMapperService() : null;
+                if (service != null) {
+                    switch (action) {
+                        case "down":
+                            service.injectTap((float) x, (float) y, 0);
+                            break;
+                        case "move":
+                            service.injectSwipe((float) x, (float) y, (float) x, (float) y, 1L, 0);
+                            break;
+                        case "up":
+                            service.injectTouchUp(99, 0);
+                            break;
+                        case "tap":
+                            service.injectTap((float) x, (float) y, 0);
+                            break;
+                        default:
+                            Log.w(TAG, "onCommand: unreachable action: " + action);
+                    }
+                } else {
+                    // Fallback: emit button event for JS-side handling
+                    // (used when Shizuku is not connected — dev/browser mode)
+                    switch (action) {
+                        case "down":
+                            GameMapperPlugin.emitGamepadButton("OVERLAY_DOWN", 1, 1.0f);
+                            break;
+                        case "move":
+                            GameMapperPlugin.emitGamepadButton("OVERLAY_MOVE", 1, 1.0f);
+                            break;
+                        case "up":
+                            GameMapperPlugin.emitGamepadButton("OVERLAY_UP", 0, 1.0f);
+                            break;
+                        case "tap":
+                            GameMapperPlugin.emitGamepadButton("OVERLAY_TAP", 1, 1.0f);
+                            break;
+                        default:
+                            Log.w(TAG, "onCommand: unreachable action: " + action);
+                    }
                 }
             } catch (Exception e) {
                 Log.e(TAG, "onCommand: dispatch failed for action=" + action, e);
@@ -495,6 +522,23 @@ public class FloatingOverlayService extends Service {
                 Log.e(TAG, "webView.destroy() failed", e);
             }
             webView = null;
+        }
+    }
+
+    /**
+     * Get the IGameMapperService binder from ShizukuHelper.
+     * FIX #13: Used by onCommand() to route overlay button presses
+     * directly to UserService injection (bypassing JS layer).
+     *
+     * @return IGameMapperService or null if not available
+     */
+    private IGameMapperService getGameMapperService() {
+        try {
+            ShizukuHelper helper = ShizukuHelper.getInstance(this);
+            return helper.getService();
+        } catch (Exception e) {
+            Log.w(TAG, "getGameMapperService: " + e.getMessage());
+            return null;
         }
     }
 }

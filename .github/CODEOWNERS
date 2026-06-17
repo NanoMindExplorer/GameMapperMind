@@ -1,0 +1,36 @@
+# CODEOWNERS — Protect critical files
+# ============================================================
+# This file ensures that the repository owner must approve
+# any changes to critical files. Contributors can freely
+# modify files in src/communityProfiles/ without approval,
+# but ALL other files require owner review.
+#
+# Syntax:
+#   <pattern>  @username
+#
+# The LAST matching pattern wins.
+# ============================================================
+
+# === Default: Owner must review ALL changes ===
+*                           @NanoMindExplorer
+
+# === Exception: Community profiles are open for PR ===
+# Contributors can modify these without owner approval
+/src/communityProfiles/     @NanoMindExplorer
+
+# === Critical files — STRICT owner-only review ===
+# These files control app security, build, and core logic
+/.github/                   @NanoMindExplorer
+/android/                   @NanoMindExplorer
+/src/App.tsx                @NanoMindExplorer
+/src/types.ts               @NanoMindExplorer
+/src/defaults.ts            @NanoMindExplorer
+/src/gameProfiles.ts        @NanoMindExplorer
+/src/hooks/                 @NanoMindExplorer
+/src/plugins/               @NanoMindExplorer
+/src/components/            @NanoMindExplorer
+/capacitor.config.ts        @NanoMindExplorer
+/vite.config.ts             @NanoMindExplorer
+/tsconfig.json              @NanoMindExplorer
+/package.json               @NanoMindExplorer
+/package-lock.json          @NanoMindExplorer

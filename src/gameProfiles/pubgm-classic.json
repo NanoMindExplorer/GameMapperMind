@@ -1,0 +1,87 @@
+{
+  "schemaVersion": "1.0.0",
+  "profileId": "pubgm-classic",
+  "gameName": "PUBG Mobile — Classic Layout",
+  "packageName": "com.tencent.ig",
+  "screenSize": { "width": 2800, "height": 1840 },
+  "orientation": "landscape",
+  "deadzone":   { "leftStick": 0.10, "rightStick": 0.10 },
+  "sensitivity":{ "leftStick": 1.0,  "rightStick": 1.2 },
+  "mappings": [
+    {
+      "id": 0,
+      "buttonCode": 304,
+      "buttonName": "A",
+      "action": "tap",
+      "xPercent": 0.92,
+      "yPercent": 0.78,
+      "durationMs": 80,
+      "pressure": 1.0,
+      "antiBan": { "jitterPx": 1.0, "timingJitterMs": 4.0, "pressureVar": 0.05 }
+    },
+    {
+      "id": 1,
+      "buttonCode": 305,
+      "buttonName": "B",
+      "action": "tap",
+      "xPercent": 0.86,
+      "yPercent": 0.84,
+      "durationMs": 80,
+      "pressure": 1.0
+    },
+    {
+      "id": 2,
+      "buttonCode": 308,
+      "buttonName": "X (Reload)",
+      "action": "tap",
+      "xPercent": 0.08,
+      "yPercent": 0.30,
+      "durationMs": 80
+    },
+    {
+      "id": 3,
+      "buttonCode": 310,
+      "buttonName": "LB (Aim)",
+      "action": "hold",
+      "xPercent": 0.50,
+      "yPercent": 0.50,
+      "durationMs": 5000,
+      "pressure": 1.0
+    },
+    {
+      "id": 4,
+      "buttonCode": 311,
+      "buttonName": "RB (Fire)",
+      "action": "tap",
+      "xPercent": 0.50,
+      "yPercent": 0.50,
+      "durationMs": 60,
+      "pressure": 1.0
+    },
+    {
+      "id": 5,
+      "buttonCode": 317,
+      "buttonName": "R3 (Fire)",
+      "action": "tap",
+      "xPercent": 0.50,
+      "yPercent": 0.50,
+      "durationMs": 60
+    }
+  ],
+  "swipeTriggers": [
+    {
+      "buttonCode": 314,
+      "direction": "left",
+      "durationMs": 120,
+      "span": 0.33
+    }
+  ],
+  "metadata": {
+    "author": "GameMapperMind Team",
+    "version": "1.0.0",
+    "createdAt": "2026-06-01T08:00:00Z",
+    "updatedAt": "2026-06-17T10:00:00Z",
+    "notes": "Optimized for Huawei MatePad Pro 12.2\" at 2800x1840 landscape.",
+    "tags": ["fps", "shooter", "pubgm", "landscape"]
+  }
+}

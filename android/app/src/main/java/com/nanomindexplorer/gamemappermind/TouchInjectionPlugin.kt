@@ -79,6 +79,17 @@ class TouchInjectionPlugin : Plugin() {
         data.put("granted", granted)
         data.put("requestCode", requestCode)
         notifyListeners("onShizukuPermissionResult", data)
+
+        // Auto-bind UserService immediately after permission is granted
+        if (granted) {
+            Log.d("GameMapper", "Permission granted — auto-binding UserService...")
+            try {
+                Shizuku.bindUserService(USER_SERVICE_ARGS, serviceConnection)
+                Log.d("GameMapper", "UserService bind initiated after permission grant")
+            } catch (e: Exception) {
+                Log.e("GameMapper", "Auto-bind after permission failed", e)
+            }
+        }
     }
 
     override fun load() {
@@ -159,21 +170,28 @@ class TouchInjectionPlugin : Plugin() {
 
             // Check if already granted
             if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
+                // Auto-bind service if permission already granted
+                try {
+                    Shizuku.bindUserService(USER_SERVICE_ARGS, serviceConnection)
+                } catch (e: Exception) {
+                    Log.e("GameMapper", "Auto-bind failed", e)
+                }
                 val data = JSObject()
                 data.put("granted", true)
-                data.put("message", "Permission already granted")
+                data.put("message", "Permission already granted, service binding")
                 call.resolve(data)
                 return
             }
 
-            // Check if we should show rationale
-            if (Shizuku.shouldShowRequestPermissionRationale()) {
-                call.reject("User denied permission previously. Please grant manually in Shizuku app.")
-                return
+            // Request permission — MUST run on UI thread for dialog to show
+            activity.runOnUiThread {
+                try {
+                    Shizuku.requestPermission(REQUEST_CODE_SHIZUKU)
+                    Log.d("GameMapper", "Shizuku.requestPermission() called on UI thread")
+                } catch (e: Exception) {
+                    Log.e("GameMapper", "requestPermission on UI thread failed", e)
+                }
             }
-
-            // Request permission — this shows the system dialog
-            Shizuku.requestPermission(REQUEST_CODE_SHIZUKU)
 
             val data = JSObject()
             data.put("granted", false)

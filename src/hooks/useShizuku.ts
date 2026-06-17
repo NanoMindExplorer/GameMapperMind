@@ -121,7 +121,16 @@ export const useShizuku = () => {
     try {
         // First check if already granted
         const checkResult = await TouchInjection.checkPermission();
-        if (checkResult.granted) return { success: true };
+        if (checkResult.granted) {
+          // Permission already granted — auto-bind service
+          try {
+            await TouchInjection.bindService();
+            await TouchInjection.startGamepadListener();
+          } catch (e) {
+            console.warn('Auto-bind after existing permission failed', e);
+          }
+          return { success: true };
+        }
 
         // If binder not alive, Shizuku app is not running
         if (checkResult.binderAlive === false) {
@@ -130,8 +139,22 @@ export const useShizuku = () => {
 
         // Actually request permission — this shows the Shizuku dialog
         const result = await TouchInjection.requestPermission();
-        if (result.granted) return { success: true };
-        return { success: false, error: result.message || "Permission not granted. Please approve in Shizuku dialog." };
+
+        // Wait a moment for the permission result listener to fire
+        // and auto-bind the service (handled in TouchInjectionPlugin)
+        if (result.granted) {
+          try {
+            await TouchInjection.bindService();
+            await TouchInjection.startGamepadListener();
+          } catch (e) {
+            console.warn('Auto-bind after new permission failed', e);
+          }
+          return { success: true };
+        }
+
+        // Permission not immediately granted — user needs to approve dialog
+        // The onShizukuPermissionResult listener will handle auto-bind
+        return { success: false, error: result.message || "Waiting for Shizuku dialog approval..." };
     } catch (e: any) {
         return { success: false, error: e.message };
     }

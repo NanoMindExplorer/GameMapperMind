@@ -291,7 +291,11 @@ export default function App() {
   // Query real simulation logs and stats from server, override with Native plugin state if on device
   const fetchStatus = async () => {
     try {
-      // Just re-check native dependencies directly
+      // Don't downgrade from CONNECTED to DISCONNECTED during polling
+      // Only upgrade from DISCONNECTED to CONNECTED
+      if (shizukuStateRef.current.status === 'CONNECTED_SHIZUKU') {
+        return; // Already connected, don't re-check (prevents flapping)
+      }
       const nextState = await checkShizukuStatus(shizukuStateRef.current);
       setShizukuState(nextState);
     } catch (err) {
@@ -318,7 +322,8 @@ export default function App() {
   // Gamepad API (useGamepad below) still handles visual feedback + fallback
   // for dev mode in the browser.
   const isShizukuConnected = shizukuState.status === 'CONNECTED_SHIZUKU';
-  useGamepadLoop(activeProfile, isShizukuConnected);
+  // Activate gamepad loop when Shizuku is connected OR always (Web Gamepad API fallback)
+  useGamepadLoop(activeProfile, true); // Always active — Shizuku path + Web Gamepad API both work
 
   // ============================================================
   // Auto-start game detection — listens to foreground app changes

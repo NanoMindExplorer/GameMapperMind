@@ -206,12 +206,41 @@ export default function ShizukuPanel({ shizukuState, setShizukuState, onLogMessa
     onLogMessage("Invoking Shizuku.requestPermission() via android.os.Binder IPC");
     const result = await nativeRequestPerm();
     if (result && !result.success) {
-      onLogMessage(`[sh ERROR] Gagal meminta izin: ${result.error}`);
+      onLogMessage(`[sh] ${result.error || 'Menunggu approval dialog Shizuku...'}`);
     } else {
-      onLogMessage(`[sh] Permintaan Izin berhasil dikirim ke Shizuku.`);
+      onLogMessage(`[sh] ✅ Izin diberikan! Menghubungkan daemon otomatis...`);
+      // Auto-start daemon after permission granted
+      try {
+        await startDaemon();
+        onLogMessage(`[sh] ✅ Daemon berhasil di-boot! Touch injection aktif.`);
+        setShizukuState(prev => ({ ...prev, status: 'CONNECTED_SHIZUKU', daemonRunning: true }));
+      } catch (e: any) {
+        onLogMessage(`[sh ERROR] Gagal start daemon: ${e.message}`);
+      }
     }
     setIsLoading(false);
   };
+
+  // Listen for async permission result (when user approves Shizuku dialog)
+  React.useEffect(() => {
+    let listener: any;
+    import('../plugins/TouchInjection').then(({ default: TouchInjection }) => {
+      TouchInjection.addListener('onShizukuPermissionResult', (data: any) => {
+        if (data.granted) {
+          onLogMessage('[sh] ✅ Shizuku permission granted via dialog! Auto-starting daemon...');
+          startDaemon().then(() => {
+            onLogMessage('[sh] ✅ Daemon auto-started after permission grant!');
+            setShizukuState(prev => ({ ...prev, status: 'CONNECTED_SHIZUKU', daemonRunning: true }));
+          }).catch((e: any) => {
+            onLogMessage(`[sh ERROR] Auto-start failed: ${e.message}`);
+          });
+        } else {
+          onLogMessage('[sh] ❌ Shizuku permission denied by user.');
+        }
+      }).then((l: any) => { listener = l; });
+    });
+    return () => { listener?.remove(); };
+  }, []);
 
   // Sync component permission status with global state
   React.useEffect(() => {

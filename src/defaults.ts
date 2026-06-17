@@ -18,19 +18,7 @@ export const DEFAULT_ANTI_BAN: AntiBanConfig = {
 // ============================================================
 // Default gyro mapping — camera control via right-stick zone
 // ============================================================
-export const DEFAULT_GYRO_MAPPING: GyroMapping = {
-  enabled: false,
-  mode: 'camera',
-  sensitivityX: 800,   // rad/s → px/s multiplier
-  sensitivityY: 600,
-  invertX: false,
-  invertY: false,
-  deadzone: 0.05,       // ~3 deg/s
-  smoothing: 0.3,
-  targetX: 1530,        // matches rightJoystick default
-  targetY: 540,
-  targetRadius: 150,
-};
+export { DEFAULT_GYRO_MAPPING } from './constants';
 
 // Helper to build standard button list for a profile.
 function standardGenshinButtons() {

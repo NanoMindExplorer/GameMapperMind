@@ -20,7 +20,7 @@
 // ============================================================
 
 import { GamepadProfile } from '../types';
-import { DEFAULT_ANTI_BAN, DEFAULT_GYRO_MAPPING } from '../defaults';
+import { DEFAULT_ANTI_BAN, DEFAULT_GYRO_MAPPING } from '../constants';
 
 // Import all community profiles (add your import here)
 // Example: import { MY_GAME } from './myGame';

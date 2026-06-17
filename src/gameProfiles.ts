@@ -3,7 +3,7 @@
 // Resolusi landscape: 2800 x 1840 (3:2 aspect ratio)
 
 import { GamepadProfile } from './types';
-import { DEFAULT_ANTI_BAN, DEFAULT_GYRO_MAPPING } from './defaults';
+import { DEFAULT_ANTI_BAN, DEFAULT_GYRO_MAPPING } from './constants';
 
 const SCREEN_W = 2800;
 const SCREEN_H = 1840;

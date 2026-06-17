@@ -134,22 +134,38 @@ const MOBILE_LEGENDS = buildProfile('mlbb', 'Mobile Legends', 'com.mobile.legend
     { id: 'buff', label: 'Buff', hwKey: 'DOWN', x: 5, y: 55, mappedKey: 'DPAD_DOWN', code: 107 },
   ], { x: 14, y: 78, radius: 170 }, { x: 82, y: 30, radius: 120 }, false);
 
-const EFOOTBALL = buildProfile('efootball', 'eFootball 2024', 'com.konami.pesam',
-  'Konami eFootball — soccer simulator (tablet 12.2")',
+const EFOOTBALL = buildProfile('efootball', 'eFootball 2026', 'com.konami.pesam',
+  'eFootball 2026 — updated soccer layout with Dash/Through/Shoot/Pass (tablet 12.2")',
   [
+    // Left stick — movement
     { id: 'l_stick', label: 'Move', hwKey: 'L_STICK', x: 14, y: 80, width: 140, height: 140, type: 'analog_stick', mappedKey: 'L_STICK', opacity: 0.5 },
+    // Right stick — skill moves
     { id: 'r_stick', label: 'Skill', hwKey: 'R_STICK', x: 82, y: 80, width: 120, height: 120, type: 'analog_stick', mappedKey: 'R_STICK', opacity: 0.5 },
-    { id: 'pass', label: 'Pass', hwKey: 'A', x: 88, y: 72, mappedKey: 'BUTTON_A', code: 96, opacity: 0.85 },
+    // Pass (bottom right, primary button)
+    { id: 'pass', label: 'Pass', hwKey: 'A', x: 88, y: 78, mappedKey: 'BUTTON_A', code: 96, opacity: 0.85 },
+    // Shoot (top right)
     { id: 'shoot', label: 'Shoot', hwKey: 'B', x: 84, y: 62, mappedKey: 'BUTTON_B', code: 97, opacity: 0.85 },
+    // Through ball (left of shoot)
     { id: 'through', label: 'Through', hwKey: 'Y', x: 76, y: 68, mappedKey: 'BUTTON_Y', code: 100, opacity: 0.85 },
-    { id: 'sprint', label: 'Sprint', hwKey: 'RB', x: 90, y: 55, mappedKey: 'BUTTON_R1', code: 102, opacity: 0.8 },
-    { id: 'skill1', label: 'Skill', hwKey: 'X', x: 72, y: 76, mappedKey: 'BUTTON_X', code: 99, opacity: 0.8 },
+    // Dash/Sprint (right trigger — analog sprint)
+    { id: 'sprint', label: 'Dash', hwKey: 'R2', x: 90, y: 65, mappedKey: 'BUTTON_R2', code: 105, opacity: 0.8 },
+    // Skill move (left of pass)
+    { id: 'skill', label: 'Skill', hwKey: 'X', x: 78, y: 82, mappedKey: 'BUTTON_X', code: 99, opacity: 0.8 },
+    // Press/contain (left bumper)
+    { id: 'press', label: 'Press', hwKey: 'RB', x: 90, y: 55, mappedKey: 'BUTTON_R1', code: 102, opacity: 0.7 },
+    // Tackle (left bumper — defense)
     { id: 'tackle', label: 'Tackle', hwKey: 'LB', x: 8, y: 70, mappedKey: 'BUTTON_L1', code: 101, opacity: 0.8 },
+    // Slide tackle (left trigger)
     { id: 'slide', label: 'Slide', hwKey: 'L2', x: 8, y: 60, mappedKey: 'BUTTON_L2', code: 104, opacity: 0.8 },
-    { id: 'press', label: 'Press', hwKey: 'R2', x: 90, y: 65, mappedKey: 'BUTTON_R2', code: 105, opacity: 0.7 },
+    // Switch player (right stick click)
     { id: 'switch', label: 'Switch', hwKey: 'R3', x: 86, y: 50, mappedKey: 'BUTTON_R3', code: 106 },
+    // Goalkeeper rush
     { id: 'keeper', label: 'Keeper', hwKey: 'Y', x: 50, y: 88, mappedKey: 'BUTTON_Y', code: 100 },
+    // Match-up / jockey (left stick click)
+    { id: 'jockey', label: 'Jockey', hwKey: 'L3', x: 23, y: 82, mappedKey: 'BUTTON_L3', code: 103, opacity: 0.7 },
+    // Strategy/tactics
     { id: 'strategy', label: 'Strategy', hwKey: 'SELECT', x: 4, y: 8, mappedKey: 'BUTTON_SELECT', code: 109, width: 45, height: 24 },
+    // Pause
     { id: 'pause', label: 'Pause', hwKey: 'START', x: 96, y: 8, mappedKey: 'BUTTON_START', code: 108, width: 45, height: 24 },
   ], { x: 14, y: 80, radius: 170 }, { x: 82, y: 80, radius: 150 }, false);
 

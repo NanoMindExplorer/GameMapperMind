@@ -11,7 +11,7 @@
 //   - Capacitor bridge mock (no-op by default; tests can override)
 
 import '@testing-library/jest-dom/vitest';
-import { vi } from 'vitest';
+import { beforeEach, vi } from 'vitest';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // jsdom polyfills

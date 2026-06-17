@@ -91,7 +91,7 @@ describe('ProfileSchema — field-level validation', () => {
     (p as any).schemaVersion = 'v1.0';
     const r = validateProfile(p);
     expect(r.success).toBe(false);
-    if (!r.success) expect(r.errors.join(' ')).toMatch(/semver/i);
+    if (!r.success) expect((r as { errors: string[] }).errors.join(' ')).toMatch(/semver/i);
   });
 
   it('rejects uppercase profileId', () => {
@@ -146,7 +146,7 @@ describe('ProfileSchema — swipe invariants', () => {
     p.mappings[0].endYPercent = 0.0;
     const r = validateProfile(p);
     expect(r.success).toBe(false);
-    if (!r.success) expect(r.errors.join(' ')).toMatch(/swipe/i);
+    if (!r.success) expect((r as { errors: string[] }).errors.join(' ')).toMatch(/swipe/i);
   });
 
   it('accepts swipe with valid endPercent', () => {
@@ -164,7 +164,7 @@ describe('ProfileSchema — cross-field invariants', () => {
     p.mappings.push({ ...p.mappings[0], buttonCode: 305 });
     const r = validateProfile(p);
     expect(r.success).toBe(false);
-    if (!r.success) expect(r.errors.join(' ')).toMatch(/Duplicate mapping id/i);
+    if (!r.success) expect((r as { errors: string[] }).errors.join(' ')).toMatch(/Duplicate mapping id/i);
   });
 
   it('rejects duplicate mapping buttonCodes', () => {
@@ -172,7 +172,7 @@ describe('ProfileSchema — cross-field invariants', () => {
     p.mappings.push({ ...p.mappings[0], id: 1 });
     const r = validateProfile(p);
     expect(r.success).toBe(false);
-    if (!r.success) expect(r.errors.join(' ')).toMatch(/Duplicate buttonCode/i);
+    if (!r.success) expect((r as { errors: string[] }).errors.join(' ')).toMatch(/Duplicate buttonCode/i);
   });
 
   it('rejects swipe trigger buttonCode colliding with mapping', () => {
@@ -182,7 +182,7 @@ describe('ProfileSchema — cross-field invariants', () => {
     ];
     const r = validateProfile(p);
     expect(r.success).toBe(false);
-    if (!r.success) expect(r.errors.join(' ')).toMatch(/collide/i);
+    if (!r.success) expect((r as { errors: string[] }).errors.join(' ')).toMatch(/collide/i);
   });
 
   it('rejects unsupported schemaVersion', () => {
@@ -190,7 +190,7 @@ describe('ProfileSchema — cross-field invariants', () => {
     (p as any).schemaVersion = '2.0.0';
     const r = validateProfile(p);
     expect(r.success).toBe(false);
-    if (!r.success) expect(r.errors.join(' ')).toMatch(/Unsupported/i);
+    if (!r.success) expect((r as { errors: string[] }).errors.join(' ')).toMatch(/Unsupported/i);
   });
 });
 

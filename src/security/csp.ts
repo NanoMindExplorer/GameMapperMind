@@ -80,7 +80,7 @@ async function forwardToNative(report: CspViolationReport): Promise<void> {
   try {
     // Dynamic import to avoid pulling Capacitor into web preview builds.
     const { App } = await import('@capacitor/app');
-    await App.addListener('app:error', {
+    await App.addListener('app:error' as any, {
       source: 'csp',
       message: `CSP violation: ${report.violatedDirective} blocked ${report.blockedURI}`,
       stack: JSON.stringify(report, null, 2),

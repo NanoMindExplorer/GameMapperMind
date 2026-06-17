@@ -75,7 +75,7 @@ export function loadAllProfiles(): {
       cache.set(id, result.data);
       valid.push(result.data);
     } else {
-      invalid.push({ profileId: id, errors: result.errors });
+      invalid.push({ profileId: id, errors: (result as { errors: string[] }).errors });
     }
   }
 

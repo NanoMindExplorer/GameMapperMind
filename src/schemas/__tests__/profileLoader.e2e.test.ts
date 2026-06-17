@@ -25,8 +25,8 @@ import type { Profile } from '../gameProfile';
 
 // Mock the Capacitor plugin registry so we can capture calls to setProfile.
 const mockSetProfile = vi.fn<(json: string) => Promise<void>>();
-vi.mock('@/plugins/GameMapper', () => ({
-  GameMapper: {
+vi.mock('../../plugins/GameMapper', () => ({
+  default: {
     setProfile: (opts: { profile: string }) => mockSetProfile(opts.profile),
   },
 }));
@@ -76,8 +76,8 @@ describe('Profile → Native pipeline E2E (mocked bridge)', () => {
     const serialized = JSON.stringify(serializeProfile(profile));
 
     // 3) Forward to (mocked) native plugin
-    const { GameMapper } = await import('@/plugins/GameMapper');
-    await GameMapper.setProfile({ profile: serialized });
+    const GameMapper = (await import("../../plugins/GameMapper")).default;
+    await (GameMapper as any).setProfile({ profile: serialized });
 
     // 4) Verify mock was called with valid JSON
     expect(mockSetProfile).toHaveBeenCalledTimes(1);
@@ -116,9 +116,8 @@ describe('Profile → Native pipeline E2E (mocked bridge)', () => {
 
     // The contract: only forward to native if validation succeeded
     if (result.success) {
-      await import('@/plugins/GameMapper').then(({ GameMapper }) =>
-        GameMapper.setProfile({ profile: JSON.stringify(result.data) })
-      );
+      const mod = await import('../../plugins/GameMapper');
+      (mod.default as any).setProfile({ profile: JSON.stringify(result.data) });
     }
 
     expect(mockSetProfile).not.toHaveBeenCalled();

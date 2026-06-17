@@ -290,10 +290,12 @@ class GameMapperUserService : IGameMapperService.Stub {
                                             axisType == "ABS_HAT0X" && valueInt > 0 -> "RIGHT"
                                             axisType == "ABS_HAT0Y" && valueInt < 0 -> "UP"
                                             axisType == "ABS_HAT0Y" && valueInt > 0 -> "DOWN"
-                                            else -> return@let
+                                            else -> ""
                                         }
-                                        val isDown = valueInt != 0
-                                        eventCallback?.invoke("BUTTON", btnName, if (isDown) 1 else 0)
+                                        if (btnName.isNotEmpty()) {
+                                            val isDown = valueInt != 0
+                                            eventCallback?.invoke("BUTTON", btnName, if (isDown) 1 else 0)
+                                        }
                                     }
                                 }
                             }

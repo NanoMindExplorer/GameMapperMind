@@ -77,25 +77,36 @@ class GamepadManager {
     // ============================================================
     // InputManager device listener — detects gamepad hotplug
     // ============================================================
-    private val deviceListener = InputManager.InputDeviceListener { deviceId ->
-        val device = InputDevice.getDevice(deviceId)
-        if (device != null && isGamepad(device)) {
-            if (connectedGamepads.containsKey(deviceId)) {
-                // Device changed (already known) — ignore
-                return@InputDeviceListener
+    private val deviceListener = object : InputManager.InputDeviceListener {
+        override fun onInputDeviceAdded(deviceId: Int) {
+            val device = InputDevice.getDevice(deviceId)
+            if (device != null && isGamepad(device)) {
+                if (connectedGamepads.containsKey(deviceId)) {
+                    return
+                }
+                connectedGamepads[deviceId] = device
+                lastAxisValues[deviceId] = mutableMapOf()
+                Log.i(TAG, "Gamepad connected: ${device.name} (id=$deviceId, sources=0x${device.sources.toString(16)})")
+                callback?.onGamepadConnected(device)
             }
-            // New gamepad connected
-            connectedGamepads[deviceId] = device
-            lastAxisValues[deviceId] = mutableMapOf()
-            Log.i(TAG, "Gamepad connected: ${device.name} (id=$deviceId, sources=0x${device.sources.toString(16)})")
-            callback?.onGamepadConnected(device)
-        } else if (device == null) {
-            // Device disconnected
+        }
+
+        override fun onInputDeviceRemoved(deviceId: Int) {
             val removed = connectedGamepads.remove(deviceId)
             lastAxisValues.remove(deviceId)
             if (removed != null) {
                 Log.i(TAG, "Gamepad disconnected: ${removed.name} (id=$deviceId)")
                 callback?.onGamepadDisconnected(removed)
+            }
+        }
+
+        override fun onInputDeviceChanged(deviceId: Int) {
+            // Device configuration changed — re-scan
+            val device = InputDevice.getDevice(deviceId)
+            if (device != null && isGamepad(device) && !connectedGamepads.containsKey(deviceId)) {
+                connectedGamepads[deviceId] = device
+                lastAxisValues[deviceId] = mutableMapOf()
+                callback?.onGamepadConnected(device)
             }
         }
     }

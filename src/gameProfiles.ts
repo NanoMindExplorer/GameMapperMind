@@ -192,6 +192,272 @@ const HONOR_OF_KINGS = buildProfile('hok', 'Honor of Kings', 'com.tencent.tmgp.h
     { id: 'emote', label: 'Emote', hwKey: 'UP', x: 5, y: 50, mappedKey: 'DPAD_UP', code: 106 },
   ], { x: 14, y: 78, radius: 170 }, { x: 82, y: 30, radius: 120 }, false);
 
+// ============================================================
+// 8. League of Legends: Wild Rift (com riotgames league wildrift)
+// ============================================================
+const WILDRIFT = buildProfile('wildrift', 'LoL: Wild Rift', 'com.riotgames.league.wildrift',
+  'League of Legends Wild Rift — MOBA 5v5 (tablet 12.2")',
+  [
+    { id: 'l_stick', label: 'Move', hwKey: 'L_STICK', x: 14, y: 78, width: 140, height: 140, type: 'analog_stick', mappedKey: 'L_STICK', opacity: 0.5 },
+    { id: 'r_stick', label: 'Camera', hwKey: 'R_STICK', x: 82, y: 30, width: 100, height: 100, type: 'analog_stick', mappedKey: 'R_STICK', opacity: 0.4 },
+    { id: 'attack', label: 'Attack', hwKey: 'A', x: 88, y: 78, mappedKey: 'BUTTON_A', code: 96, opacity: 0.85 },
+    { id: 'q', label: 'Q', hwKey: 'X', x: 78, y: 82, mappedKey: 'BUTTON_X', code: 99, opacity: 0.85 },
+    { id: 'w', label: 'W', hwKey: 'B', x: 84, y: 66, mappedKey: 'BUTTON_B', code: 97, opacity: 0.85 },
+    { id: 'e', label: 'E', hwKey: 'Y', x: 72, y: 72, mappedKey: 'BUTTON_Y', code: 100, opacity: 0.85 },
+    { id: 'r', label: 'Ultimate', hwKey: 'RB', x: 90, y: 55, mappedKey: 'BUTTON_R1', code: 102, opacity: 0.8 },
+    { id: 'recall', label: 'Recall', hwKey: 'LB', x: 8, y: 60, mappedKey: 'BUTTON_L1', code: 101, opacity: 0.7 },
+    { id: 'shop', label: 'Shop', hwKey: 'SELECT', x: 4, y: 8, mappedKey: 'BUTTON_SELECT', code: 109, width: 45, height: 24 },
+    { id: 'map', label: 'Map', hwKey: 'START', x: 96, y: 8, mappedKey: 'BUTTON_START', code: 108, width: 45, height: 24 },
+    { id: 'pingleft', label: 'Ping L', hwKey: 'L2', x: 70, y: 80, mappedKey: 'BUTTON_L2', code: 104 },
+    { id: 'pingright', label: 'Ping R', hwKey: 'R2', x: 76, y: 86, mappedKey: 'BUTTON_R2', code: 105 },
+    { id: 'emote', label: 'Emote', hwKey: 'UP', x: 5, y: 50, mappedKey: 'DPAD_UP', code: 106 },
+    { id: 'vision', label: 'Vision', hwKey: 'DOWN', x: 5, y: 55, mappedKey: 'DPAD_DOWN', code: 107 },
+  ], { x: 14, y: 78, radius: 170 }, { x: 82, y: 30, radius: 120 }, false);
+
+// ============================================================
+// 9. Apex Legends Mobile (com.ea.gp.apexlegendsmobile)
+// ============================================================
+const APEX = buildProfile('apex', 'Apex Legends Mobile', 'com.ea.gp.apexlegendsmobilefps',
+  'Apex Legends Mobile — hero shooter BR (tablet 12.2")',
+  [
+    { id: 'l_stick', label: 'Move', hwKey: 'L_STICK', x: 14, y: 78, width: 130, height: 130, type: 'analog_stick', mappedKey: 'L_STICK', opacity: 0.5 },
+    { id: 'r_stick', label: 'Look', hwKey: 'R_STICK', x: 82, y: 78, width: 130, height: 130, type: 'analog_stick', mappedKey: 'R_STICK', opacity: 0.5 },
+    { id: 'fire', label: 'Fire', hwKey: 'R2', x: 90, y: 72, mappedKey: 'BUTTON_R2', code: 105, opacity: 0.85 },
+    { id: 'aim', label: 'ADS', hwKey: 'L2', x: 78, y: 68, mappedKey: 'BUTTON_L2', code: 104, opacity: 0.85 },
+    { id: 'reload', label: 'Reload', hwKey: 'X', x: 72, y: 76, mappedKey: 'BUTTON_X', code: 99 },
+    { id: 'jump', label: 'Jump', hwKey: 'A', x: 90, y: 60, mappedKey: 'BUTTON_A', code: 96 },
+    { id: 'crouch', label: 'Crouch', hwKey: 'B', x: 85, y: 55, mappedKey: 'BUTTON_B', code: 97 },
+    { id: 'ability', label: 'Tactical', hwKey: 'LB', x: 10, y: 58, mappedKey: 'BUTTON_L1', code: 101 },
+    { id: 'ultimate', label: 'Ultimate', hwKey: 'RB', x: 16, y: 58, mappedKey: 'BUTTON_R1', code: 102 },
+    { id: 'melee', label: 'Melee', hwKey: 'R3', x: 86, y: 64, mappedKey: 'BUTTON_R3', code: 106 },
+    { id: 'sprint', label: 'Sprint', hwKey: 'L3', x: 23, y: 82, mappedKey: 'BUTTON_L3', code: 103 },
+    { id: 'grenade', label: 'Nade', hwKey: 'UP', x: 68, y: 48, mappedKey: 'DPAD_UP', code: 106 },
+    { id: 'weapon1', label: 'W1', hwKey: 'UP', x: 88, y: 35, mappedKey: 'DPAD_UP', code: 106, width: 40, height: 40 },
+    { id: 'weapon2', label: 'W2', hwKey: 'DOWN', x: 88, y: 42, mappedKey: 'DPAD_DOWN', code: 107, width: 40, height: 40 },
+    { id: 'inventory', label: 'Bag', hwKey: 'Y', x: 94, y: 25, mappedKey: 'BUTTON_Y', code: 100 },
+    { id: 'map', label: 'Map', hwKey: 'SELECT', x: 4, y: 8, mappedKey: 'BUTTON_SELECT', code: 109, width: 45, height: 24 },
+    { id: 'ping', label: 'Ping', hwKey: 'R3', x: 50, y: 50, mappedKey: 'BUTTON_R3', code: 106 },
+  ], { x: 14, y: 78, radius: 160 }, { x: 82, y: 78, radius: 160 }, true);
+
+// ============================================================
+// 10. Diablo Immortal (com.blizzard.diablo.immortal)
+// ============================================================
+const DIABLO = buildProfile('diablo', 'Diablo Immortal', 'com.blizzard.diablo.immortal',
+  'Diablo Immortal — ARPG dungeon crawler (tablet 12.2")',
+  [
+    { id: 'l_stick', label: 'Move', hwKey: 'L_STICK', x: 15, y: 75, width: 140, height: 140, type: 'analog_stick', mappedKey: 'L_STICK', opacity: 0.5 },
+    { id: 'attack', label: 'Attack', hwKey: 'A', x: 88, y: 78, mappedKey: 'BUTTON_A', code: 96, opacity: 0.85 },
+    { id: 'skill1', label: 'Skill 1', hwKey: 'X', x: 78, y: 82, mappedKey: 'BUTTON_X', code: 99, opacity: 0.85 },
+    { id: 'skill2', label: 'Skill 2', hwKey: 'B', x: 84, y: 66, mappedKey: 'BUTTON_B', code: 97, opacity: 0.85 },
+    { id: 'skill3', label: 'Skill 3', hwKey: 'Y', x: 72, y: 72, mappedKey: 'BUTTON_Y', code: 100, opacity: 0.85 },
+    { id: 'skill4', label: 'Skill 4', hwKey: 'RB', x: 90, y: 55, mappedKey: 'BUTTON_R1', code: 102, opacity: 0.8 },
+    { id: 'ultimate', label: 'Ultimate', hwKey: 'R2', x: 78, y: 60, mappedKey: 'BUTTON_R2', code: 105, opacity: 0.85 },
+    { id: 'potion', label: 'Potion', hwKey: 'LB', x: 8, y: 60, mappedKey: 'BUTTON_L1', code: 101, opacity: 0.7 },
+    { id: 'inventory', label: 'Bag', hwKey: 'SELECT', x: 4, y: 8, mappedKey: 'BUTTON_SELECT', code: 109, width: 45, height: 24 },
+    { id: 'map', label: 'Map', hwKey: 'START', x: 96, y: 8, mappedKey: 'BUTTON_START', code: 108, width: 45, height: 24 },
+    { id: 'interact', label: 'Interact', hwKey: 'L2', x: 30, y: 82, mappedKey: 'BUTTON_L2', code: 104 },
+    { id: 'autoattack', label: 'Auto', hwKey: 'L3', x: 23, y: 82, mappedKey: 'BUTTON_L3', code: 103 },
+  ], { x: 15, y: 75, radius: 170 }, { x: 82, y: 78, radius: 150 }, false);
+
+// ============================================================
+// 11. Brawl Stars (com.supercell.brawlstars)
+// ============================================================
+const BRAWL = buildProfile('brawl', 'Brawl Stars', 'com.supercell.brawlstars',
+  'Supercell Brawl Stars — 3v3 shooter (tablet 12.2")',
+  [
+    { id: 'l_stick', label: 'Move', hwKey: 'L_STICK', x: 14, y: 78, width: 140, height: 140, type: 'analog_stick', mappedKey: 'L_STICK', opacity: 0.5 },
+    { id: 'attack', label: 'Attack', hwKey: 'A', x: 88, y: 78, mappedKey: 'BUTTON_A', code: 96, opacity: 0.85 },
+    { id: 'super', label: 'Super', hwKey: 'B', x: 84, y: 66, mappedKey: 'BUTTON_B', code: 97, opacity: 0.85 },
+    { id: 'gadget', label: 'Gadget', hwKey: 'X', x: 78, y: 82, mappedKey: 'BUTTON_X', code: 99, opacity: 0.85 },
+    { id: 'gears', label: 'Gear', hwKey: 'Y', x: 72, y: 72, mappedKey: 'BUTTON_Y', code: 100, opacity: 0.8 },
+    { id: 'reload', label: 'Reload', hwKey: 'RB', x: 90, y: 55, mappedKey: 'BUTTON_R1', code: 102, opacity: 0.7 },
+    { id: 'autoaim', label: 'Auto', hwKey: 'R3', x: 86, y: 64, mappedKey: 'BUTTON_R3', code: 106 },
+    { id: 'ping', label: 'Ping', hwKey: 'LB', x: 8, y: 60, mappedKey: 'BUTTON_L1', code: 101, opacity: 0.7 },
+  ], { x: 14, y: 78, radius: 170 }, { x: 82, y: 78, radius: 140 }, false);
+
+// ============================================================
+// 12. EA Sports FC Mobile (com.ea.gp.fifamobile)
+// ============================================================
+const EA_FC = buildProfile('eafc', 'EA Sports FC Mobile', 'com.ea.gp.fifamobile',
+  'EA Sports FC Mobile (FIFA) — soccer (tablet 12.2")',
+  [
+    { id: 'l_stick', label: 'Move', hwKey: 'L_STICK', x: 14, y: 80, width: 140, height: 140, type: 'analog_stick', mappedKey: 'L_STICK', opacity: 0.5 },
+    { id: 'pass', label: 'Pass', hwKey: 'A', x: 88, y: 72, mappedKey: 'BUTTON_A', code: 96, opacity: 0.85 },
+    { id: 'shoot', label: 'Shoot', hwKey: 'B', x: 84, y: 62, mappedKey: 'BUTTON_B', code: 97, opacity: 0.85 },
+    { id: 'through', label: 'Through', hwKey: 'Y', x: 76, y: 68, mappedKey: 'BUTTON_Y', code: 100, opacity: 0.85 },
+    { id: 'sprint', label: 'Sprint', hwKey: 'RB', x: 90, y: 55, mappedKey: 'BUTTON_R1', code: 102, opacity: 0.8 },
+    { id: 'skill', label: 'Skill', hwKey: 'X', x: 72, y: 76, mappedKey: 'BUTTON_X', code: 99, opacity: 0.8 },
+    { id: 'switch', label: 'Switch', hwKey: 'LB', x: 8, y: 70, mappedKey: 'BUTTON_L1', code: 101, opacity: 0.8 },
+    { id: 'tackle', label: 'Tackle', hwKey: 'L2', x: 8, y: 60, mappedKey: 'BUTTON_L2', code: 104, opacity: 0.8 },
+    { id: 'modifier', label: 'Modifier', hwKey: 'R2', x: 90, y: 65, mappedKey: 'BUTTON_R2', code: 105, opacity: 0.7 },
+    { id: 'tactics', label: 'Tactics', hwKey: 'SELECT', x: 4, y: 8, mappedKey: 'BUTTON_SELECT', code: 109, width: 45, height: 24 },
+    { id: 'pause', label: 'Pause', hwKey: 'START', x: 96, y: 8, mappedKey: 'BUTTON_START', code: 108, width: 45, height: 24 },
+  ], { x: 14, y: 80, radius: 170 }, { x: 82, y: 80, radius: 150 }, false);
+
+// ============================================================
+// 13. Arena Breakout (com.proximabeta.mb.uww)
+// ============================================================
+const ARENA_BREAKOUT = buildProfile('arena', 'Arena Breakout', 'com.proximabeta.mb.uww',
+  'Arena Breakout — tactical FPS extraction (tablet 12.2")',
+  [
+    { id: 'l_stick', label: 'Move', hwKey: 'L_STICK', x: 14, y: 78, width: 130, height: 130, type: 'analog_stick', mappedKey: 'L_STICK', opacity: 0.5 },
+    { id: 'r_stick', label: 'Look', hwKey: 'R_STICK', x: 82, y: 78, width: 130, height: 130, type: 'analog_stick', mappedKey: 'R_STICK', opacity: 0.5 },
+    { id: 'fire', label: 'Fire', hwKey: 'R2', x: 90, y: 72, mappedKey: 'BUTTON_R2', code: 105, opacity: 0.85 },
+    { id: 'aim', label: 'ADS', hwKey: 'L2', x: 78, y: 68, mappedKey: 'BUTTON_L2', code: 104, opacity: 0.85 },
+    { id: 'reload', label: 'Reload', hwKey: 'X', x: 72, y: 76, mappedKey: 'BUTTON_X', code: 99 },
+    { id: 'crouch', label: 'Crouch', hwKey: 'B', x: 85, y: 55, mappedKey: 'BUTTON_B', code: 97 },
+    { id: 'prone', label: 'Prone', hwKey: 'Y', x: 77, y: 53, mappedKey: 'BUTTON_Y', code: 100 },
+    { id: 'jump', label: 'Jump', hwKey: 'A', x: 90, y: 60, mappedKey: 'BUTTON_A', code: 96 },
+    { id: 'lean_l', label: 'Lean L', hwKey: 'LB', x: 10, y: 58, mappedKey: 'BUTTON_L1', code: 101 },
+    { id: 'lean_r', label: 'Lean R', hwKey: 'RB', x: 16, y: 58, mappedKey: 'BUTTON_R1', code: 102 },
+    { id: 'sprint', label: 'Sprint', hwKey: 'L3', x: 23, y: 82, mappedKey: 'BUTTON_L3', code: 103 },
+    { id: 'inventory', label: 'Bag', hwKey: 'R3', x: 86, y: 64, mappedKey: 'BUTTON_R3', code: 106 },
+    { id: 'map', label: 'Map', hwKey: 'SELECT', x: 4, y: 8, mappedKey: 'BUTTON_SELECT', code: 109, width: 45, height: 24 },
+    { id: 'loot', label: 'Loot', hwKey: 'A', x: 50, y: 60, mappedKey: 'BUTTON_A', code: 96 },
+  ], { x: 14, y: 78, radius: 160 }, { x: 82, y: 78, radius: 160 }, true);
+
+// ============================================================
+// 14. Farlight 84 (com.farlightgames.farlight84)
+// ============================================================
+const FARLIGHT = buildProfile('farlight', 'Farlight 84', 'com.farlightgames.farlight84',
+  'Farlight 84 — hero shooter BR (tablet 12.2")',
+  [
+    { id: 'l_stick', label: 'Move', hwKey: 'L_STICK', x: 14, y: 78, width: 130, height: 130, type: 'analog_stick', mappedKey: 'L_STICK', opacity: 0.5 },
+    { id: 'r_stick', label: 'Look', hwKey: 'R_STICK', x: 82, y: 78, width: 130, height: 130, type: 'analog_stick', mappedKey: 'R_STICK', opacity: 0.5 },
+    { id: 'fire', label: 'Fire', hwKey: 'R2', x: 90, y: 72, mappedKey: 'BUTTON_R2', code: 105, opacity: 0.85 },
+    { id: 'aim', label: 'Aim', hwKey: 'L2', x: 78, y: 68, mappedKey: 'BUTTON_L2', code: 104, opacity: 0.85 },
+    { id: 'reload', label: 'Reload', hwKey: 'X', x: 72, y: 76, mappedKey: 'BUTTON_X', code: 99 },
+    { id: 'jump', label: 'Jump', hwKey: 'A', x: 90, y: 60, mappedKey: 'BUTTON_A', code: 96 },
+    { id: 'crouch', label: 'Crouch', hwKey: 'B', x: 85, y: 55, mappedKey: 'BUTTON_B', code: 97 },
+    { id: 'skill', label: 'Skill', hwKey: 'LB', x: 10, y: 58, mappedKey: 'BUTTON_L1', code: 101 },
+    { id: 'ultimate', label: 'Ultimate', hwKey: 'RB', x: 16, y: 58, mappedKey: 'BUTTON_R1', code: 102 },
+    { id: 'melee', label: 'Melee', hwKey: 'R3', x: 86, y: 64, mappedKey: 'BUTTON_R3', code: 106 },
+    { id: 'sprint', label: 'Sprint', hwKey: 'L3', x: 23, y: 82, mappedKey: 'BUTTON_L3', code: 103 },
+    { id: 'vehicle', label: 'Vehicle', hwKey: 'Y', x: 94, y: 25, mappedKey: 'BUTTON_Y', code: 100 },
+    { id: 'map', label: 'Map', hwKey: 'SELECT', x: 4, y: 8, mappedKey: 'BUTTON_SELECT', code: 109, width: 45, height: 24 },
+    { id: 'weapon1', label: 'W1', hwKey: 'UP', x: 88, y: 35, mappedKey: 'DPAD_UP', code: 106, width: 40, height: 40 },
+    { id: 'weapon2', label: 'W2', hwKey: 'DOWN', x: 88, y: 42, mappedKey: 'DPAD_DOWN', code: 107, width: 40, height: 40 },
+  ], { x: 14, y: 78, radius: 160 }, { x: 82, y: 78, radius: 160 }, true);
+
+// ============================================================
+// 15. Blood Strike (com.dts.freefireth.bloodstrike)
+// ============================================================
+const BLOOD_STRIKE = buildProfile('bloodstrike', 'Blood Strike', 'com.dts.freefireth.bloodstrike',
+  'Blood Strike — fast paced FPS BR (tablet 12.2")',
+  [
+    { id: 'l_stick', label: 'Move', hwKey: 'L_STICK', x: 14, y: 78, width: 130, height: 130, type: 'analog_stick', mappedKey: 'L_STICK', opacity: 0.5 },
+    { id: 'r_stick', label: 'Look', hwKey: 'R_STICK', x: 82, y: 78, width: 130, height: 130, type: 'analog_stick', mappedKey: 'R_STICK', opacity: 0.5 },
+    { id: 'fire', label: 'Fire', hwKey: 'R2', x: 90, y: 72, mappedKey: 'BUTTON_R2', code: 105, opacity: 0.85 },
+    { id: 'aim', label: 'Aim', hwKey: 'L2', x: 78, y: 68, mappedKey: 'BUTTON_L2', code: 104, opacity: 0.85 },
+    { id: 'reload', label: 'Reload', hwKey: 'X', x: 72, y: 76, mappedKey: 'BUTTON_X', code: 99 },
+    { id: 'jump', label: 'Jump', hwKey: 'A', x: 90, y: 60, mappedKey: 'BUTTON_A', code: 96 },
+    { id: 'crouch', label: 'Crouch', hwKey: 'B', x: 85, y: 55, mappedKey: 'BUTTON_B', code: 97 },
+    { id: 'prone', label: 'Prone', hwKey: 'Y', x: 77, y: 53, mappedKey: 'BUTTON_Y', code: 100 },
+    { id: 'skill', label: 'Skill', hwKey: 'LB', x: 10, y: 58, mappedKey: 'BUTTON_L1', code: 101 },
+    { id: 'ultimate', label: 'Ult', hwKey: 'RB', x: 16, y: 58, mappedKey: 'BUTTON_R1', code: 102 },
+    { id: 'sprint', label: 'Sprint', hwKey: 'L3', x: 23, y: 82, mappedKey: 'BUTTON_L3', code: 103 },
+    { id: 'scope', label: 'Scope', hwKey: 'R3', x: 86, y: 64, mappedKey: 'BUTTON_R3', code: 106 },
+    { id: 'map', label: 'Map', hwKey: 'SELECT', x: 4, y: 8, mappedKey: 'BUTTON_SELECT', code: 109, width: 45, height: 24 },
+    { id: 'weapon1', label: 'W1', hwKey: 'UP', x: 88, y: 35, mappedKey: 'DPAD_UP', code: 106, width: 40, height: 40 },
+    { id: 'weapon2', label: 'W2', hwKey: 'DOWN', x: 88, y: 42, mappedKey: 'DPAD_DOWN', code: 107, width: 40, height: 40 },
+  ], { x: 14, y: 78, radius: 160 }, { x: 82, y: 78, radius: 160 }, true);
+
+// ============================================================
+// 16. Pokemon UNITE (jp.pokemon.pokemonunite)
+// ============================================================
+const POKEMON_UNITE = buildProfile('pokemon', 'Pokemon UNITE', 'jp.pokemon.pokemonunite',
+  'Pokemon UNITE — MOBA 5v5 (tablet 12.2")',
+  [
+    { id: 'l_stick', label: 'Move', hwKey: 'L_STICK', x: 14, y: 78, width: 140, height: 140, type: 'analog_stick', mappedKey: 'L_STICK', opacity: 0.5 },
+    { id: 'attack', label: 'Attack', hwKey: 'A', x: 88, y: 78, mappedKey: 'BUTTON_A', code: 96, opacity: 0.85 },
+    { id: 'skill1', label: 'Move 1', hwKey: 'X', x: 78, y: 82, mappedKey: 'BUTTON_X', code: 99, opacity: 0.85 },
+    { id: 'skill2', label: 'Move 2', hwKey: 'B', x: 84, y: 66, mappedKey: 'BUTTON_B', code: 97, opacity: 0.85 },
+    { id: 'unite', label: 'Unite', hwKey: 'Y', x: 72, y: 72, mappedKey: 'BUTTON_Y', code: 100, opacity: 0.85 },
+    { id: 'buff', label: 'Buff', hwKey: 'RB', x: 90, y: 55, mappedKey: 'BUTTON_R1', code: 102, opacity: 0.8 },
+    { id: 'recall', label: 'Recall', hwKey: 'LB', x: 8, y: 60, mappedKey: 'BUTTON_L1', code: 101, opacity: 0.7 },
+    { id: 'shop', label: 'Items', hwKey: 'SELECT', x: 4, y: 8, mappedKey: 'BUTTON_SELECT', code: 109, width: 45, height: 24 },
+    { id: 'map', label: 'Map', hwKey: 'START', x: 96, y: 8, mappedKey: 'BUTTON_START', code: 108, width: 45, height: 24 },
+    { id: 'score', label: 'Score', hwKey: 'R2', x: 76, y: 86, mappedKey: 'BUTTON_R2', code: 105 },
+    { id: 'target', label: 'Target', hwKey: 'L2', x: 70, y: 80, mappedKey: 'BUTTON_L2', code: 104 },
+  ], { x: 14, y: 78, radius: 170 }, { x: 82, y: 78, radius: 120 }, false);
+
+// ============================================================
+// 17. Arena of Valor (com.ngame.allstar.eu)
+// ============================================================
+const AOV = buildProfile('aov', 'Arena of Valor', 'com.ngame.allstar.eu',
+  'Arena of Valor — MOBA 5v5 (tablet 12.2")',
+  [
+    { id: 'l_stick', label: 'Move', hwKey: 'L_STICK', x: 14, y: 78, width: 140, height: 140, type: 'analog_stick', mappedKey: 'L_STICK', opacity: 0.5 },
+    { id: 'r_stick', label: 'Camera', hwKey: 'R_STICK', x: 82, y: 30, width: 100, height: 100, type: 'analog_stick', mappedKey: 'R_STICK', opacity: 0.4 },
+    { id: 'attack', label: 'Attack', hwKey: 'A', x: 88, y: 78, mappedKey: 'BUTTON_A', code: 96, opacity: 0.85 },
+    { id: 'skill1', label: 'Skill 1', hwKey: 'X', x: 78, y: 82, mappedKey: 'BUTTON_X', code: 99, opacity: 0.85 },
+    { id: 'skill2', label: 'Skill 2', hwKey: 'B', x: 84, y: 66, mappedKey: 'BUTTON_B', code: 97, opacity: 0.85 },
+    { id: 'skill3', label: 'Skill 3', hwKey: 'Y', x: 72, y: 72, mappedKey: 'BUTTON_Y', code: 100, opacity: 0.85 },
+    { id: 'ultimate', label: 'Ultimate', hwKey: 'RB', x: 90, y: 55, mappedKey: 'BUTTON_R1', code: 102, opacity: 0.8 },
+    { id: 'recall', label: 'Recall', hwKey: 'LB', x: 8, y: 60, mappedKey: 'BUTTON_L1', code: 101, opacity: 0.7 },
+    { id: 'shop', label: 'Shop', hwKey: 'SELECT', x: 4, y: 8, mappedKey: 'BUTTON_SELECT', code: 109, width: 45, height: 24 },
+    { id: 'map', label: 'Map', hwKey: 'START', x: 96, y: 8, mappedKey: 'BUTTON_START', code: 108, width: 45, height: 24 },
+    { id: 'target', label: 'Target', hwKey: 'L2', x: 70, y: 80, mappedKey: 'BUTTON_L2', code: 104 },
+    { id: 'emote', label: 'Emote', hwKey: 'UP', x: 5, y: 50, mappedKey: 'DPAD_UP', code: 106 },
+  ], { x: 14, y: 78, radius: 170 }, { x: 82, y: 30, radius: 120 }, false);
+
+// ============================================================
+// 18. Roblox (com.roblox.client)
+// ============================================================
+const ROBLOX = buildProfile('roblox', 'Roblox', 'com.roblox.client',
+  'Roblox — universal game platform (tablet 12.2")',
+  [
+    { id: 'l_stick', label: 'Move', hwKey: 'L_STICK', x: 14, y: 78, width: 140, height: 140, type: 'analog_stick', mappedKey: 'L_STICK', opacity: 0.5 },
+    { id: 'r_stick', label: 'Camera', hwKey: 'R_STICK', x: 82, y: 30, width: 120, height: 120, type: 'analog_stick', mappedKey: 'R_STICK', opacity: 0.4 },
+    { id: 'jump', label: 'Jump', hwKey: 'A', x: 88, y: 78, mappedKey: 'BUTTON_A', code: 96, opacity: 0.85 },
+    { id: 'action1', label: 'Action 1', hwKey: 'X', x: 78, y: 82, mappedKey: 'BUTTON_X', code: 99, opacity: 0.85 },
+    { id: 'action2', label: 'Action 2', hwKey: 'B', x: 84, y: 66, mappedKey: 'BUTTON_B', code: 97, opacity: 0.85 },
+    { id: 'action3', label: 'Action 3', hwKey: 'Y', x: 72, y: 72, mappedKey: 'BUTTON_Y', code: 100, opacity: 0.85 },
+    { id: 'sprint', label: 'Sprint', hwKey: 'RB', x: 90, y: 55, mappedKey: 'BUTTON_R1', code: 102, opacity: 0.7 },
+    { id: 'inventory', label: 'Bag', hwKey: 'LB', x: 8, y: 60, mappedKey: 'BUTTON_L1', code: 101, opacity: 0.7 },
+    { id: 'chat', label: 'Chat', hwKey: 'SELECT', x: 4, y: 8, mappedKey: 'BUTTON_SELECT', code: 109, width: 45, height: 24 },
+    { id: 'menu', label: 'Menu', hwKey: 'START', x: 96, y: 8, mappedKey: 'BUTTON_START', code: 108, width: 45, height: 24 },
+    { id: 'shift', label: 'Shift', hwKey: 'L3', x: 23, y: 82, mappedKey: 'BUTTON_L3', code: 103 },
+    { id: 'zoom', label: 'Zoom', hwKey: 'R3', x: 86, y: 64, mappedKey: 'BUTTON_R3', code: 106 },
+  ], { x: 14, y: 78, radius: 170 }, { x: 82, y: 30, radius: 150 }, false);
+
+// ============================================================
+// 19. NBA 2K Mobile (com.catdoggames.nba2kmobile)
+// ============================================================
+const NBA2K = buildProfile('nba2k', 'NBA 2K Mobile', 'com.catdoggames.nba2kmobile',
+  'NBA 2K Mobile — basketball (tablet 12.2")',
+  [
+    { id: 'l_stick', label: 'Move', hwKey: 'L_STICK', x: 14, y: 80, width: 140, height: 140, type: 'analog_stick', mappedKey: 'L_STICK', opacity: 0.5 },
+    { id: 'shoot', label: 'Shoot', hwKey: 'A', x: 88, y: 78, mappedKey: 'BUTTON_A', code: 96, opacity: 0.85 },
+    { id: 'pass', label: 'Pass', hwKey: 'X', x: 78, y: 82, mappedKey: 'BUTTON_X', code: 99, opacity: 0.85 },
+    { id: 'dribble', label: 'Dribble', hwKey: 'B', x: 84, y: 66, mappedKey: 'BUTTON_B', code: 97, opacity: 0.85 },
+    { id: 'sprint', label: 'Sprint', hwKey: 'Y', x: 72, y: 72, mappedKey: 'BUTTON_Y', code: 100, opacity: 0.8 },
+    { id: 'block', label: 'Block', hwKey: 'RB', x: 90, y: 55, mappedKey: 'BUTTON_R1', code: 102, opacity: 0.8 },
+    { id: 'steal', label: 'Steal', hwKey: 'LB', x: 8, y: 60, mappedKey: 'BUTTON_L1', code: 101, opacity: 0.8 },
+    { id: 'swap', label: 'Switch', hwKey: 'L2', x: 8, y: 70, mappedKey: 'BUTTON_L2', code: 104, opacity: 0.7 },
+    { id: 'post', label: 'Post Up', hwKey: 'R2', x: 90, y: 65, mappedKey: 'BUTTON_R2', code: 105, opacity: 0.7 },
+    { id: 'strategy', label: 'Plays', hwKey: 'SELECT', x: 4, y: 8, mappedKey: 'BUTTON_SELECT', code: 109, width: 45, height: 24 },
+    { id: 'pause', label: 'Pause', hwKey: 'START', x: 96, y: 8, mappedKey: 'BUTTON_START', code: 108, width: 45, height: 24 },
+  ], { x: 14, y: 80, radius: 170 }, { x: 82, y: 80, radius: 150 }, false);
+
+// ============================================================
+// 20. Marvel Snap (com.nvsgames.marvelsnap)
+// ============================================================
+const MARVEL_SNAP = buildProfile('snap', 'Marvel Snap', 'com.nvsgames.marvelsnap',
+  'Marvel Snap — card battler (tablet 12.2")',
+  [
+    { id: 'l_stick', label: 'Cursor', hwKey: 'L_STICK', x: 14, y: 50, width: 100, height: 100, type: 'analog_stick', mappedKey: 'L_STICK', opacity: 0.4 },
+    { id: 'play', label: 'Play Card', hwKey: 'A', x: 88, y: 78, mappedKey: 'BUTTON_A', code: 96, opacity: 0.85 },
+    { id: 'select', label: 'Select', hwKey: 'X', x: 78, y: 82, mappedKey: 'BUTTON_X', code: 99, opacity: 0.85 },
+    { id: 'snap', label: 'SNAP!', hwKey: 'B', x: 84, y: 66, mappedKey: 'BUTTON_B', code: 97, opacity: 0.9 },
+    { id: 'retreat', label: 'Retreat', hwKey: 'Y', x: 72, y: 72, mappedKey: 'BUTTON_Y', code: 100, opacity: 0.8 },
+    { id: 'end_turn', label: 'End Turn', hwKey: 'RB', x: 90, y: 55, mappedKey: 'BUTTON_R1', code: 102, opacity: 0.85 },
+    { id: 'menu', label: 'Menu', hwKey: 'SELECT', x: 4, y: 8, mappedKey: 'BUTTON_SELECT', code: 109, width: 45, height: 24 },
+    { id: 'info', label: 'Info', hwKey: 'START', x: 96, y: 8, mappedKey: 'BUTTON_START', code: 108, width: 45, height: 24 },
+  ], { x: 14, y: 50, radius: 150 }, { x: 82, y: 78, radius: 120 }, false);
+
 export const PRESET_PROFILES: GamepadProfile[] = [
   GENSHIN, PUBGM, FREEFIRE, CODM, MOBILE_LEGENDS, EFOOTBALL, HONOR_OF_KINGS,
+  WILDRIFT, APEX, DIABLO, BRAWL, EA_FC, ARENA_BREAKOUT, FARLIGHT,
+  BLOOD_STRIKE, POKEMON_UNITE, AOV, ROBLOX, NBA2K, MARVEL_SNAP,
 ];

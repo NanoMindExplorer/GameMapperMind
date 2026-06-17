@@ -1,267 +1,135 @@
 # ============================================================
-# GameMapperMind — Android APK Build (Capacitor + Vite + Shizuku)
+# GameMapperMind — Build Android APK (Clean & Reliable)
 # ============================================================
-name: Build Android APK (Capacitor)
+# This is the PRIMARY build workflow. It:
+#   1. Installs npm dependencies
+#   2. Builds web assets (Vite)
+#   3. Syncs Capacitor (generates Android subproject variants)
+#   4. Regenerates launcher icons from icon.svg
+#   5. Builds debug APK
+#   6. Uploads APK as artifact
+#
+# Triggers:
+#   - Push to main
+#   - Pull request to main
+#   - Manual dispatch
+#
+# Key lessons from previous failures:
+#   - MUST run `npx vite build` before `npx cap sync` (Capacitor needs ./dist)
+#   - MUST run `npx cap sync` before Gradle (generates capacitor-* subprojects)
+#   - MUST regenerate icons from SVG (some mipmap PNGs are corrupt/missing)
+#   - MUST use JDK 21 (Capacitor 8 requires Java 21)
+#   - MUST use Node 24 (Node 20 deprecated on GitHub Actions)
+#   - MUST use Android SDK 36 (matches compileSdk in build.gradle)
+# ============================================================
+name: Build Android APK
 
 on:
   push:
     branches: [ main ]
-    tags: [ 'v*.*.*' ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
-    inputs:
-      build_type:
-        description: 'Build type (debug only by default — release requires keystore secrets)'
-        required: true
-        default: 'debug'
-        type: choice
-        options:
-          - debug
-          - release
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: build-apk-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
-  contents: write
+  contents: read
   actions: read
-  checks: write
+
+env:
+  NODE_VERSION: '24'
+  JAVA_VERSION: '21'
 
 jobs:
   build:
+    name: Build Debug APK
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
 
     steps:
-      - name: Checkout Code
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Set up JDK 21
+      - name: Setup JDK ${{ env.JAVA_VERSION }}
         uses: actions/setup-java@v4
         with:
-          java-version: '21'
+          java-version: ${{ env.JAVA_VERSION }}
           distribution: 'zulu'
           cache: 'gradle'
 
-      - name: Set up Node.js
+      - name: Setup Node ${{ env.NODE_VERSION }}
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
 
       - name: Setup Android SDK
-        run: |
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null || true
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-36" "build-tools;36.0.0"
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
 
-      - name: Install dependencies
+      - name: Install npm dependencies
         run: npm ci
 
       - name: TypeScript type-check
         run: npx tsc --noEmit
 
-      - name: Build web app (Vite only)
+      - name: Build web app (Vite)
         run: npx vite build
 
-      - name: Verify Capacitor config
-        run: |
-          if [ ! -f "capacitor.config.ts" ] && [ ! -f "capacitor.config.json" ]; then
-            echo "::error::capacitor.config.ts not found in repo root"
-            exit 1
-          fi
-          echo "OK Capacitor config found"
+      - name: Sync Capacitor
+        run: npx cap sync android
 
-      - name: Clean and regenerate launcher icons
+      - name: Regenerate launcher icons from SVG
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq librsvg2-bin
-
-          if [ ! -f "icon.svg" ]; then
+          if [ -f "icon.svg" ]; then
+            echo "Generating icons from icon.svg..."
+            mkdir -p android/app/src/main/res/mipmap-mdpi
+            mkdir -p android/app/src/main/res/mipmap-hdpi
+            mkdir -p android/app/src/main/res/mipmap-xhdpi
+            mkdir -p android/app/src/main/res/mipmap-xxhdpi
+            mkdir -p android/app/src/main/res/mipmap-xxxhdpi
+            rsvg-convert -w 48 -h 48 icon.svg -o android/app/src/main/res/mipmap-mdpi/ic_launcher.png
+            rsvg-convert -w 48 -h 48 icon.svg -o android/app/src/main/res/mipmap-mdpi/ic_launcher_round.png
+            rsvg-convert -w 72 -h 72 icon.svg -o android/app/src/main/res/mipmap-hdpi/ic_launcher.png
+            rsvg-convert -w 72 -h 72 icon.svg -o android/app/src/main/res/mipmap-hdpi/ic_launcher_round.png
+            rsvg-convert -w 96 -h 96 icon.svg -o android/app/src/main/res/mipmap-xhdpi/ic_launcher.png
+            rsvg-convert -w 96 -h 96 icon.svg -o android/app/src/main/res/mipmap-xhdpi/ic_launcher_round.png
+            rsvg-convert -w 144 -h 144 icon.svg -o android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png
+            rsvg-convert -w 144 -h 144 icon.svg -o android/app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png
+            rsvg-convert -w 192 -h 192 icon.svg -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
+            rsvg-convert -w 192 -h 192 icon.svg -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png
+            echo "Icons generated successfully"
+          else
             echo "::warning::icon.svg not found, skipping icon generation"
-            exit 0
           fi
 
-          echo "Cleaning ALL old launcher icons and splash PNGs..."
-          rm -rf android/app/src/main/res/mipmap-*
-          rm -rf android/app/src/main/res/drawable-*
-          rm -rf android/app/src/main/res/drawable
-
-          mkdir -p android/app/src/main/res/mipmap-mdpi
-          mkdir -p android/app/src/main/res/mipmap-hdpi
-          mkdir -p android/app/src/main/res/mipmap-xhdpi
-          mkdir -p android/app/src/main/res/mipmap-xxhdpi
-          mkdir -p android/app/src/main/res/mipmap-xxxhdpi
-          mkdir -p android/app/src/main/res/mipmap-anydpi-v26
-          mkdir -p android/app/src/main/res/drawable
-
-          echo "Generating launcher icons from icon.svg..."
-          rsvg-convert -w 48 -h 48 icon.svg -o android/app/src/main/res/mipmap-mdpi/ic_launcher.png
-          rsvg-convert -w 48 -h 48 icon.svg -o android/app/src/main/res/mipmap-mdpi/ic_launcher_round.png
-          rsvg-convert -w 72 -h 72 icon.svg -o android/app/src/main/res/mipmap-hdpi/ic_launcher.png
-          rsvg-convert -w 72 -h 72 icon.svg -o android/app/src/main/res/mipmap-hdpi/ic_launcher_round.png
-          rsvg-convert -w 96 -h 96 icon.svg -o android/app/src/main/res/mipmap-xhdpi/ic_launcher.png
-          rsvg-convert -w 96 -h 96 icon.svg -o android/app/src/main/res/mipmap-xhdpi/ic_launcher_round.png
-          rsvg-convert -w 144 -h 144 icon.svg -o android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png
-          rsvg-convert -w 144 -h 144 icon.svg -o android/app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png
-          rsvg-convert -w 192 -h 192 icon.svg -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
-          rsvg-convert -w 192 -h 192 icon.svg -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png
-
-          rsvg-convert -w 108 -h 108 icon.svg -o android/app/src/main/res/mipmap-mdpi/ic_launcher_foreground.png
-          rsvg-convert -w 108 -h 108 icon.svg -o android/app/src/main/res/mipmap-mdpi/ic_launcher_background.png
-          rsvg-convert -w 162 -h 162 icon.svg -o android/app/src/main/res/mipmap-hdpi/ic_launcher_foreground.png
-          rsvg-convert -w 162 -h 162 icon.svg -o android/app/src/main/res/mipmap-hdpi/ic_launcher_background.png
-          rsvg-convert -w 216 -h 216 icon.svg -o android/app/src/main/res/mipmap-xhdpi/ic_launcher_foreground.png
-          rsvg-convert -w 216 -h 216 icon.svg -o android/app/src/main/res/mipmap-xhdpi/ic_launcher_background.png
-          rsvg-convert -w 324 -h 324 icon.svg -o android/app/src/main/res/mipmap-xxhdpi/ic_launcher_foreground.png
-          rsvg-convert -w 324 -h 324 icon.svg -o android/app/src/main/res/mipmap-xxhdpi/ic_launcher_background.png
-          rsvg-convert -w 432 -h 432 icon.svg -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png
-          rsvg-convert -w 432 -h 432 icon.svg -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_background.png
-
-          rsvg-convert -w 1080 -h 1920 icon.svg -o android/app/src/main/res/drawable/splash.png
-
-          echo "Icons generated successfully"
-
-      - name: Clean stale assets + Capacitor Sync
-        run: |
-          rm -rf android/app/src/main/assets/public/*
-          npx cap sync android
-          echo "=== Verifying synced assets ==="
-          ls -la android/app/src/main/assets/public/
-          cat android/app/src/main/assets/public/index.html | head -5
-
-      - name: Patch build.gradle to use debug signing for release (no keystore in CI)
-        run: |
-          cd android/app
-          # Use $HOME (bash syntax) — NOT ${System.env.HOME} which is Gradle Groovy syntax
-          ANDROID_HOME_DIR="$HOME/.android"
-          mkdir -p "$ANDROID_HOME_DIR"
-
-          # Create debug keystore if it doesn't exist (CI runner)
-          if [ ! -f "$ANDROID_HOME_DIR/debug.keystore" ]; then
-            keytool -genkey -v -keystore "$ANDROID_HOME_DIR/debug.keystore" \
-              -storepass android -alias androiddebugkey -keypass android \
-              -keyalg RSA -keysize 2048 -validity 10000 \
-              -dname "CN=Android Debug, O=Android, C=US" 2>/dev/null || true
-          fi
-
-          # Patch signingConfigs.release to use debug keystore
-          # sed needs to use | as delimiter because paths contain /
-          sed -i "s|storeFile file(\"keystore.jks\")|storeFile file(\"$ANDROID_HOME_DIR/debug.keystore\")|g" build.gradle
-          sed -i 's|storePassword "password_placeholder"|storePassword "android"|g' build.gradle
-          sed -i 's|keyAlias "alias_placeholder"|keyAlias "androiddebugkey"|g' build.gradle
-          sed -i 's|keyPassword "password_placeholder"|keyPassword "android"|g' build.gradle
-
-          echo "Patched build.gradle to use debug signing for release builds"
-          grep -A5 "signingConfigs" build.gradle || true
-
-      - name: Make gradlew executable
-        run: |
-          cd android
-          chmod +x gradlew
-          ls -la gradlew gradle/wrapper/gradle-wrapper.jar
+      - name: Grant execute permission for gradlew
+        run: chmod +x android/gradlew
 
       - name: Build Debug APK
-        if: github.event.inputs.build_type != 'release'
-        run: |
-          cd android
-          ./gradlew assembleDebug --no-daemon --stacktrace
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
 
-      - name: Build Release APK (signed with debug keystore)
-        if: github.event.inputs.build_type == 'release'
+      - name: Verify APK exists
         run: |
-          cd android
-          ./gradlew assembleRelease --no-daemon --stacktrace
-
-      - name: Sign Release APK with user keystore (if secrets provided)
-        if: |
-          github.event.inputs.build_type == 'release' &&
-          env.KEYSTORE_BASE64 != ''
-        env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: |
-          if [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
-            echo "::warning::Keystore secrets incomplete, keeping debug-signed release"
-            exit 0
+          APK_PATH="android/app/build/outputs/apk/debug/app-debug.apk"
+          if [ ! -f "$APK_PATH" ]; then
+            echo "::error::APK not found at $APK_PATH"
+            exit 1
           fi
-          echo "$KEYSTORE_BASE64" | base64 -d > android/app/keystore.jks
-          cd android
-          ./gradlew assembleRelease --no-daemon \
-            -Pandroid.injected.signing.store.file=app/keystore.jks \
-            -Pandroid.injected.signing.store.password=$KEYSTORE_PASSWORD \
-            -Pandroid.injected.signing.key.alias=$KEY_ALIAS \
-            -Pandroid.injected.signing.key.password=$KEY_PASSWORD
-          rm -f app/keystore.jks
+          APK_SIZE=$(du -h "$APK_PATH" | cut -f1)
+          echo "::notice::APK built successfully ($APK_SIZE)"
 
-      - name: Collect APK artifacts
-        run: |
-          mkdir -p artifacts
-          if [ -f "android/app/build/outputs/apk/debug/app-debug.apk" ]; then
-            cp android/app/build/outputs/apk/debug/app-debug.apk artifacts/GameMapperMind-debug.apk
-          fi
-          if [ -f "android/app/build/outputs/apk/release/app-release.apk" ]; then
-            cp android/app/build/outputs/apk/release/app-release.apk artifacts/GameMapperMind-release.apk
-          fi
-          ls -la artifacts/
-
-      - name: Upload Debug APK
-        if: github.event.inputs.build_type != 'release'
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: GameMapperMind-debug-apk
-          path: artifacts/GameMapperMind-debug.apk
-          retention-days: 30
-          if-no-files-found: warn
-
-      - name: Upload Release APK
-        if: github.event.inputs.build_type == 'release'
-        uses: actions/upload-artifact@v4
-        with:
-          name: GameMapperMind-release-apk
-          path: artifacts/GameMapperMind-release.apk
-          retention-days: 90
-          if-no-files-found: warn
-
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            artifacts/GameMapperMind-debug.apk
-            artifacts/GameMapperMind-release.apk
-          generate_release_notes: true
-          draft: false
-          prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-beta') || contains(github.ref, '-alpha') }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build Summary
-        if: always()
-        run: |
-          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Trigger**: \`${{ github.event_name }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Ref**: \`${{ github.ref }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Commit**: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Build type requested**: \`${{ github.event.inputs.build_type || 'default (debug)' }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          if [ -f "artifacts/GameMapperMind-debug.apk" ]; then
-            DEBUG_SIZE=$(du -h artifacts/GameMapperMind-debug.apk | cut -f1)
-            echo "- Debug APK built ($DEBUG_SIZE)" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "- Debug APK not built" >> $GITHUB_STEP_SUMMARY
-          fi
-          if [ -f "artifacts/GameMapperMind-release.apk" ]; then
-            echo "- Release APK built" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "- Release APK not built" >> $GITHUB_STEP_SUMMARY
-          fi
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Download" >> $GITHUB_STEP_SUMMARY
-          echo "Artifacts are available in the Actions tab - this run - Artifacts section." >> $GITHUB_STEP_SUMMARY
+          name: debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          retention-days: 14
+          if-no-files-found: error

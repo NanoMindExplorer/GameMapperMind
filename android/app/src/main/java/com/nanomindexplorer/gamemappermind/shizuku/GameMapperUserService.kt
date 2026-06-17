@@ -344,7 +344,7 @@ class GameMapperUserService : IGameMapperService.Stub {
         sizeVariance: Float
     ) {
         antiBan = AntiBanConfig(enabled, coordinateJitter, timingJitterMs, pressureVariance, sizeVariance)
-        pluginImpl.setAntiBan(enabled, pressureVariance, sizeVariance)
+        pluginImpl.setAntiBan(enabled, coordinateJitter, timingJitterMs, pressureVariance, sizeVariance)
         Log.d(TAG, "Anti-ban config updated: enabled=$enabled jitter=${coordinateJitter}px timing=${timingJitterMs}ms")
     }
 

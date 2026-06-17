@@ -62,6 +62,9 @@ class GameMapperPluginImpl(
 
     init {
         refreshDisplayMetrics()
+        // Step [9]: Force early initialization of TouchInjector to detect
+        // reflection failures before gamepad input starts.
+        touchInjector.initialize()
     }
 
     /**

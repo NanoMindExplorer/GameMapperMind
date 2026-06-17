@@ -6,6 +6,7 @@ import android.graphics.Path
 import android.os.Build
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
+import com.nanomindexplorer.gamemappermind.plugin.GameMapperPlugin
 import java.util.concurrent.ConcurrentHashMap
 
 class TouchAccessibilityService : AccessibilityService() {

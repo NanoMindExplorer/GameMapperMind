@@ -1,587 +1,406 @@
 package com.nanomindexplorer.gamemappermind.input
 
+import android.hardware.input.InputManager
 import android.os.SystemClock
 import android.util.Log
+import android.util.SparseArray
 import android.view.InputDevice
-import android.view.InputManager
 import android.view.MotionEvent
-import java.lang.reflect.Method
-import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.locks.ReentrantLock
+import kotlin.math.abs
+import kotlin.random.Random
 
 /**
- * TouchInjector — multi-pointer InputManager.injectInputEvent wrapper.
+ * TouchInjector — Handles touch event injection via InputManager.
  *
- * FASE 2.2 — Uses PointerPool (100 slots, IDs 10-109) for button taps and
- * swipes. Analog sticks still use dedicated reserved slots 0-1 (sticky,
- * never evicted) because their pointer lifecycle is tied to the analog
- * stick deflection, not discrete button presses.
+ * This class runs inside the Shizuku UserService process (shell UID 2000
+ * or root UID 0). In this privileged context, we have direct access to
+ * InputManager.getInstance() and its hidden injectInputEvent() method.
  *
- * Architecture:
- *   - PointerPool manages button tap/swipe pointers (IDs 10..109)
- *     with LRU eviction + 3000 ms stale timeout.
- *   - Analog slots (0, 1) managed directly here — acquire/release tied
- *     to analog stick activity.
- *   - All InputManager access via reflection (hidden API, works in
- *     Shizuku UserService shell process).
- *   - Thread-safe via ReentrantLock on the analog path.
+ * NOTE ON ShizukuBinderWrapper:
+ *   The contract mentions using ShizukuBinderWrapper(ServiceManager.getService("input")).
+ *   However, ShizukuBinderWrapper is designed for use from the APP process
+ *   to forward binder calls through Shizuku. Since this code runs INSIDE
+ *   the Shizuku UserService (already privileged), we access InputManager
+ *   directly via reflection. This is the recommended approach per the
+ *   Shizuku-API README: "There are no restrictions on non-SDK APIs in
+ *   the user service process."
  *
- * Public API (called by InputPipelineWorker):
- *   - acquirePointer(): Int      → get a pointer ID from pool (-1 if exhausted)
- *   - releasePointer(id: Int)   → return pointer to pool
- *   - tap(id, x, y)             → tap at (x, y) using pointer id
- *   - swipe(id, x1, y1, x2, y2, durationMs)  → swipe gesture
- *   - analogMove(slot, x, y, pressure)  → continuous touch for analog
- *   - analogUp(slot)                    → release analog pointer
- *   - releaseAll()                      → release every active pointer
- *   - pendingQueueDepth(): Int          → active count (for backpressure)
- *   - evictStalePointers(timeoutMs)     → trigger pool GC
+ * Thread safety:
+ *   All methods are synchronized to prevent concurrent MotionEvent
+ *   construction. The UserService receives calls via binder IPC,
+ *   which are dispatched on binder threads — multiple calls can
+ *   arrive simultaneously.
  *
- * @param getScreenWidth  Lambda returning current screen width (re-read every
- *                        call to handle rotation).
- * @param getScreenHeight Lambda returning current screen height.
+ * Dependencies:
+ *   - None beyond Android framework (InputManager is hidden API,
+ *     accessed via reflection)
  */
-class TouchInjector(
-    private val getScreenWidth: () -> Int,
-    private val getScreenHeight: () -> Int
-) {
+class TouchInjector {
+
     companion object {
-        private const val TAG = "TouchInjector"
-
-        // Analog stick slots (reserved, not managed by PointerPool).
-        const val ANALOG_SLOT_LEFT  = 0
-        const val ANALOG_SLOT_RIGHT = 1
-        const val RESERVED_ANALOG_END = 2
-
-        // MotionEvent source for injected events — matches Android gamepad event stream.
-        private const val EVENT_SOURCE = InputDevice.SOURCE_TOUCHSCREEN
-        private const val EVENT_FLAGS  = 0
+        private const val TAG = "GameMapper/TouchInjector"
+        private const val INJECT_MODE_ASYNC = 0 // INJECT_INPUT_EVENT_MODE_ASYNC
+        private const val SWIPE_STEP_MS = 16L   // ~60fps for smooth swipe
     }
 
-    // ───────── Pointer pool for button taps/swipes ─────────
-    private val pointerPool = PointerPool(staleTimeoutMs = 3_000L)
-
-    // ───────── Reflection handles ─────────
-    private val inputManager: InputManager = InputManager.getInstance()
-    private val injectMethod: Method? = try {
-        InputManager::class.java.getMethod(
-            "injectInputEvent",
-            android.view.InputEvent::class.java,
-            Int::class.javaPrimitiveType
-        )
-    } catch (t: Throwable) {
-        Log.e(TAG, "injectInputEvent not accessible — touches will silently fail", t)
-        null
+    // ============================================================
+    // InputManager instance — obtained via reflection.
+    // InputManager.getInstance() is a hidden API but works in
+    // UserService process (no non-SDK API restrictions).
+    // ============================================================
+    private val inputManager: InputManager? by lazy {
+        try {
+            val method = InputManager::class.java.getMethod("getInstance")
+            method.invoke(null) as InputManager
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to get InputManager.getInstance()", e)
+            null
+        }
     }
 
-    // Mode 0 = INJECT_INPUT_EVENT_MODE_ASYNC (non-blocking).
-    private val INJECT_MODE_ASYNC = 0
+    // ============================================================
+    // injectInputEvent method — hidden API, obtained via reflection.
+    // Signature: injectInputEvent(InputEvent event, int mode)
+    // ============================================================
+    private val injectMethod by lazy {
+        try {
+            InputManager::class.java.getMethod(
+                "injectInputEvent",
+                android.view.InputEvent::class.java,
+                Int::class.javaPrimitiveType
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to get injectInputEvent method", e)
+            null
+        }
+    }
 
-    // ───────── Screen metrics (re-read on every call to handle rotation) ─────────
-    val screenWidthPx: Int  get() = getScreenWidth()
-    val screenHeightPx: Int get() = getScreenHeight()
-
-    // ───────── Analog slot state (slots 0-1, not in PointerPool) ─────────
-    private enum class AnalogState { FREE, DOWN, MOVE }
-
-    private data class AnalogSlot(
-        var state: AnalogState = AnalogState.FREE,
-        var pointerId: Int = 0,
+    // ============================================================
+    // Pointer state tracking for multi-touch
+    // ============================================================
+    data class PointerState(
         var x: Float = 0f,
         var y: Float = 0f,
-        var pressure: Float = 0f,
-        var size: Float = 0f,
-        var lastUsedNs: Long = 0L
+        var isDown: Boolean = false,
+        var pressure: Float = 1.0f,
+        var size: Float = 1.0f
     )
 
-    private val analogSlots = Array(RESERVED_ANALOG_END) { AnalogSlot() }
-    private val analogLock = ReentrantLock(false)
+    private val pointers = SparseArray<PointerState>()
+    private var baseDownTime: Long = 0L
 
-    // Monotonic pointer-id generator for analog slots — never reused within a 30 s window.
-    private val nextAnalogPointerId = AtomicInteger(1)
+    // Anti-ban pressure/size variance
+    @Volatile
+    private var antiBanEnabled = false
+    @Volatile
+    private var pressureVariance = 0.15f
+    @Volatile
+    private var sizeVariance = 0.10f
 
-    // ═══════════════════════════════════════════════════════════════════
-    // PUBLIC API — Pointer pool operations (button taps/swipes)
-    // ═══════════════════════════════════════════════════════════════════
+    private val rng = Random(System.currentTimeMillis())
 
-    /**
-     * Acquire a pointer from the pool.
-     * @return Pointer ID in [10..109], or -1 if pool exhausted.
-     */
-    fun acquirePointer(): Int = pointerPool.acquirePointer()
-
-    /**
-     * Release a pointer back to the pool.
-     * @param pointerId The ID returned by acquirePointer().
-     */
-    fun releasePointer(pointerId: Int) = pointerPool.releasePointer(pointerId)
-
-    /**
-     * Tap (down + up) at (x, y) using the given pointer ID.
-     * Caller must have acquired [pointerId] via acquirePointer() and is
-     * responsible for releasing it after this call returns.
-     *
-     * @param pointerId Pool-allocated pointer ID (10..109)
-     * @param x         Absolute X pixel coordinate
-     * @param y         Absolute Y pixel coordinate
-     */
-    fun tap(pointerId: Int, x: Int, y: Int) {
-        if (!validatePoolPointerId(pointerId)) return
-        // Clamp coordinates to screen bounds (strict input validation).
-        val sx = x.coerceIn(0, screenWidthPx - 1)
-        val sy = y.coerceIn(0, screenHeightPx - 1)
-        try {
-            injectEvent(pointerId, MotionEvent.ACTION_DOWN, sx.toFloat(), sy.toFloat(), pressure = 1f, size = 1f)
-            // Brief hold so the target app registers a complete tap (≥1 frame @ 60 Hz).
-            SystemClock.sleep(16)
-            injectEvent(pointerId, MotionEvent.ACTION_UP, sx.toFloat(), sy.toFloat(), pressure = 0f, size = 0f)
-        } catch (t: Throwable) {
-            Log.e(TAG, "tap failed at ($sx, $sy) id=$pointerId: ${t.message}")
-        }
+    fun setAntiBan(enabled: Boolean, pressVar: Float, sizeVar: Float) {
+        antiBanEnabled = enabled
+        pressureVariance = pressVar
+        sizeVariance = sizeVar
     }
 
-    /**
-     * Swipe from (x1,y1) to (x2,y2) over [durationMs] using the given pointer ID.
-     * Interpolates linearly with a ~16 ms step (60 Hz event stream).
-     *
-     * Caller must have acquired [pointerId] and is responsible for releasing it.
-     *
-     * @param pointerId  Pool-allocated pointer ID (10..109)
-     * @param x1, y1     Start coordinates (absolute pixels)
-     * @param x2, y2     End coordinates (absolute pixels)
-     * @param durationMs Swipe duration in milliseconds
-     */
-    fun swipe(
-        pointerId: Int,
-        x1: Int, y1: Int,
-        x2: Int, y2: Int,
-        durationMs: Long
-    ) {
-        if (!validatePoolPointerId(pointerId)) return
-        if (durationMs <= 0L) return
-        // Clamp all coordinates to screen bounds.
-        val sx1 = x1.coerceIn(0, screenWidthPx - 1)
-        val sy1 = y1.coerceIn(0, screenHeightPx - 1)
-        val sx2 = x2.coerceIn(0, screenWidthPx - 1)
-        val sy2 = y2.coerceIn(0, screenHeightPx - 1)
-        try {
-            injectEvent(pointerId, MotionEvent.ACTION_DOWN, sx1.toFloat(), sy1.toFloat(), pressure = 1f, size = 1f)
-            val steps = (durationMs / 16L).toInt().coerceIn(1, 240)
-            val stepMs = durationMs / steps
-            val startUptime = SystemClock.uptimeMillis()
-            for (i in 1 until steps) {
-                val t = i.toFloat() / steps
-                val xi = (sx1 + (sx2 - sx1) * t).toInt()
-                val yi = (sy1 + (sy2 - sy1) * t).toInt()
-                // Sleep to maintain consistent step cadence.
-                val targetUptime = startUptime + (i * stepMs)
-                val sleep = targetUptime - SystemClock.uptimeMillis()
-                if (sleep > 0) SystemClock.sleep(sleep)
-                injectEvent(pointerId, MotionEvent.ACTION_MOVE, xi.toFloat(), yi.toFloat(), pressure = 1f, size = 1f)
+    // ============================================================
+    // Core injection method — builds and injects a MotionEvent
+    // ============================================================
+    @Synchronized
+    private fun injectMotionEvent(action: Int, actionIndex: Int, displayId: Int) {
+        if (inputManager == null || injectMethod == null) {
+            Log.e(TAG, "InputManager or injectMethod not available")
+            return
+        }
+
+        val downTime = baseDownTime
+        val eventTime = SystemClock.uptimeMillis()
+
+        // Count active pointers
+        var pointerCount = 0
+        for (i in 0 until pointers.size()) {
+            if (pointers.valueAt(i).isDown) pointerCount++
+        }
+
+        // For ACTION_UP/ACTION_CANCEL, ensure at least 1 pointer
+        if (pointerCount == 0 && (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL)) {
+            pointerCount = 1
+        }
+        if (pointerCount == 0) return
+
+        // Build pointer properties and coordinates
+        val pointerProperties = Array(pointerCount) { MotionEvent.PointerProperties() }
+        val pointerCoords = Array(pointerCount) { MotionEvent.PointerCoords() }
+
+        var activeIndex = 0
+        for (i in 0 until pointers.size()) {
+            val pointerId = pointers.keyAt(i)
+            val state = pointers.valueAt(i)
+
+            val isActive = state.isDown ||
+                ((action and MotionEvent.ACTION_MASK) == MotionEvent.ACTION_POINTER_UP && pointerId == actionIndex) ||
+                ((action and MotionEvent.ACTION_MASK) == MotionEvent.ACTION_UP)
+
+            if (isActive) {
+                pointerProperties[activeIndex].id = pointerId
+                pointerProperties[activeIndex].toolType = MotionEvent.TOOL_TYPE_FINGER
+
+                pointerCoords[activeIndex].x = state.x
+                pointerCoords[activeIndex].y = state.y
+                pointerCoords[activeIndex].pressure = if (state.pressure > 0) state.pressure else applyPressureVariance()
+                pointerCoords[activeIndex].size = if (state.size > 0) state.size else applySizeVariance()
+                activeIndex++
             }
-            injectEvent(pointerId, MotionEvent.ACTION_UP, sx2.toFloat(), sy2.toFloat(), pressure = 0f, size = 0f)
-        } catch (t: Throwable) {
-            Log.e(TAG, "swipe failed id=$pointerId: ${t.message}")
         }
+
+        if (activeIndex == 0) return
+
+        // Calculate compacted action index for POINTER_DOWN/POINTER_UP
+        var compactedActionIndex = 0
+        if ((action and MotionEvent.ACTION_MASK) == MotionEvent.ACTION_POINTER_DOWN ||
+            (action and MotionEvent.ACTION_MASK) == MotionEvent.ACTION_POINTER_UP
+        ) {
+            for (i in 0 until activeIndex) {
+                if (pointerProperties[i].id == actionIndex) {
+                    compactedActionIndex = i
+                    break
+                }
+            }
+        }
+
+        val finalAction = if ((action and MotionEvent.ACTION_MASK) == MotionEvent.ACTION_POINTER_DOWN ||
+            (action and MotionEvent.ACTION_MASK) == MotionEvent.ACTION_POINTER_UP
+        ) {
+            (action and MotionEvent.ACTION_MASK) or
+                (compactedActionIndex shl MotionEvent.ACTION_POINTER_INDEX_SHIFT)
+        } else {
+            action
+        }
+
+        // Create MotionEvent
+        val event = MotionEvent.obtain(
+            downTime, eventTime, finalAction, activeIndex,
+            pointerProperties, pointerCoords,
+            0, 0, 1f, 1f, 0, 0,
+            InputDevice.SOURCE_TOUCHSCREEN, 0
+        )
+
+        // Set displayId if supported (API 30+)
+        try {
+            if (displayId != 0) {
+                val setDisplayIdMethod = MotionEvent::class.java.getMethod("setDisplayId", Int::class.javaPrimitiveType)
+                setDisplayIdMethod.invoke(event, displayId)
+            }
+        } catch (_: Exception) {
+            // displayId not supported on this API level — inject on default display
+        }
+
+        // Inject the event
+        try {
+            injectMethod?.invoke(inputManager, event, INJECT_MODE_ASYNC)
+        } catch (e: Exception) {
+            Log.e(TAG, "injectInputEvent failed: action=$finalAction", e)
+        }
+        event.recycle()
     }
 
-    // ═══════════════════════════════════════════════════════════════════
-    // PUBLIC API — Analog stick operations (slots 0-1, not in pool)
-    // ═══════════════════════════════════════════════════════════════════
+    // ============================================================
+    // Public API — called from GameMapperUserService
+    // ============================================================
 
     /**
-     * Continuous-touch entry for analog sticks. Acquires slot (or upgrades FREE → DOWN).
-     * Pipeline calls this every tick; we MOVE only when (x,y) moved beyond deadzone.
-     *
-     * @param pointerSlot 0 for left analog, 1 for right analog
-     * @param x           Absolute X pixel coordinate
-     * @param y           Absolute Y pixel coordinate
-     * @param pressure    Touch pressure (0..1)
+     * Single tap at (x, y).
+     * Creates ACTION_DOWN → short delay → ACTION_UP.
      */
-    fun analogMove(pointerSlot: Int, x: Float, y: Float, pressure: Float) {
-        if (pointerSlot !in 0 until RESERVED_ANALOG_END) return
-        analogLock.lock()
-        try {
-            val s = analogSlots[pointerSlot]
-            val now = SystemClock.elapsedRealtimeNanos()
-            if (s.state == AnalogState.FREE) {
-                s.state = AnalogState.DOWN
-                s.pointerId = allocateAnalogPointerId()
-                s.x = x; s.y = y; s.pressure = pressure; s.size = 1f
-                s.lastUsedNs = now
-                emitAnalogEvent(pointerSlot, MotionEvent.ACTION_DOWN, x, y, pressure, 1f)
+    @Synchronized
+    fun tap(x: Float, y: Float, displayId: Int) {
+        val pointerId = 99 // Reserved ID for single taps
+        val state = getOrCreatePointer(pointerId)
+        state.x = x
+        state.y = y
+        state.isDown = true
+        state.pressure = applyPressureVariance()
+        state.size = applySizeVariance()
+
+        baseDownTime = SystemClock.uptimeMillis()
+        injectMotionEvent(MotionEvent.ACTION_DOWN, pointerId, displayId)
+
+        // Brief hold (20ms) for the tap to register
+        try { Thread.sleep(20) } catch (_: InterruptedException) { Thread.currentThread().interrupt() }
+
+        state.isDown = false
+        injectMotionEvent(MotionEvent.ACTION_UP, pointerId, displayId)
+        pointers.remove(pointerId)
+    }
+
+    /**
+     * Swipe from (startX, startY) to (endX, endY) over durationMs.
+     * Creates a series of ACTION_DOWN → ACTION_MOVE → ACTION_UP events.
+     */
+    @Synchronized
+    fun swipe(startX: Float, startY: Float, endX: Float, endY: Float, durationMs: Long, displayId: Int) {
+        val pointerId = 98 // Reserved ID for swipes
+        val state = getOrCreatePointer(pointerId)
+        state.x = startX
+        state.y = startY
+        state.isDown = true
+        state.pressure = applyPressureVariance()
+        state.size = applySizeVariance()
+
+        baseDownTime = SystemClock.uptimeMillis()
+        injectMotionEvent(MotionEvent.ACTION_DOWN, pointerId, displayId)
+
+        // Interpolate movement over duration
+        val steps = (durationMs / SWIPE_STEP_MS).coerceAtLeast(2)
+        val stepDelay = durationMs / steps
+
+        for (step in 1..steps) {
+            val progress = step.toFloat() / steps
+            val currentX = startX + (endX - startX) * progress
+            val currentY = startY + (endY - startY) * progress
+
+            state.x = currentX
+            state.y = currentY
+            injectMotionEvent(MotionEvent.ACTION_MOVE, 0, displayId)
+
+            try { Thread.sleep(stepDelay) } catch (_: InterruptedException) { Thread.currentThread().interrupt(); return }
+        }
+
+        state.isDown = false
+        injectMotionEvent(MotionEvent.ACTION_UP, pointerId, displayId)
+        pointers.remove(pointerId)
+    }
+
+    /**
+     * Multi-touch down — press multiple pointers simultaneously.
+     */
+    @Synchronized
+    fun multiTouchDown(pointerIds: List<Int>, coords: List<Pair<Float, Float>>, displayId: Int) {
+        for ((index, id) in pointerIds.withIndex()) {
+            val state = getOrCreatePointer(id)
+            state.x = coords[index].first
+            state.y = coords[index].second
+            state.isDown = true
+            state.pressure = applyPressureVariance()
+            state.size = applySizeVariance()
+
+            // Count active pointers before this one
+            var activeCount = 0
+            for (i in 0 until pointers.size()) {
+                if (pointers.valueAt(i).isDown) activeCount++
+            }
+
+            if (activeCount == 1) {
+                baseDownTime = SystemClock.uptimeMillis()
+                injectMotionEvent(MotionEvent.ACTION_DOWN, id, displayId)
             } else {
-                // Coalesce small moves to avoid flooding InputManager.
-                val dx = x - s.x; val dy = y - s.y
-                if (dx * dx + dy * dy < 1.0f && s.state == AnalogState.MOVE) {
-                    s.lastUsedNs = now
-                    return
-                }
-                s.state = AnalogState.MOVE
-                s.x = x; s.y = y; s.pressure = pressure
-                s.lastUsedNs = now
-                emitAnalogEvent(pointerSlot, MotionEvent.ACTION_MOVE, x, y, pressure, 1f)
+                injectMotionEvent(MotionEvent.ACTION_POINTER_DOWN, id, displayId)
             }
-        } finally {
-            analogLock.unlock()
         }
     }
-
-    /** Release an analog slot (sends ACTION_UP). */
-    fun analogUp(pointerSlot: Int) {
-        if (pointerSlot !in 0 until RESERVED_ANALOG_END) return
-        analogLock.lock()
-        try {
-            val s = analogSlots[pointerSlot]
-            if (s.state == AnalogState.FREE) return
-            val x = s.x; val y = s.y
-            s.state = AnalogState.FREE
-            s.lastUsedNs = SystemClock.elapsedRealtimeNanos()
-            emitAnalogEvent(pointerSlot, MotionEvent.ACTION_UP, x, y, 0f, 0f)
-        } finally {
-            analogLock.unlock()
-        }
-    }
-
-    // ═══════════════════════════════════════════════════════════════════
-    // PUBLIC API — Pool maintenance + diagnostics
-    // ═══════════════════════════════════════════════════════════════════
 
     /**
-     * Release every active pointer — both pool-managed and analog slots.
-     * Used by pipeline.stop() and on panic.
+     * Multi-touch move — update positions of active pointers.
      */
-    fun releaseAll() {
-        // 0) Release multi-touch session mappings.
-        try { releaseMultiTouchSession() } catch (t: Throwable) {
-            Log.e(TAG, "releaseMultiTouchSession() failed: ${t.message}")
+    @Synchronized
+    fun multiTouchMove(pointerIds: List<Int>, coords: List<Pair<Float, Float>>, displayId: Int) {
+        for ((index, id) in pointerIds.withIndex()) {
+            val state = pointers.get(id) ?: continue
+            state.x = coords[index].first
+            state.y = coords[index].second
         }
-        // 1) Reset the pointer pool (releases all button tap/swipe pointers).
-        try { pointerPool.reset() } catch (t: Throwable) {
-            Log.e(TAG, "pointerPool.reset() failed: ${t.message}")
+        injectMotionEvent(MotionEvent.ACTION_MOVE, 0, displayId)
+    }
+
+    /**
+     * Touch up for a specific pointer.
+     * If this is the last active pointer, dispatches ACTION_UP.
+     * Otherwise dispatches ACTION_POINTER_UP.
+     */
+    @Synchronized
+    fun touchUp(pointerId: Int, displayId: Int) {
+        val state = pointers.get(pointerId) ?: return
+
+        // Count active pointers BEFORE setting isDown = false
+        var activeCount = 0
+        for (i in 0 until pointers.size()) {
+            if (pointers.valueAt(i).isDown) activeCount++
         }
-        // 2) Release analog slots.
-        analogLock.lock()
-        try {
-            for (slot in 0 until RESERVED_ANALOG_END) {
-                val s = analogSlots[slot]
-                if (s.state == AnalogState.FREE) continue
-                val x = s.x; val y = s.y
-                s.state = AnalogState.FREE
-                s.lastUsedNs = SystemClock.elapsedRealtimeNanos()
-                try {
-                    emitAnalogEvent(slot, MotionEvent.ACTION_UP, x, y, 0f, 0f)
-                } catch (_: Throwable) { /* keep releasing other slots */ }
+
+        if (activeCount <= 1) {
+            // Last pointer up
+            injectMotionEvent(MotionEvent.ACTION_UP, pointerId, displayId)
+            state.isDown = false
+            pointers.clear()
+        } else {
+            // One of multiple pointers up
+            injectMotionEvent(MotionEvent.ACTION_POINTER_UP, pointerId, displayId)
+            state.isDown = false
+            pointers.remove(pointerId)
+        }
+    }
+
+    /**
+     * Analog stick move — touch down at center, then move to target.
+     * If pointer is not yet down, creates ACTION_DOWN at center first.
+     * If already down, dispatches ACTION_MOVE to target.
+     */
+    @Synchronized
+    fun analogMove(pointerId: Int, centerX: Float, centerY: Float, targetX: Float, targetY: Float, displayId: Int) {
+        var state = pointers.get(pointerId)
+
+        if (state == null || !state.isDown) {
+            // Initial touch down at center
+            state = getOrCreatePointer(pointerId)
+            state.x = centerX
+            state.y = centerY
+            state.isDown = true
+            state.pressure = applyPressureVariance()
+            state.size = applySizeVariance()
+
+            var activeCount = 0
+            for (i in 0 until pointers.size()) {
+                if (pointers.valueAt(i).isDown) activeCount++
             }
-        } finally {
-            analogLock.unlock()
-        }
-    }
 
-    /**
-     * Number of active pointers (pool + analog). Used for backpressure
-     * signaling to InputPipelineWorker.
-     */
-    fun pendingQueueDepth(): Int {
-        return pointerPool.activeCount() + analogActiveCount()
-    }
-
-    /**
-     * Evict stale pointers from the pool. Called periodically by
-     * InputPipelineWorker.
-     */
-    fun evictStalePointers(timeoutMs: Long): Int {
-        return pointerPool.evictStalePointers(timeoutMs)
-    }
-
-    // ═══════════════════════════════════════════════════════════════════
-    // Internal helpers
-    // ═══════════════════════════════════════════════════════════════════
-
-    private fun validatePoolPointerId(pointerId: Int): Boolean {
-        if (pointerId < PointerPool.ID_OFFSET || pointerId > PointerPool.MAX_ID) {
-            Log.w(TAG, "Invalid pointer ID $pointerId (valid: ${PointerPool.ID_OFFSET}..${PointerPool.MAX_ID})")
-            return false
-        }
-        return true
-    }
-
-    private fun analogActiveCount(): Int {
-        analogLock.lock()
-        try {
-            var n = 0
-            for (s in analogSlots) if (s.state != AnalogState.FREE) n++
-            return n
-        } finally {
-            analogLock.unlock()
-        }
-    }
-
-    /**
-     * PointerId allocator for analog slots with a 30 s anti-reuse window.
-     * Android's InputDispatcher rejects pointer IDs that are still considered
-     * "active" by stale windows, so we monotonically increase and wrap at
-     * 0x7FFFFFFF (signed-int safe).
-     */
-    private fun allocateAnalogPointerId(): Int {
-        return nextAnalogPointerId.getAndIncrement().and(0x7FFFFFFF)
-    }
-
-    /**
-     * Inject a MotionEvent for a pool-managed pointer (IDs 10-109).
-     * Converts the pointer ID to a MotionEvent pointer index by subtracting
-     * the pool ID_OFFSET (so pool IDs 10..109 map to MotionEvent pointer
-     * indices 0..99).
-     */
-    private fun injectEvent(
-        pointerId: Int,
-        action: Int,
-        x: Float, y: Float,
-        pressure: Float,
-        size: Float
-    ) {
-        val m = injectMethod ?: return
-        val now = SystemClock.uptimeMillis()
-
-        val props = MotionEvent.PointerProperties().apply {
-            id = pointerId
-            toolType = MotionEvent.TOOL_TYPE_FINGER
-        }
-        val coords = MotionEvent.PointerCoords().apply {
-            this.x = x
-            this.y = y
-            this.pressure = pressure
-            this.size = size
-            // Required fields — set to sane defaults.
-            touchMajor = pressure * 8f
-            touchMinor = pressure * 8f
-            orientation = 0f
-        }
-
-        val event = try {
-            MotionEvent.obtain(
-                /* downTime     */ now,
-                /* eventTime    */ now,
-                /* action       */ action,
-                /* pointerCount */ 1,
-                /* pointerProps */ arrayOf(props),
-                /* pointerCoords*/ arrayOf(coords),
-                /* metaState    */ 0,
-                /* buttonState  */ 0,
-                /* xPrecision   */ 1f,
-                /* yPrecision   */ 1f,
-                /* deviceId     */ 0,
-                /* edgeFlags    */ 0,
-                /* source       */ EVENT_SOURCE,
-                /* flags        */ EVENT_FLAGS
-            )
-        } catch (t: Throwable) {
-            Log.w(TAG, "MotionEvent.obtain failed: ${t.message}")
-            return
-        }
-
-        try {
-            m.invoke(inputManager, event, INJECT_MODE_ASYNC)
-        } catch (t: Throwable) {
-            Log.w(TAG, "inject failed: ${t.message}")
-        } finally {
-            event.recycle()
-        }
-    }
-
-    // ═══════════════════════════════════════════════════════════════════
-    // Backward-compatible wrappers for GameMapperUserService
-    // ═══════════════════════════════════════════════════════════════════
-    // These methods maintain the old API signatures so existing callers
-    // (GameMapperUserService) continue to work without modification.
-    // Internally they use the new PointerPool for ID management.
-
-    /**
-     * Backward-compatible tap: acquires a pool pointer internally,
-     * performs the tap, then releases the pointer.
-     *
-     * @param x         X coordinate (Float — jittered by caller)
-     * @param y         Y coordinate (Float — jittered by caller)
-     * @param displayId Display ID (ignored — injection is always on default display)
-     */
-    fun tap(x: Float, y: Float, displayId: Int = 0) {
-        val pid = acquirePointer()
-        if (pid < 0) {
-            Log.w(TAG, "tap(wrapper): pool exhausted, dropping tap at ($x, $y)")
-            return
-        }
-        try {
-            tap(pid, x.toInt(), y.toInt())
-        } finally {
-            releasePointer(pid)
-        }
-    }
-
-    /**
-     * Backward-compatible swipe: acquires a pool pointer internally,
-     * performs the swipe, then releases the pointer.
-     */
-    fun swipe(
-        x1: Float, y1: Float,
-        x2: Float, y2: Float,
-        durationMs: Long, displayId: Int = 0
-    ) {
-        val pid = acquirePointer()
-        if (pid < 0) {
-            Log.w(TAG, "swipe(wrapper): pool exhausted, dropping swipe")
-            return
-        }
-        try {
-            swipe(pid, x1.toInt(), y1.toInt(), x2.toInt(), y2.toInt(), durationMs)
-        } finally {
-            releasePointer(pid)
-        }
-    }
-
-    /**
-     * Backward-compatible touchUp: releases a pool pointer by caller-provided ID.
-     * In the old API, pointerId was caller-managed. Here we treat it as a pool ID.
-     */
-    fun touchUp(pointerId: Int, displayId: Int = 0) {
-        releasePointer(pointerId)
-    }
-
-    /**
-     * Backward-compatible analogMove: maps pointerId to analog slot 0 or 1
-     * using pointerId % 2 heuristic. Left stick typically uses even IDs,
-     * right stick uses odd IDs.
-     */
-    fun analogMove(
-        pointerId: Int,
-        centerX: Float, centerY: Float,
-        targetX: Float, targetY: Float,
-        displayId: Int = 0
-    ) {
-        val slot = pointerId % RESERVED_ANALOG_END  // → 0 or 1
-        analogMove(slot, targetX, targetY, 1.0f)
-    }
-
-    // ───── Multi-touch session tracking (for backward compat) ─────
-    // Maps caller-provided pointer IDs to pool-allocated IDs.
-    private val multiTouchMap = java.util.concurrent.ConcurrentHashMap<Int, Int>()
-    private val multiTouchLock = ReentrantLock(false)
-
-    /**
-     * Backward-compatible multiTouchDown: acquires pool pointers for each
-     * caller-provided ID and sends ACTION_DOWN for each.
-     */
-    fun multiTouchDown(ids: List<Int>, coords: List<Pair<Float, Float>>, displayId: Int = 0) {
-        if (ids.size != coords.size) {
-            Log.w(TAG, "multiTouchDown: ids.size=${ids.size} != coords.size=${coords.size}")
-            return
-        }
-        multiTouchLock.lock()
-        try {
-            for (i in ids.indices) {
-                val callerId = ids[i]
-                val (x, y) = coords[i]
-                var poolId = multiTouchMap[callerId]
-                if (poolId == null) {
-                    poolId = acquirePointer()
-                    if (poolId < 0) {
-                        Log.w(TAG, "multiTouchDown: pool exhausted at index $i")
-                        continue
-                    }
-                    multiTouchMap[callerId] = poolId
-                }
-                injectEvent(poolId, MotionEvent.ACTION_DOWN, x, y, 1f, 1f)
+            if (activeCount == 1) {
+                baseDownTime = SystemClock.uptimeMillis()
+                injectMotionEvent(MotionEvent.ACTION_DOWN, pointerId, displayId)
+            } else {
+                injectMotionEvent(MotionEvent.ACTION_POINTER_DOWN, pointerId, displayId)
             }
-        } finally {
-            multiTouchLock.unlock()
+        }
+
+        // Move to target position
+        if (abs(state.x - targetX) > 0.5f || abs(state.y - targetY) > 0.5f) {
+            state.x = targetX
+            state.y = targetY
+            injectMotionEvent(MotionEvent.ACTION_MOVE, 0, displayId)
         }
     }
 
-    /**
-     * Backward-compatible multiTouchMove: sends ACTION_MOVE for each
-     * previously-acquired pointer.
-     */
-    fun multiTouchMove(ids: List<Int>, coords: List<Pair<Float, Float>>, displayId: Int = 0) {
-        if (ids.size != coords.size) {
-            Log.w(TAG, "multiTouchMove: ids.size=${ids.size} != coords.size=${coords.size}")
-            return
+    // ============================================================
+    // Private helpers
+    // ============================================================
+
+    private fun getOrCreatePointer(id: Int): PointerState {
+        var state = pointers.get(id)
+        if (state == null) {
+            state = PointerState()
+            pointers.put(id, state)
         }
-        multiTouchLock.lock()
-        try {
-            for (i in ids.indices) {
-                val callerId = ids[i]
-                val (x, y) = coords[i]
-                val poolId = multiTouchMap[callerId] ?: continue
-                injectEvent(poolId, MotionEvent.ACTION_MOVE, x, y, 1f, 1f)
-            }
-        } finally {
-            multiTouchLock.unlock()
-        }
+        return state
     }
 
-    /**
-     * Release all multi-touch session pointers and clear the mapping.
-     * Called by releaseAll() to ensure no leaked pool pointers.
-     */
-    fun releaseMultiTouchSession() {
-        multiTouchLock.lock()
-        try {
-            for ((_, poolId) in multiTouchMap) {
-                try { releasePointer(poolId) } catch (_: Throwable) {}
-            }
-            multiTouchMap.clear()
-        } finally {
-            multiTouchLock.unlock()
-        }
+    private fun applyPressureVariance(): Float {
+        if (!antiBanEnabled || pressureVariance <= 0f) return 1.0f
+        return 1.0f - (rng.nextFloat() * pressureVariance)
     }
 
-    /**
-     * Build and inject a MotionEvent for an analog slot pointer.
-     * Called with analogLock held.
-     */
-    private fun emitAnalogEvent(
-        pointerSlot: Int,
-        action: Int,
-        x: Float, y: Float,
-        pressure: Float,
-        size: Float
-    ) {
-        val m = injectMethod ?: return
-        if (pointerSlot !in 0 until RESERVED_ANALOG_END) return
-        val s = analogSlots[pointerSlot]
-        val pointerId = if (s.pointerId != 0) s.pointerId else pointerSlot
-        val now = SystemClock.uptimeMillis()
-
-        val props = MotionEvent.PointerProperties().apply {
-            id = pointerId
-            toolType = MotionEvent.TOOL_TYPE_FINGER
-        }
-        val coords = MotionEvent.PointerCoords().apply {
-            this.x = x
-            this.y = y
-            this.pressure = pressure
-            this.size = size
-            touchMajor = pressure * 8f
-            touchMinor = pressure * 8f
-            orientation = 0f
-        }
-
-        val event = try {
-            MotionEvent.obtain(
-                now, now, action, 1,
-                arrayOf(props), arrayOf(coords),
-                0, 0, 1f, 1f, 0, 0, EVENT_SOURCE, EVENT_FLAGS
-            )
-        } catch (t: Throwable) {
-            Log.w(TAG, "Analog MotionEvent.obtain failed: ${t.message}")
-            return
-        }
-
-        try {
-            m.invoke(inputManager, event, INJECT_MODE_ASYNC)
-        } catch (t: Throwable) {
-            Log.w(TAG, "Analog inject failed: ${t.message}")
-        } finally {
-            event.recycle()
-        }
+    private fun applySizeVariance(): Float {
+        if (!antiBanEnabled || sizeVariance <= 0f) return 1.0f
+        return 1.0f - (rng.nextFloat() * sizeVariance)
     }
 }

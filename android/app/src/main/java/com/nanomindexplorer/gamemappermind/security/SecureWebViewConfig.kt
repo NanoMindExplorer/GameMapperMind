@@ -96,7 +96,6 @@ object SecureWebViewConfig {
 
         // ───── 6. Caching — disable for security; we re-bundle on every release ─────
         settings.cacheMode = android.webkit.WebSettings.LOAD_NO_CACHE
-        settings.setAppCacheEnabled(false)  // deprecated but enforce
 
         // ───── 7. Disable algorithmic dark mode forcing (let CSS handle it) ─────
         try {

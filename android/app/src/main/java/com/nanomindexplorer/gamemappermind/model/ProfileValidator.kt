@@ -2,7 +2,7 @@ package com.nanomindexplorer.gamemappermind.model
 
 import android.util.Log
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonException
+import kotlinx.serialization.SerializationException
 import org.json.JSONObject
 
 /**
@@ -163,10 +163,10 @@ object ProfileValidator {
      */
     fun validateProfile(profile: GameProfile): Boolean {
         return try {
-            when (validate(profile)) {
+            when (val result = validate(profile)) {
                 is ValidationResult.Ok -> true
                 is ValidationResult.Err -> {
-                    Log.w(TAG, "validateProfile(GameProfile): validation failed — ${(it as ValidationResult.Err).joined()}")
+                    Log.w(TAG, "validateProfile(GameProfile): validation failed — ${result.joined()}")
                     false
                 }
             }
@@ -188,7 +188,7 @@ object ProfileValidator {
         // 1) Deserialize.
         val profile: GameProfile = try {
             json.decodeFromString(GameProfile.serializer(), jsonStr)
-        } catch (e: JsonException) {
+        } catch (e: SerializationException) {
             return ValidationResult.Err(listOf("JSON parse error: ${e.message}"))
         } catch (e: Throwable) {
             return ValidationResult.Err(listOf("Unexpected parse error: ${e.message}"))

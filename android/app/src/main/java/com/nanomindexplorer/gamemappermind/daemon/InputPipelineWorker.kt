@@ -5,29 +5,53 @@ import android.os.HandlerThread
 import android.os.Process
 import android.os.SystemClock
 import android.util.Log
-import android.view.InputDevice
-import android.view.MotionEvent
 import com.nanomindexplorer.gamemappermind.input.AnalogProcessor
 import com.nanomindexplorer.gamemappermind.input.GamepadManager
+import com.nanomindexplorer.gamemappermind.input.PointerPool
 import com.nanomindexplorer.gamemappermind.input.TouchInjector
 import com.nanomindexplorer.gamemappermind.model.GameProfile
 import com.nanomindexplorer.gamemappermind.model.Mapping
 import org.json.JSONObject
 
 /**
- * InputPipelineWorker — adaptive 60–250 Hz pipeline.
+ * InputPipelineWorker — adaptive pipeline with dynamic polling.
  *
- * FASE 2.1 — Dynamic Adaptive Polling:
- *  - Monitors CPU load (via /proc/stat) and gamepad activity (analog delta + button rate).
- *  - Dynamically switches polling period among {4 ms (250 Hz), 8 ms (125 Hz), 16 ms (60 Hz)}
- *    using a hysteresis band to avoid flapping.
- *  - Touch-injection backpressure detection: if the injector queue depth crosses a watermark,
- *    the pipeline temporarily downshifts to avoid flooding InputManager.
- *  - All sensitive state is guarded by `pipelineLock`; hot-path reads use volatile snapshots.
+ * FASE 2.1 — Dynamic Adaptive Polling (idle 50 ms, active 10 ms):
+ *
+ *   Best logical algorithm:
+ *     1. Use System.nanoTime() for sub-millisecond precision timing.
+ *        SystemClock.uptimeMillis() only has ~1 ms resolution which causes
+ *        jitter at high polling frequencies. nanoTime() gives true nanosecond
+ *        precision and is monotonic.
+ *     2. Two-tier polling:
+ *          - IDLE  (50 ms / 20 Hz): no gamepad activity for ≥ 1500 ms
+ *          - ACTIVE (10 ms / 100 Hz): any button press or analog movement
+ *        This minimizes CPU usage when the user puts the controller down
+ *        while staying responsive the instant they resume play.
+ *     3. Hysteresis band (1500 ms idle before demote, any-event instant
+ *        promote) prevents flapping between tiers during brief pauses.
+ *     4. CPU load monitoring via /proc/stat with EMA smoothing (α=0.4).
+ *        If CPU ≥ 85%, force ACTIVE→IDLE downgrade even if gamepad is
+ *        active, to avoid starving the foreground game.
+ *     5. Touch-injection backpressure: if TouchInjector queue depth ≥ 32
+ *        (hard watermark), force IDLE until queue drains below 12 (soft
+ *        watermark). Prevents pipeline from flooding InputManager.
+ *     6. Self-healing: tickRunnable catches all Throwable — pipeline
+ *        thread never dies. Worker thread priority is
+ *        THREAD_PRIORITY_URGENT_DISPLAY (-8) to minimize jitter.
+ *     7. All sensitive state guarded by `pipelineLock`. Hot-path reads
+ *        use @Volatile snapshots for lock-free access from the worker
+ *        thread.
  *
  * Thread model:
- *  - Worker thread priority = THREAD_PRIORITY_URGENT_DISPLAY (-8) to minimize jitter.
- *  - Single looper, no chained handlers — every tick is self-contained.
+ *   - Single HandlerThread ("GMM-Pipeline") with single looper.
+ *   - No chained handlers — every tick is self-contained.
+ *   - postDelayed(this, delayMs) schedules next tick.
+ *
+ * @param gamepadManager   Source of gamepad snapshots
+ * @param touchInjector    Touch injection target
+ * @param analogProcessor  Analog stick → touch coordinate translator
+ * @param onGamepadEvent   Callback to forward events to JS layer
  */
 class InputPipelineWorker(
     private val gamepadManager: GamepadManager,
@@ -38,36 +62,44 @@ class InputPipelineWorker(
     companion object {
         private const val TAG = "InputPipelineWorker"
 
-        // Polling tiers (nanoseconds per tick).
-        private const val TIER_HIGH_NS   = 4_000_000L   // 250 Hz — active analog
-        private const val TIER_MID_NS    = 8_000_000L   // 125 Hz — buttons only / light analog
-        private const val TIER_LOW_NS    = 16_000_000L  // 60 Hz  — idle / backpressure
+        // ───── Polling tiers (nanoseconds per tick) ─────
+        // FASE 2.1: idle 50 ms (20 Hz), active 10 ms (100 Hz).
+        // Using System.nanoTime() for sub-millisecond precision.
+        private const val TIER_ACTIVE_NS = 10_000_000L   // 10 ms / 100 Hz — gamepad active
+        private const val TIER_IDLE_NS   = 50_000_000L   // 50 ms / 20 Hz  — gamepad idle
 
-        // Hysteresis thresholds (avoid flapping).
-        private const val PROMOTE_MID_TO_HIGH_ANALOG_DELTA = 0.06f   // ≥6% deflection → high
-        private const val DEMOTE_HIGH_TO_MID_ANALOG_DELTA  = 0.02f   // ≤2% for ≥300 ms → mid
-        private const val DEMOTE_MID_TO_LOW_IDLE_MS        = 1_500L  // no events 1.5 s → low
-        private const val PROMOTE_LOW_TO_MID_ANY_EVENT     = true    // any event → mid
+        // ───── Hysteresis thresholds (anti-flapping) ─────
+        // Promote IDLE → ACTIVE on any event within this window.
+        private const val PROMOTE_IDLE_TO_ACTIVE_IDLE_MS = 1_500L   // ≤ 1.5 s idle → demote
+        private const val ACTIVE_EVENT_RECENCY_MS        = 100L     // event in last 100 ms = active
 
-        // CPU load thresholds (0..1).
+        // ───── CPU load thresholds (0..1) ─────
         private const val CPU_HIGH_WATERMARK = 0.85f
         private const val CPU_LOW_WATERMARK  = 0.55f
 
-        // Touch-injection backpressure.
+        // ───── Touch-injection backpressure ─────
         private const val INJECT_QUEUE_HARD_WATERMARK = 32
         private const val INJECT_QUEUE_SOFT_WATERMARK = 12
 
-        // CPU sampling cadence — /proc/stat parsing is cheap but not free.
-        private const val CPU_SAMPLE_INTERVAL_TICKS = 25  // ~every 100 ms @ 250 Hz
+        // ───── CPU sampling cadence ─────
+        // /proc/stat parsing is cheap but not free. Sample every N ticks.
+        // At ACTIVE (100 Hz), this is ~every 100 ms. At IDLE (20 Hz), ~500 ms.
+        private const val CPU_SAMPLE_INTERVAL_TICKS = 10
 
-        // Activity bookkeeping window.
+        // ───── Activity bookkeeping window ─────
         private const val ACTIVITY_WINDOW_MS = 250L
+
+        // ───── Pointer pool maintenance cadence ─────
+        // Trigger LRU cleanup on TouchInjector's PointerPool every N ticks.
+        // Pool entries idle for > POOL_TIMEOUT_MS are evicted.
+        private const val POINTER_POOL_CLEANUP_TICKS = 50    // ~every 500 ms at ACTIVE
+        private const val POINTER_POOL_TIMEOUT_MS    = 3_000L
     }
 
     // ───────── Pipeline state ─────────
     @Volatile private var running = false
-    @Volatile private var currentPeriodNs = TIER_LOW_NS
-    @Volatile private var currentTier: Tier = Tier.LOW
+    @Volatile private var currentPeriodNs = TIER_IDLE_NS
+    @Volatile private var currentTier: Tier = Tier.IDLE
 
     private val pipelineLock = Any()
     private var profile: GameProfile? = null
@@ -89,30 +121,36 @@ class InputPipelineWorker(
     private var eventCount = 0
     private val eventLock = Any()
 
-    // High-tier residency tracker (to apply hysteresis on demotion).
-    @Volatile private var lowAnalogSinceMs: Long = 0L
-
     // ───────── CPU sampler ─────────
     private var cpuPrevIdle = 0L
     private var cpuPrevTotal = 0L
     @Volatile private var cpuLoadSmoothed = 0f
     private var cpuSampleTickCounter = 0
 
-    private enum class Tier { LOW, MID, HIGH }
+    // ───────── Pointer pool cleanup counter ─────────
+    private var poolCleanupTickCounter = 0
+
+    private enum class Tier { IDLE, ACTIVE }
 
     // ───────── Lifecycle ─────────
 
+    /**
+     * Start the pipeline. Idempotent — calling twice is a no-op.
+     * Initializes worker thread with THREAD_PRIORITY_URGENT_DISPLAY (-8)
+     * to minimize scheduling jitter at 100 Hz polling.
+     */
     fun start() {
         synchronized(pipelineLock) {
             if (running) return
             running = true
-            currentTier = Tier.LOW
-            currentPeriodNs = TIER_LOW_NS
-            lowAnalogSinceMs = SystemClock.uptimeMillis()
+            currentTier = Tier.IDLE
+            currentPeriodNs = TIER_IDLE_NS
+            lastEventUptimeMs = SystemClock.uptimeMillis()
             cpuPrevIdle = 0L
             cpuPrevTotal = 0L
             cpuLoadSmoothed = 0f
             cpuSampleTickCounter = 0
+            poolCleanupTickCounter = 0
             resetEventBuffer()
 
             val thread = HandlerThread("GMM-Pipeline", Process.THREAD_PRIORITY_URGENT_DISPLAY).apply {
@@ -121,10 +159,14 @@ class InputPipelineWorker(
             workerThread = thread
             workerHandler = Handler(thread.looper)
             workerHandler?.post(tickRunnable)
-            Log.i(TAG, "Pipeline started @ tier=${currentTier} period=${currentPeriodNs}ns")
+            Log.i(TAG, "Pipeline started @ tier=${currentTier} period=${currentPeriodNs / 1_000_000}ms")
         }
     }
 
+    /**
+     * Stop the pipeline and release all held touch pointers.
+     * Idempotent — calling twice is a no-op.
+     */
     fun stop() {
         synchronized(pipelineLock) {
             if (!running) return
@@ -161,17 +203,24 @@ class InputPipelineWorker(
 
     // ───────── Main tick ─────────
 
+    /**
+     * Tick runnable — runs on the worker thread. Self-rescheduling.
+     * Catches all Throwable to prevent pipeline thread death.
+     */
     private val tickRunnable: Runnable = object : Runnable {
         override fun run() {
             if (!running) return
             try {
+                // Use nanoTime() for sub-millisecond precision.
+                // SystemClock.elapsedRealtimeNanos() is monotonic and survives sleep.
                 val tickStartNs = SystemClock.elapsedRealtimeNanos()
                 processTick()
                 val elapsedNs = SystemClock.elapsedRealtimeNanos() - tickStartNs
 
                 // Schedule next tick at adaptive cadence.
+                // Coerce to ≥ 1 ms to avoid postDelayed(0) busy-looping.
                 val period = currentPeriodNs
-                val delayMs = ((period - elapsedNs).coerceAtLeast(1L)) / 1_000_000L
+                val delayMs = ((period - elapsedNs).coerceAtLeast(1_000_000L)) / 1_000_000L
                 workerHandler?.postDelayed(this, delayMs)
             } catch (t: Throwable) {
                 // Never let an exception kill the pipeline thread.
@@ -189,11 +238,22 @@ class InputPipelineWorker(
             sampleCpuLoad()
         }
 
-        // 2) Read gamepad snapshot (lock-free).
+        // 2) Periodic PointerPool cleanup — evict entries idle > POOL_TIMEOUT_MS.
+        poolCleanupTickCounter++
+        if (poolCleanupTickCounter >= POINTER_POOL_CLEANUP_TICKS) {
+            poolCleanupTickCounter = 0
+            try {
+                touchInjector.evictStalePointers(POINTER_POOL_TIMEOUT_MS)
+            } catch (t: Throwable) {
+                Log.w(TAG, "PointerPool cleanup failed: ${t.message}")
+            }
+        }
+
+        // 3) Read gamepad snapshot (lock-free).
         val snapshot = gamepadManager.snapshot() ?: return
         val now = SystemClock.uptimeMillis()
 
-        // 3) Compute analog delta magnitude (0..1).
+        // 4) Compute analog delta magnitude (0..1).
         val lx = snapshot.leftStickX
         val ly = snapshot.leftStickY
         val rx = snapshot.rightStickX
@@ -204,27 +264,27 @@ class InputPipelineWorker(
         )
         lastAnalogDelta = analogDelta
 
-        // 4) Record event for rate computation.
+        // 5) Record event for rate computation.
         if (snapshot.hasAnyButton() || analogDelta > 0.01f) {
             recordEvent(now)
             lastEventUptimeMs = now
         }
 
-        // 5) Update button rate (Hz over last ACTIVITY_WINDOW_MS).
+        // 6) Update button rate (Hz over last ACTIVITY_WINDOW_MS).
         lastButtonRateHz = computeButtonRateHz(now)
 
-        // 6) Forward snapshot to JS layer (throttled inside the callback).
+        // 7) Forward snapshot to JS layer (throttled inside the callback).
         try {
             onGamepadEvent(buildEventJson(snapshot, analogDelta))
         } catch (_: Throwable) { /* never block pipeline on JS bridge */ }
 
-        // 7) Apply profile mappings → inject touches.
+        // 8) Apply profile mappings → inject touches.
         val p = profile
         if (p != null) {
             applyMappings(p, snapshot, analogDelta)
         }
 
-        // 8) Adaptive tier selection.
+        // 9) Adaptive tier selection.
         adaptTier(now, analogDelta)
     }
 
@@ -239,7 +299,7 @@ class InputPipelineWorker(
         val screenH = touchInjector.screenHeightPx
         if (screenW <= 0 || screenH <= 0) return
 
-        // Analog sticks → continuous pointers.
+        // Analog sticks → continuous pointers (slots 0 and 1 reserved).
         if (analogDelta > 0.02f) {
             analogProcessor.process(
                 snapshot = snapshot,
@@ -253,7 +313,7 @@ class InputPipelineWorker(
             analogProcessor.releaseAll(touchInjector)
         }
 
-        // Buttons → tap/swipe.
+        // Buttons → tap/swipe. Each mapping gets a pointer from the pool.
         for (mapping in profile.mappings) {
             if (!snapshot.isButtonPressed(mapping.buttonCode)) continue
             handleButtonEvent(mapping, screenW, screenH)
@@ -268,21 +328,45 @@ class InputPipelineWorker(
     }
 
     private fun handleButtonEvent(m: Mapping, screenW: Int, screenH: Int) {
-        val x = (m.xPercent * screenW).toInt().coerceIn(0, screenW - 1)
-        val y = (m.yPercent * screenH).toInt().coerceIn(0, screenH - 1)
+        // Clamp percentages to [0, 100] before conversion (strict input validation).
+        val xPct = m.xPercent.coerceIn(0f, 1f)
+        val yPct = m.yPercent.coerceIn(0f, 1f)
+        val endXPct = m.endXPercent.coerceIn(0f, 1f)
+        val endYPct = m.endYPercent.coerceIn(0f, 1f)
+
+        val x = (xPct * screenW).toInt().coerceIn(0, screenW - 1)
+        val y = (yPct * screenH).toInt().coerceIn(0, screenH - 1)
+        val endX = (endXPct * screenW).toInt().coerceIn(0, screenW - 1)
+        val endY = (endYPct * screenH).toInt().coerceIn(0, screenH - 1)
+
         when (m.action) {
             Mapping.ACTION_TAP -> {
-                touchInjector.tap(pointerSlot = m.id + 10, x = x, y = y)
+                // Acquire a pointer from the pool (IDs 10-109) and tap.
+                val pointerId = touchInjector.acquirePointer()
+                if (pointerId >= 0) {
+                    try {
+                        touchInjector.tap(pointerId, x, y)
+                    } finally {
+                        touchInjector.releasePointer(pointerId)
+                    }
+                }
             }
             Mapping.ACTION_SWIPE -> {
-                touchInjector.swipe(
-                    pointerSlot = m.id + 10,
-                    x1 = x,
-                    y1 = y,
-                    x2 = (m.endXPercent * screenW).toInt().coerceIn(0, screenW - 1),
-                    y2 = (m.endYPercent * screenH).toInt().coerceIn(0, screenH - 1),
-                    durationMs = m.durationMs.coerceAtLeast(16L)
-                )
+                val pointerId = touchInjector.acquirePointer()
+                if (pointerId >= 0) {
+                    try {
+                        touchInjector.swipe(
+                            pointerId = pointerId,
+                            x1 = x,
+                            y1 = y,
+                            x2 = endX,
+                            y2 = endY,
+                            durationMs = m.durationMs.coerceAtLeast(16L)
+                        )
+                    } finally {
+                        touchInjector.releasePointer(pointerId)
+                    }
+                }
             }
         }
     }
@@ -291,59 +375,63 @@ class InputPipelineWorker(
         val cx = screenW / 2
         val cy = screenH / 2
         val span = minOf(screenW, screenH) / 3
-        when (direction) {
-            0 -> touchInjector.swipe(99, cx, cy + span, cx, cy - span, 120L)
-            1 -> touchInjector.swipe(99, cx, cy - span, cx, cy + span, 120L)
-            2 -> touchInjector.swipe(99, cx + span, cy, cx - span, cy, 120L)
-            3 -> touchInjector.swipe(99, cx - span, cy, cx + span, cy, 120L)
+        val pointerId = touchInjector.acquirePointer()
+        if (pointerId < 0) return
+        try {
+            when (direction) {
+                0 -> touchInjector.swipe(pointerId, cx, cy + span, cx, cy - span, 120L)
+                1 -> touchInjector.swipe(pointerId, cx, cy - span, cx, cy + span, 120L)
+                2 -> touchInjector.swipe(pointerId, cx + span, cy, cx - span, cy, 120L)
+                3 -> touchInjector.swipe(pointerId, cx - span, cy, cx + span, cy, 120L)
+            }
+        } finally {
+            touchInjector.releasePointer(pointerId)
         }
     }
 
     // ───────── Adaptive tier selection ─────────
 
+    /**
+     * Two-tier adaptive polling: IDLE (50 ms) ↔ ACTIVE (10 ms).
+     *
+     * Transition rules:
+     *   IDLE → ACTIVE: any gamepad event in last ACTIVE_EVENT_RECENCY_MS
+     *   ACTIVE → IDLE: no events for PROMOTE_IDLE_TO_ACTIVE_IDLE_MS (1500 ms)
+     *
+     * Overrides (immediate downgrade, ignore hysteresis):
+     *   - Backpressure: queue depth ≥ HARD_WATERMARK (32)
+     *   - CPU overload: cpuLoadSmoothed ≥ CPU_HIGH_WATERMARK (0.85)
+     */
     private fun adaptTier(now: Long, analogDelta: Float) {
         val idleMs = now - lastEventUptimeMs
         val queueDepth = touchInjector.pendingQueueDepth()
         val cpu = cpuLoadSmoothed
 
-        // Backpressure overrides — drop tier immediately, ignore hysteresis.
+        // Override 1: Backpressure — force IDLE immediately.
         if (queueDepth >= INJECT_QUEUE_HARD_WATERMARK) {
-            setTier(Tier.LOW, reason = "queue-hard-watermark depth=$queueDepth")
+            setTier(Tier.IDLE, reason = "queue-hard-watermark depth=$queueDepth")
             return
         }
 
-        // CPU overload — clamp to MID or LOW.
-        if (cpu >= CPU_HIGH_WATERMARK && currentTier == Tier.HIGH) {
-            setTier(Tier.MID, reason = "cpu-high cpu=${"%.2f".format(cpu)}")
-            // fall through to finer-grained logic below
+        // Override 2: CPU overload — force IDLE immediately.
+        if (cpu >= CPU_HIGH_WATERMARK) {
+            setTier(Tier.IDLE, reason = "cpu-overload cpu=${"%.2f".format(cpu)}")
+            return
         }
 
+        // Normal hysteresis logic.
         val next: Tier = when (currentTier) {
-            Tier.LOW -> {
-                if (queueDepth >= INJECT_QUEUE_SOFT_WATERMARK) Tier.LOW
-                else if (idleMs <= 50L || analogDelta > 0.05f) Tier.MID
-                else Tier.LOW
+            Tier.IDLE -> {
+                // Promote to ACTIVE if any event in last 100 ms OR analog deflection > 5%.
+                val recentActivity = idleMs <= ACTIVE_EVENT_RECENCY_MS || analogDelta > 0.05f
+                if (recentActivity && queueDepth < INJECT_QUEUE_SOFT_WATERMARK) Tier.ACTIVE
+                else Tier.IDLE
             }
-            Tier.MID -> {
-                when {
-                    cpu >= CPU_HIGH_WATERMARK -> Tier.LOW
-                    idleMs > DEMOTE_MID_TO_LOW_IDLE_MS && analogDelta < 0.01f -> Tier.LOW
-                    analogDelta >= PROMOTE_MID_TO_HIGH_ANALOG_DELTA &&
-                        cpu < CPU_HIGH_WATERMARK &&
-                        queueDepth < INJECT_QUEUE_SOFT_WATERMARK -> Tier.HIGH
-                    else -> Tier.MID
-                }
-            }
-            Tier.HIGH -> {
-                if (cpu >= CPU_HIGH_WATERMARK) Tier.MID
-                else if (queueDepth >= INJECT_QUEUE_SOFT_WATERMARK) Tier.MID
-                else if (analogDelta <= DEMOTE_HIGH_TO_MID_ANALOG_DELTA) {
-                    if (lowAnalogSinceMs == 0L) lowAnalogSinceMs = now
-                    if (now - lowAnalogSinceMs >= 300L) Tier.MID else Tier.HIGH
-                } else {
-                    lowAnalogSinceMs = 0L
-                    Tier.HIGH
-                }
+            Tier.ACTIVE -> {
+                // Demote to IDLE if no events for 1500 ms AND analog < 1%.
+                val prolongedIdle = idleMs > PROMOTE_IDLE_TO_ACTIVE_IDLE_MS && analogDelta < 0.01f
+                if (prolongedIdle) Tier.IDLE
+                else Tier.ACTIVE
             }
         }
 
@@ -361,14 +449,12 @@ class InputPipelineWorker(
 
     private fun setTier(tier: Tier, reason: String) {
         val newPeriod = when (tier) {
-            Tier.LOW  -> TIER_LOW_NS
-            Tier.MID  -> TIER_MID_NS
-            Tier.HIGH -> TIER_HIGH_NS
+            Tier.IDLE   -> TIER_IDLE_NS
+            Tier.ACTIVE -> TIER_ACTIVE_NS
         }
         if (tier == currentTier && newPeriod == currentPeriodNs) return
         currentTier = tier
         currentPeriodNs = newPeriod
-        if (tier != Tier.HIGH) lowAnalogSinceMs = 0L
         Log.d(TAG, "Tier → $tier (${newPeriod / 1_000_000}ms) [$reason]")
     }
 
@@ -377,6 +463,8 @@ class InputPipelineWorker(
     /**
      * Parses /proc/stat for aggregate CPU usage. Cheap and process-agnostic.
      * Format: cpu user nice system idle iowait irq softirq steal guest guest_nice
+     *
+     * Uses EMA smoothing (α=0.4) to react within ~5 samples without flapping.
      */
     private fun sampleCpuLoad() {
         try {
@@ -449,6 +537,10 @@ class InputPipelineWorker(
 
     // ───────── JS event payload ─────────
 
+    /**
+     * Build a JSON payload to forward gamepad state to the JS layer.
+     * Uses JSONObject (not string concatenation) for safe escaping.
+     */
     private fun buildEventJson(
         snapshot: GamepadManager.Snapshot,
         analogDelta: Float

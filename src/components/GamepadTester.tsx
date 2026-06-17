@@ -224,7 +224,7 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
   React.useEffect(() => {
     let cancelled = false;
     import('@capacitor/preferences').then(({ Preferences }) => {
-      Preferences.get({ key: 'nexion_tester_settings' }).then((res) => {
+      Preferences.get({ key: 'gamemapper_tester_settings' }).then((res) => {
         if (cancelled || !res.value) return;
         try {
           const parsed = JSON.parse(res.value);
@@ -244,7 +244,7 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
   React.useEffect(() => {
     import('@capacitor/preferences').then(({ Preferences }) => {
       Preferences.set({
-        key: 'nexion_tester_settings',
+        key: 'gamemapper_tester_settings',
         value: JSON.stringify({
           lowLatencyEnabled, selectedPollingRate, directInputBypass,
           threadPriorityBoost, bleConnectionTuning, optimizeJitter
@@ -771,7 +771,7 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
 
               {/* Middle Logo details */}
               <div className="w-1/3 flex flex-col items-center justify-center space-y-4 sm:space-y-6 z-10 pt-2 sm:pt-4">
-                <div className="font-semibold text-[13px] sm:text-[15px] text-indigo-400 uppercase tracking-widest leading-none drop-shadow-md">NEXION</div>
+                <div className="font-semibold text-[13px] sm:text-[15px] text-indigo-400 uppercase tracking-widest leading-none drop-shadow-md">GAMEMAPPER</div>
                 <div className="flex gap-4 sm:gap-6">
                    {/* Select */}
                    <div className="flex flex-col items-center gap-1.5">

@@ -71,7 +71,7 @@ Sistem kami akan memvalidasi PR Anda secara otomatis. Jika lolos, profil Anda ak
 - **Backend/Native**: Kotlin, Java, Shizuku API v13.1.5
 - **CI/CD**: GitHub Actions (Auto-build APK)
 
-## 💎 Donasi
+## 💎 Donate
 
 GameMapperMind adalah software gratis dan open-source. Jika Anda merasa terbantu, pertimbangkan untuk mendukung pengembang:
 

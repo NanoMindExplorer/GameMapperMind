@@ -22,7 +22,23 @@ import android.os.Handler;
 import android.os.Looper;
 import androidx.core.app.NotificationCompat;
 import androidx.webkit.WebViewAssetLoader;
+import org.json.JSONObject;
 
+/**
+ * FloatingOverlayService — Displays a transparent WebView overlay on top
+ * of the active game. The overlay shows virtual gamepad buttons that the
+ * user can tap to trigger touch injection.
+ *
+ * SECURITY (FASE 1):
+ * - setAllowFileAccess(false) — prevents file:// access
+ * - setAllowContentAccess(false) — prevents content:// access
+ * - JS evaluation uses JSONObject.quote() for safe string escaping
+ * - No file system access from JavascriptInterface methods
+ *
+ * The overlay loads from appassets.androidplatform.net (Capacitor's
+ * built-in asset loader) which serves files from the app's assets
+ * directory over HTTPS.
+ */
 public class FloatingOverlayService extends Service {
     private WindowManager windowManager;
     private WebView webView;
@@ -80,17 +96,53 @@ public class FloatingOverlayService extends Service {
 
         if (intent != null && intent.hasExtra("config")) {
             currentConfigJson = intent.getStringExtra("config");
-            if (webView != null) {
-                new Handler(Looper.getMainLooper()).post(() -> {
-                    webView.evaluateJavascript(
-                        "if(window.injectConfig) window.injectConfig('" + currentConfigJson.replace("'", "\\'") + "');",
-                        null
-                    );
-                });
-            }
+            updateOverlayConfig(currentConfigJson);
         }
 
         return START_STICKY;
+    }
+
+    /**
+     * Safely evaluate JavaScript to update the overlay configuration.
+     * Uses JSONObject.quote() to properly escape the JSON string for
+     * embedding inside a JavaScript string literal.
+     *
+     * @param configJson Raw JSON string to pass to window.injectConfig()
+     */
+    private void updateOverlayConfig(String configJson) {
+        if (configJson == null || configJson.isEmpty()) {
+            Log.w("GameMapper", "updateOverlayConfig: configJson is null or empty");
+            return;
+        }
+
+        final String safeJson = configJson;
+        final WebView view = webView;
+
+        new Handler(Looper.getMainLooper()).post(() -> {
+            if (view == null) {
+                Log.w("GameMapper", "WebView not ready yet — config will be sent on ReactReady");
+                return;
+            }
+
+            try {
+                // JSONObject.quote() wraps the string in double quotes and escapes
+                // all special characters (newlines, quotes, backslashes) per JSON spec.
+                // This prevents syntax errors when embedding in JS.
+                String escapedJson = JSONObject.quote(safeJson);
+                String js = "if(window.injectConfig){window.injectConfig(" + escapedJson + ");}";
+                view.evaluateJavascript(js, null);
+                Log.d("GameMapper", "Overlay config updated via safe JS evaluation");
+            } catch (Exception e) {
+                Log.e("GameMapper", "Failed to evaluate JS for config update", e);
+                // Fallback: try with manual escaping (less safe but better than nothing)
+                try {
+                    String manualEscaped = safeJson.replace("\\", "\\\\").replace("'", "\\'").replace("\"", "\\\"");
+                    view.evaluateJavascript("if(window.injectConfig){window.injectConfig('" + manualEscaped + "');}", null);
+                } catch (Exception e2) {
+                    Log.e("GameMapper", "Fallback JS evaluation also failed", e2);
+                }
+            }
+        });
     }
 
     @Override
@@ -105,12 +157,17 @@ public class FloatingOverlayService extends Service {
             new Handler(Looper.getMainLooper()).post(() -> {
                 webView = new WebView(FloatingOverlayService.this);
                 webView.setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null);
-                webView.setBackgroundColor(0x00000000);
+                webView.setBackgroundColor(0x00000000); // completely transparent
 
                 WebSettings settings = webView.getSettings();
                 settings.setJavaScriptEnabled(true);
                 settings.setDomStorageEnabled(true);
                 settings.setMediaPlaybackRequiresUserGesture(false);
+
+                // SECURITY: Disable file and content access to prevent
+                // malicious scripts from reading local files.
+                settings.setAllowFileAccess(false);
+                settings.setAllowContentAccess(false);
 
                 webView.setFocusable(true);
                 webView.setFocusableInTouchMode(true);
@@ -154,21 +211,20 @@ public class FloatingOverlayService extends Service {
 
     /**
      * Bridge exposed to the overlay WebView as window.AndroidOverlay.
-     * React-side OverlayWysiwyg calls these methods when the user taps virtual
-     * buttons in play mode.
+     * React-side OverlayWysiwyg calls these methods when the user taps
+     * virtual buttons in play mode.
+     *
+     * SECURITY: None of these methods access the file system or
+     * sensitive APIs. They only forward commands to the GameMapperPlugin.
      */
     private class WebAppInterface {
         @JavascriptInterface
         public void onReactReady() {
             Log.d("GameMapper", "React is ready in Overlay");
-            new Handler(Looper.getMainLooper()).post(() -> {
-                if (currentConfigJson != null && !currentConfigJson.isEmpty()) {
-                    webView.evaluateJavascript(
-                        "if (window.injectConfig) { window.injectConfig('" + currentConfigJson.replace("'", "\\'") + "'); }",
-                        null
-                    );
-                }
-            });
+            // Use the safe config update method instead of inline JS
+            if (currentConfigJson != null && !currentConfigJson.isEmpty()) {
+                updateOverlayConfig(currentConfigJson);
+            }
         }
 
         /**
@@ -222,7 +278,11 @@ public class FloatingOverlayService extends Service {
     public void onDestroy() {
         super.onDestroy();
         if (webView != null) {
-            windowManager.removeView(webView);
+            try {
+                windowManager.removeView(webView);
+            } catch (Exception e) {
+                Log.e("GameMapper", "Failed to remove WebView from WindowManager", e);
+            }
             webView.destroy();
             webView = null;
         }

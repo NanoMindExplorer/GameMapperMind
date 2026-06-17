@@ -59,7 +59,16 @@ export const useShizuku = () => {
   };
 
   const executeShizukuCommand = async (command: string) => {
-    return { output: 'Legacy command disabled', error: '', exitCode: 0 };
+    if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== 'android') {
+      return { output: 'Shell commands only available on native Android', error: 'Not native platform', exitCode: -1 };
+    }
+    try {
+      const result = await GameMapper.executeShellCommand({ command });
+      return { output: result.output, error: result.error || '', exitCode: result.exitCode };
+    } catch (e: any) {
+      console.error('[useShizuku] executeShellCommand failed:', e);
+      return { output: '', error: e.message || 'Shizuku command execution failed. Is Shizuku running?', exitCode: -1 };
+    }
   };
 
   const requestShizukuPermission = async (): Promise<{ success: boolean; error?: string }> => {

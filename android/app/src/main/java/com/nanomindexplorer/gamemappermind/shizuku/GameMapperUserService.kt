@@ -46,7 +46,7 @@ import kotlin.random.Random
  *
  *   Algorithm (Pasal 4.2):
  *     1. Scan /dev/input/ for event* files
- *     2. For each device, read device name via /sys/class/input/event*/device/name
+ *     2. For each device, read device name via /sys/class/input/eventN/device/name
  *     3. Filter for gamepad/joystick devices (name contains "gamepad",
  *        "joystick", or device has EV_KEY + EV_ABS capabilities)
  *     4. Open each gamepad device with FileInputStream (shell privilege)
@@ -362,7 +362,7 @@ class GameMapperUserService : IGameMapperService.Stub {
     //
     // The evdev reader:
     //   1. Scans /dev/input/ for event* files
-    //   2. Reads /sys/class/input/event*/device/name to identify gamepads
+    //   2. Reads /sys/class/input/eventN/device/name to identify gamepads
     //   3. Opens each gamepad device with FileInputStream (shell privilege)
     //   4. Reads input_event structs in binary
     //   5. Parses and dispatches to callback
@@ -466,7 +466,7 @@ class GameMapperUserService : IGameMapperService.Stub {
 
     /**
      * Discover gamepad devices by scanning /dev/input/ and reading
-     * device names from /sys/class/input/event*/device/name.
+     * device names from /sys/class/input/eventN/device/name.
      *
      * Algorithm:
      *   1. List /dev/input/event* files

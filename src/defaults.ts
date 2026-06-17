@@ -151,26 +151,10 @@ export function getButtonMappingForMode(mode: ControllerMode): string[] {
   return BUTTON_MAPPING_XBOX;
 }
 
-export const INITIAL_PROFILES: GamepadProfile[] = [
-  {
-    id: 'genshin',
-    name: 'Genshin Impact',
-    packageName: 'com.miHoYo.GenshinImpact',
-    description: 'Default action mapping (dual stick + 8 buttons + L2/R2 analog)',
-    isCustom: false,
-    gyroSensitivity: 1.0,
-    deadzone: 0.15,
-    smoothing: 0.5,
-    buttons: standardGenshinButtons(),
-    mappings: standardMappings(),
-    leftJoystick:  { centerX: 270,  centerY: 540, radius: 150 },
-    rightJoystick: { centerX: 1530, centerY: 540, radius: 150 },
-    antiBanEnabled: false,
-    antiBanConfig: { ...DEFAULT_ANTI_BAN },
-    gyroMapping: { ...DEFAULT_GYRO_MAPPING },
-    autoStartEnabled: true,
-  },
-];
+// Import comprehensive preset profiles for 7 popular mobile games
+import { PRESET_PROFILES } from './gameProfiles';
+
+export const INITIAL_PROFILES: GamepadProfile[] = PRESET_PROFILES;
 
 export const INITIAL_MACROS: GamepadMacro[] = [];
 

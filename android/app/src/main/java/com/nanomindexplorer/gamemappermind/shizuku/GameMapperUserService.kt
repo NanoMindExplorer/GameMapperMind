@@ -7,7 +7,6 @@ import android.util.Log
 import android.view.InputDevice
 import android.view.MotionEvent
 import androidx.annotation.Keep
-import com.nanomindexplorer.gamemappermind.input.TouchInjector
 import com.nanomindexplorer.gamemappermind.plugin.GameMapperPluginImpl
 import java.io.BufferedReader
 import java.io.File
@@ -158,13 +157,11 @@ class GameMapperUserService : IGameMapperService.Stub {
     private var appContext: Context? = null
 
     // ============================================================
-    // PRIORITAS 1: TouchInjector runs in THIS process (shell).
-    // Both touchInjector (direct injection) and pluginImpl's
-    // internal TouchInjector (pipeline-driven injection) execute
-    // with shell UID privileges.
+    // FIX #2: Removed separate touchInjector instance.
+    // All injection now goes through pluginImpl's single TouchInjector.
+    // This ensures shared pointer state — no more dual injection
+    // or pointer ID collisions between two SparseArrays.
     // ============================================================
-    private val touchInjector: TouchInjector = TouchInjector()
-
     private val pluginImpl: GameMapperPluginImpl by lazy {
         GameMapperPluginImpl(appContext)
     }
@@ -258,7 +255,7 @@ class GameMapperUserService : IGameMapperService.Stub {
         applyTimingJitter()
         val jx = applyCoordinateJitterX(x)
         val jy = applyCoordinateJitterY(y)
-        touchInjector.tap(jx, jy, displayId)
+        pluginImpl.tap(jx, jy, displayId)
     }
 
     override fun injectSwipe(
@@ -267,7 +264,7 @@ class GameMapperUserService : IGameMapperService.Stub {
         durationMs: Long, displayId: Int
     ) {
         applyTimingJitter()
-        touchInjector.swipe(
+        pluginImpl.swipe(
             applyCoordinateJitterX(startX), applyCoordinateJitterY(startY),
             applyCoordinateJitterX(endX), applyCoordinateJitterY(endY),
             durationMs, displayId
@@ -282,7 +279,7 @@ class GameMapperUserService : IGameMapperService.Stub {
             Pair(parts[0].toFloat(), parts[1].toFloat())
         }
         val jitteredCoords = coordPairs.map { Pair(applyCoordinateJitterX(it.first), applyCoordinateJitterY(it.second)) }
-        touchInjector.multiTouchDown(ids, jitteredCoords, displayId)
+        pluginImpl.multiTouchDown(ids, jitteredCoords, displayId)
     }
 
     override fun injectMultiTouchMove(pointerIds: String, coords: String, displayId: Int) {
@@ -292,12 +289,12 @@ class GameMapperUserService : IGameMapperService.Stub {
             Pair(parts[0].toFloat(), parts[1].toFloat())
         }
         val jitteredCoords = coordPairs.map { Pair(applyCoordinateJitterX(it.first), applyCoordinateJitterY(it.second)) }
-        touchInjector.multiTouchMove(ids, jitteredCoords, displayId)
+        pluginImpl.multiTouchMove(ids, jitteredCoords, displayId)
     }
 
     override fun injectTouchUp(pointerId: Int, displayId: Int) {
         applyTimingJitter()
-        touchInjector.touchUp(pointerId, displayId)
+        pluginImpl.touchUp(pointerId, displayId)
     }
 
     override fun injectAnalogStick(
@@ -307,11 +304,11 @@ class GameMapperUserService : IGameMapperService.Stub {
     ) {
         val targetX = centerX + deltaX
         val targetY = centerY + deltaY
-        touchInjector.analogMove(pointerId, centerX, centerY, targetX, targetY, displayId)
+        pluginImpl.analogMove(pointerId, centerX, centerY, targetX, targetY, displayId)
     }
 
     override fun releaseAnalogStick(pointerId: Int, displayId: Int) {
-        touchInjector.touchUp(pointerId, displayId)
+        pluginImpl.touchUp(pointerId, displayId)
     }
 
     // ============================================================
@@ -347,7 +344,7 @@ class GameMapperUserService : IGameMapperService.Stub {
         sizeVariance: Float
     ) {
         antiBan = AntiBanConfig(enabled, coordinateJitter, timingJitterMs, pressureVariance, sizeVariance)
-        touchInjector.setAntiBan(enabled, pressureVariance, sizeVariance)
+        pluginImpl.setAntiBan(enabled, pressureVariance, sizeVariance)
         Log.d(TAG, "Anti-ban config updated: enabled=$enabled jitter=${coordinateJitter}px timing=${timingJitterMs}ms")
     }
 

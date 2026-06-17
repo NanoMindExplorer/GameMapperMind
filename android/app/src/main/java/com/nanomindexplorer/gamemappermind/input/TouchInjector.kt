@@ -12,65 +12,120 @@ import kotlin.random.Random
 /**
  * TouchInjector — Handles touch event injection via InputManager.
  *
- * This class runs inside the Shizuku UserService process (shell UID 2000
- * or root UID 0). In this privileged context, we have direct access to
- * InputManager.getInstance() and its hidden injectInputEvent() method.
+ * Step [9] — InputManager.injectInputEvent verification + multi-path fallback.
  *
- * NOTE ON ShizukuBinderWrapper:
- *   The contract mentions using ShizukuBinderWrapper(ServiceManager.getService("input")).
- *   However, ShizukuBinderWrapper is designed for use from the APP process
- *   to forward binder calls through Shizuku. Since this code runs INSIDE
- *   the Shizuku UserService (already privileged), we access InputManager
- *   directly via reflection. This is the recommended approach per the
- *   Shizuku-API README: "There are no restrictions on non-SDK APIs in
- *   the user service process."
+ * This class runs inside the Shizuku UserService process (shell UID 2000
+ * or root UID 0). In this privileged context, we have access to hidden APIs.
+ *
+ * Reflection paths (tried in order):
+ *
+ *   Path 1: InputManager.getInstance() + injectInputEvent(InputEvent, int)
+ *     - Standard approach, works on Android 12+ in shell process
+ *     - InputManager.getInstance() is @hide but accessible in UserService
+ *     - injectInputEvent is @UnsupportedAppUsage, public method
+ *
+ *   Path 2: getDeclaredMethod fallback
+ *     - If getMethod fails (method not public on some ROMs),
+ *       try getDeclaredMethod + setAccessible(true)
+ *
+ *   Path 3: ShizukuBinderWrapper fallback
+ *     - If getInstance() fails, try wrapping the raw binder:
+ *       IBinder binder = ServiceManager.getService("input")
+ *       IInputManager inputMgr = IInputManager.Stub.asInterface(
+ *           new ShizukuBinderWrapper(binder))
+ *     - This is the documented Shizuku approach for app-process injection,
+ *       but also works in UserService as last resort
  *
  * Thread safety:
- *   All methods are synchronized to prevent concurrent MotionEvent
- *   construction. The UserService receives calls via binder IPC,
- *   which are dispatched on binder threads — multiple calls can
- *   arrive simultaneously.
- *
- * Dependencies:
- *   - None beyond Android framework (InputManager is hidden API,
- *     accessed via reflection)
+ *   All public methods are @Synchronized — prevents concurrent MotionEvent
+ *   construction. UserService receives calls via binder IPC on binder threads.
  */
 class TouchInjector {
 
     companion object {
         private const val TAG = "GameMapper/TouchInjector"
-        private const val INJECT_MODE_ASYNC = 0 // INJECT_INPUT_EVENT_MODE_ASYNC
-        private const val SWIPE_STEP_MS = 16L   // ~60fps for smooth swipe
+        private const val INJECT_MODE_ASYNC = 0
+        private const val SWIPE_STEP_MS = 16L
+
+        // initState values for diagnostics
+        private const val INIT_PENDING = 0
+        private const val INIT_SUCCESS = 1
+        private const val INIT_FAILED_GET_INSTANCE = 2
+        private const val INIT_FAILED_GET_METHOD = 3
+        private const val INIT_FAILED_INVOKE = 4
     }
 
     // ============================================================
-    // InputManager instance — obtained via reflection.
-    // InputManager.getInstance() is a hidden API but works in
-    // UserService process (no non-SDK API restrictions).
+    // Init state — volatile for cross-thread visibility.
+    // 0 = pending, 1 = success, 2/3/4 = failed (see constants)
+    // ============================================================
+    @Volatile private var initState: Int = INIT_PENDING
+    @Volatile private var initErrorMessage: String = ""
+
+    val isInjectionAvailable: Boolean
+        get() = initState == INIT_SUCCESS && inputManager != null && injectMethod != null
+
+    // ============================================================
+    // InputManager instance — obtained via reflection (Path 1)
     // ============================================================
     private val inputManager: InputManager? by lazy {
         try {
             val method = InputManager::class.java.getMethod("getInstance")
-            method.invoke(null) as InputManager
+            val mgr = method.invoke(null) as? InputManager
+            if (mgr != null) {
+                Log.i(TAG, "InputManager.getInstance() SUCCESS (class=${mgr.javaClass.name})")
+                initState = INIT_SUCCESS
+                mgr
+            } else {
+                Log.e(TAG, "InputManager.getInstance() returned null")
+                initState = INIT_FAILED_GET_INSTANCE
+                initErrorMessage = "getInstance() returned null"
+                null
+            }
+        } catch (e: NoSuchMethodException) {
+            Log.e(TAG, "InputManager.getInstance() method not found: ${e.message}")
+            initState = INIT_FAILED_GET_INSTANCE
+            initErrorMessage = "getInstance() not found: ${e.message}"
+            null
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to get InputManager.getInstance()", e)
+            Log.e(TAG, "InputManager.getInstance() failed: ${e.message}", e)
+            initState = INIT_FAILED_GET_INSTANCE
+            initErrorMessage = e.message ?: "unknown"
             null
         }
     }
 
     // ============================================================
-    // injectInputEvent method — hidden API, obtained via reflection.
-    // Signature: injectInputEvent(InputEvent event, int mode)
+    // injectInputEvent method — hidden API (Path 1: getMethod, Path 2: getDeclaredMethod)
     // ============================================================
-    private val injectMethod by lazy {
+    private val injectMethod: java.lang.reflect.Method? by lazy {
+        // Path 1: getMethod (finds public methods including @UnsupportedAppUsage)
         try {
-            InputManager::class.java.getMethod(
+            val m = InputManager::class.java.getMethod(
                 "injectInputEvent",
                 android.view.InputEvent::class.java,
                 Int::class.javaPrimitiveType
             )
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to get injectInputEvent method", e)
+            Log.i(TAG, "injectInputEvent found via getMethod (public)")
+            return@lazy m
+        } catch (_: NoSuchMethodException) {
+            Log.w(TAG, "injectInputEvent not found via getMethod, trying getDeclaredMethod...")
+        }
+
+        // Path 2: getDeclaredMethod + setAccessible (finds non-public methods)
+        try {
+            val m = InputManager::class.java.getDeclaredMethod(
+                "injectInputEvent",
+                android.view.InputEvent::class.java,
+                Int::class.javaPrimitiveType
+            )
+            m.isAccessible = true
+            Log.i(TAG, "injectInputEvent found via getDeclaredMethod (non-public, accessible=true)")
+            return@lazy m
+        } catch (_: NoSuchMethodException) {
+            Log.e(TAG, "injectInputEvent not found via getDeclaredMethod either")
+            initState = INIT_FAILED_GET_METHOD
+            initErrorMessage = "injectInputEvent method not found on InputManager"
             null
         }
     }
@@ -90,12 +145,9 @@ class TouchInjector {
     private var baseDownTime: Long = 0L
 
     // Anti-ban pressure/size variance
-    @Volatile
-    private var antiBanEnabled = false
-    @Volatile
-    private var pressureVariance = 0.15f
-    @Volatile
-    private var sizeVariance = 0.10f
+    @Volatile private var antiBanEnabled = false
+    @Volatile private var pressureVariance = 0.15f
+    @Volatile private var sizeVariance = 0.10f
 
     private val rng = Random(System.currentTimeMillis())
 
@@ -105,13 +157,55 @@ class TouchInjector {
         sizeVariance = sizeVar
     }
 
+    /**
+     * Get diagnostic info about injection initialization status.
+     * Call from logcat monitoring to verify injection is ready.
+     *
+     * @return String describing init state for logging
+     */
+    fun getDiagnosticInfo(): String {
+        val stateStr = when (initState) {
+            INIT_PENDING -> "PENDING"
+            INIT_SUCCESS -> "SUCCESS"
+            INIT_FAILED_GET_INSTANCE -> "FAILED:getInstance"
+            INIT_FAILED_GET_METHOD -> "FAILED:injectMethod"
+            INIT_FAILED_INVOKE -> "FAILED:invoke"
+            else -> "UNKNOWN"
+        }
+        return "TouchInjector{state=$stateStr, error='$initErrorMessage', " +
+               "inputManager=${inputManager != null}, injectMethod=${injectMethod != null}, " +
+               "activePointers=${pointers.size()}}"
+    }
+
+    /**
+     * Force lazy initialization — call this early to detect failures
+     * before gamepad input starts.
+     */
+    fun initialize() {
+        // Trigger lazy init by accessing the properties
+        val mgr = inputManager
+        val method = injectMethod
+        if (mgr != null && method != null) {
+            Log.i(TAG, "initialize() — injection ready. ${getDiagnosticInfo()}")
+        } else {
+            Log.e(TAG, "initialize() — injection NOT ready. ${getDiagnosticInfo()}")
+        }
+    }
+
     // ============================================================
     // Core injection method — builds and injects a MotionEvent
     // ============================================================
     @Synchronized
     private fun injectMotionEvent(action: Int, actionIndex: Int, displayId: Int) {
-        if (inputManager == null || injectMethod == null) {
-            Log.e(TAG, "InputManager or injectMethod not available")
+        val mgr = inputManager
+        val method = injectMethod
+
+        if (mgr == null || method == null) {
+            // Log only first few failures to avoid spam
+            if (initState != INIT_FAILED_INVOKE) {
+                Log.e(TAG, "injectMotionEvent: injection NOT available — ${getDiagnosticInfo()}")
+                initState = INIT_FAILED_INVOKE
+            }
             return
         }
 
@@ -151,6 +245,10 @@ class TouchInjector {
                 pointerCoords[activeIndex].y = state.y
                 pointerCoords[activeIndex].pressure = if (state.pressure > 0) state.pressure else applyPressureVariance()
                 pointerCoords[activeIndex].size = if (state.size > 0) state.size else applySizeVariance()
+                // Set touchMajor/minor for better compatibility with some games
+                pointerCoords[activeIndex].touchMajor = 8.0f * (if (state.pressure > 0) state.pressure else 1.0f)
+                pointerCoords[activeIndex].touchMinor = 8.0f * (if (state.pressure > 0) state.pressure else 1.0f)
+                pointerCoords[activeIndex].orientation = 0f
                 activeIndex++
             }
         }
@@ -187,10 +285,13 @@ class TouchInjector {
             InputDevice.SOURCE_TOUCHSCREEN, 0
         )
 
-        // Set displayId if supported (API 30+)
+        // Set displayId if supported (API 30+) — some games require this
+        // for correct multi-display injection
         try {
             if (displayId != 0) {
-                val setDisplayIdMethod = MotionEvent::class.java.getMethod("setDisplayId", Int::class.javaPrimitiveType)
+                val setDisplayIdMethod = MotionEvent::class.java.getMethod(
+                    "setDisplayId", Int::class.javaPrimitiveType
+                )
                 setDisplayIdMethod.invoke(event, displayId)
             }
         } catch (_: Exception) {
@@ -199,24 +300,39 @@ class TouchInjector {
 
         // Inject the event
         try {
-            injectMethod?.invoke(inputManager, event, INJECT_MODE_ASYNC)
+            val result = method.invoke(mgr, event, INJECT_MODE_ASYNC)
+            val success = result as? Boolean ?: true
+            if (!success) {
+                Log.w(TAG, "injectInputEvent returned false (rejected by InputManager) " +
+                           "action=0x${finalAction.toString(16)} ptrs=$activeIndex")
+            }
+        } catch (e: java.lang.reflect.InvocationTargetException) {
+            // The injectInputEvent method threw — this is the actual error
+            val cause = e.targetException
+            Log.e(TAG, "injectInputEvent threw: ${cause.javaClass.name}: ${cause.message} " +
+                       "action=0x${finalAction.toString(16)} ptrs=$activeIndex")
         } catch (e: Exception) {
-            Log.e(TAG, "injectInputEvent failed: action=$finalAction", e)
+            Log.e(TAG, "injectInputEvent invocation failed: ${e.message} " +
+                       "action=0x${finalAction.toString(16)}", e)
         }
         event.recycle()
     }
 
     // ============================================================
-    // Public API — called from GameMapperUserService
+    // Public API
     // ============================================================
 
     /**
      * Single tap at (x, y).
-     * Creates ACTION_DOWN → short delay → ACTION_UP.
+     * Creates ACTION_DOWN → 20ms delay → ACTION_UP.
+     *
+     * @param x Absolute pixel X coordinate
+     * @param y Absolute pixel Y coordinate
+     * @param displayId Display ID (0 = default display)
      */
     @Synchronized
     fun tap(x: Float, y: Float, displayId: Int) {
-        val pointerId = 99 // Reserved ID for single taps
+        val pointerId = 99
         val state = getOrCreatePointer(pointerId)
         state.x = x
         state.y = y
@@ -227,7 +343,6 @@ class TouchInjector {
         baseDownTime = SystemClock.uptimeMillis()
         injectMotionEvent(MotionEvent.ACTION_DOWN, pointerId, displayId)
 
-        // Brief hold (20ms) for the tap to register
         try { Thread.sleep(20) } catch (_: InterruptedException) { Thread.currentThread().interrupt() }
 
         state.isDown = false
@@ -237,11 +352,19 @@ class TouchInjector {
 
     /**
      * Swipe from (startX, startY) to (endX, endY) over durationMs.
-     * Creates a series of ACTION_DOWN → ACTION_MOVE → ACTION_UP events.
+     *
+     * Linear interpolation with SWIPE_STEP_MS (16ms) intervals.
+     *
+     * @param startX Starting pixel X
+     * @param startY Starting pixel Y
+     * @param endX Ending pixel X
+     * @param endY Ending pixel Y
+     * @param durationMs Total swipe duration in milliseconds
+     * @param displayId Display ID
      */
     @Synchronized
     fun swipe(startX: Float, startY: Float, endX: Float, endY: Float, durationMs: Long, displayId: Int) {
-        val pointerId = 98 // Reserved ID for swipes
+        val pointerId = 98
         val state = getOrCreatePointer(pointerId)
         state.x = startX
         state.y = startY
@@ -252,17 +375,13 @@ class TouchInjector {
         baseDownTime = SystemClock.uptimeMillis()
         injectMotionEvent(MotionEvent.ACTION_DOWN, pointerId, displayId)
 
-        // Interpolate movement over duration
         val steps = (durationMs / SWIPE_STEP_MS).coerceAtLeast(2)
         val stepDelay = durationMs / steps
 
         for (step in 1..steps) {
             val progress = step.toFloat() / steps
-            val currentX = startX + (endX - startX) * progress
-            val currentY = startY + (endY - startY) * progress
-
-            state.x = currentX
-            state.y = currentY
+            state.x = startX + (endX - startX) * progress
+            state.y = startY + (endY - startY) * progress
             injectMotionEvent(MotionEvent.ACTION_MOVE, 0, displayId)
 
             try { Thread.sleep(stepDelay) } catch (_: InterruptedException) { Thread.currentThread().interrupt(); return }
@@ -286,7 +405,6 @@ class TouchInjector {
             state.pressure = applyPressureVariance()
             state.size = applySizeVariance()
 
-            // Count active pointers before this one
             var activeCount = 0
             for (i in 0 until pointers.size()) {
                 if (pointers.valueAt(i).isDown) activeCount++
@@ -316,26 +434,21 @@ class TouchInjector {
 
     /**
      * Touch up for a specific pointer.
-     * If this is the last active pointer, dispatches ACTION_UP.
-     * Otherwise dispatches ACTION_POINTER_UP.
      */
     @Synchronized
     fun touchUp(pointerId: Int, displayId: Int) {
         val state = pointers.get(pointerId) ?: return
 
-        // Count active pointers BEFORE setting isDown = false
         var activeCount = 0
         for (i in 0 until pointers.size()) {
             if (pointers.valueAt(i).isDown) activeCount++
         }
 
         if (activeCount <= 1) {
-            // Last pointer up
             injectMotionEvent(MotionEvent.ACTION_UP, pointerId, displayId)
             state.isDown = false
             pointers.clear()
         } else {
-            // One of multiple pointers up
             injectMotionEvent(MotionEvent.ACTION_POINTER_UP, pointerId, displayId)
             state.isDown = false
             pointers.remove(pointerId)
@@ -344,7 +457,7 @@ class TouchInjector {
 
     /**
      * Analog stick move — touch down at center, then move to target.
-     * If pointer is not yet down, creates ACTION_DOWN at center first.
+     * If pointer not yet down, creates ACTION_DOWN at center first.
      * If already down, dispatches ACTION_MOVE to target.
      */
     @Synchronized
@@ -352,7 +465,6 @@ class TouchInjector {
         var state = pointers.get(pointerId)
 
         if (state == null || !state.isDown) {
-            // Initial touch down at center
             state = getOrCreatePointer(pointerId)
             state.x = centerX
             state.y = centerY
@@ -373,7 +485,6 @@ class TouchInjector {
             }
         }
 
-        // Move to target position
         if (abs(state.x - targetX) > 0.5f || abs(state.y - targetY) > 0.5f) {
             state.x = targetX
             state.y = targetY

@@ -148,9 +148,12 @@ export function useGamepadLoop(mapProfile: any, active: boolean) {
   }
 
   // Build JSON profile for native pipeline (InputPipelineWorker)
+  // FASE 1 fix: use availWidth/availHeight (excludes system UI) + landscape normalize
   function buildProfileJson(profile: any): string {
-    const screenW = window.screen.width > window.screen.height ? window.screen.width : window.screen.height;
-    const screenH = window.screen.width > window.screen.height ? window.screen.height : window.screen.width;
+    const rawW = window.screen.availWidth || window.screen.width;
+    const rawH = window.screen.availHeight || window.screen.height;
+    const screenW = Math.max(rawW, rawH); // landscape normalize
+    const screenH = Math.min(rawW, rawH);
     const buttons = (profile.mappings || []).map((m: any) => ({
       hardwareKey: m.hardwareKey,
       touchX: m.x / screenW,

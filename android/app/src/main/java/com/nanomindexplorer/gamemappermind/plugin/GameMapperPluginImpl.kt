@@ -62,6 +62,9 @@ class GameMapperPluginImpl(
 
     init {
         refreshDisplayMetrics()
+        // Step [9]: Force early initialization of TouchInjector to detect
+        // reflection failures before gamepad input starts.
+        touchInjector.initialize()
     }
 
     /**
@@ -119,7 +122,47 @@ class GameMapperPluginImpl(
 
     fun isPipelineRunning(): Boolean = pipelineStarted
 
-    fun setProfile(profileJson: String): Boolean = pipelineWorker.setProfileFromJson(profileJson)
+    /**
+     * Parse profile JSON, override screen dimensions with actual DisplayMetrics,
+     * then pass to pipeline.
+     *
+     * Step [8] fix: The screenWidth/screenHeight in the JSON come from the
+     * React WebView (window.screen.availWidth), which may differ from the
+     * physical screen due to density scaling or compatibility mode.
+     *
+     * Since touchX/touchY are percentages [0.0..1.0], they are
+     * screen-independent. Only the multiplier needs to be correct.
+     * We override screenWidth/screenHeight with DisplayMetrics values
+     * from the shell process (authoritative).
+     *
+     * Mathematical proof:
+     *   touchX = buttonPixelX / webViewScreenWidth (in React)
+     *   pixelX = touchX × actualScreenWidth (in pipeline)
+     *   If webViewScreenWidth ≠ actualScreenWidth:
+     *     pixelX = (buttonPixelX / webViewScreenWidth) × actualScreenWidth
+     *   This gives the correct physical pixel because touchX is a ratio,
+     *   not an absolute coordinate.
+     */
+    fun setProfile(profileJson: String): Boolean {
+        try {
+            val obj = JSONObject(profileJson)
+
+            // Override screen dimensions with actual DisplayMetrics
+            refreshDisplayMetrics()
+            obj.put("screenWidth", cachedScreenWidth)
+            obj.put("screenHeight", cachedScreenHeight)
+
+            Log.i(TAG, "setProfile: overriding screen dimensions to " +
+                    "${cachedScreenWidth}x${cachedScreenHeight} (from DisplayMetrics)")
+
+            val correctedJson = obj.toString()
+            return pipelineWorker.setProfileFromJson(correctedJson)
+        } catch (e: Exception) {
+            Log.e(TAG, "setProfile: failed to override screen dimensions: ${e.message}")
+            // Fallback: pass original JSON unmodified
+            return pipelineWorker.setProfileFromJson(profileJson)
+        }
+    }
     fun clearProfile() = pipelineWorker.clearProfile()
 
     fun updateSwipeTrigger(hardwareKey: String, direction: String, touchX: Float, touchY: Float) =

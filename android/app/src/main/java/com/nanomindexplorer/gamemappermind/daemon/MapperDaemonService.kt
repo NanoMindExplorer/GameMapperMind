@@ -22,6 +22,16 @@ class MapperDaemonService : Service() {
         const val ACTION_STOP = "com.nanomindexplorer.gamemappermind.STOP_DAEMON"
         const val EXTRA_PROFILE_JSON = "profile_json"
         @Volatile var isRunning = false; private set
+
+        @JvmStatic fun startDaemon(context: Context, profileJson: String? = null) {
+            val intent = Intent(context, MapperDaemonService::class.java).apply { action = ACTION_START; if (profileJson != null) putExtra(EXTRA_PROFILE_JSON, profileJson) }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent) else context.startService(intent)
+        }
+
+        @JvmStatic fun stopDaemon(context: Context) {
+            val intent = Intent(context, MapperDaemonService::class.java).apply { action = ACTION_STOP }
+            context.startService(intent)
+        }
     }
 
     private var touchInjector: TouchInjector? = null
@@ -68,14 +78,4 @@ class MapperDaemonService : Service() {
 
     private fun createNotification(text: String): Notification = NotificationCompat.Builder(this, CHANNEL_ID).setContentTitle("GameMapperMind").setContentText(text).setSmallIcon(android.R.drawable.ic_menu_compass).setOngoing(true).setPriority(NotificationCompat.PRIORITY_LOW).setCategory(NotificationCompat.CATEGORY_SERVICE).build()
     private fun updateNotification(text: String) { try { getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, createNotification(text)) } catch (e: Exception) { Log.e(TAG, "Notification update failed", e) } }
-
-    @JvmStatic fun startDaemon(context: Context, profileJson: String? = null) {
-        val intent = Intent(context, MapperDaemonService::class.java).apply { action = ACTION_START; if (profileJson != null) putExtra(EXTRA_PROFILE_JSON, profileJson) }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent) else context.startService(intent)
-    }
-
-    @JvmStatic fun stopDaemon(context: Context) {
-        val intent = Intent(context, MapperDaemonService::class.java).apply { action = ACTION_STOP }
-        context.startService(intent)
-    }
 }

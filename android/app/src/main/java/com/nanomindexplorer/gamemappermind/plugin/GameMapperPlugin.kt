@@ -21,6 +21,10 @@ class GameMapperPlugin : Plugin() {
     companion object {
         private const val TAG = "GameMapper/Plugin"
         @JvmField var instance: GameMapperPlugin? = null
+
+        @JvmStatic fun emitGamepadButton(buttonName: String, value: Int, pressure: Float) { val d = JSObject(); d.put("buttonName", buttonName); d.put("value", value); d.put("pressure", pressure); instance?.notifyListeners("onGamepadButton", d) }
+        @JvmStatic fun emitGamepadAxis(axes: FloatArray) { val d = JSObject(); val a = JSArray(); for (v in axes) a.put(v.toDouble()); d.put("axes", a); instance?.notifyListeners("onGamepadAxis", d) }
+        @JvmStatic fun emitForegroundAppChanged(packageName: String) { val d = JSObject(); d.put("packageName", packageName); d.put("timestamp", System.currentTimeMillis()); instance?.notifyListeners("onForegroundAppChanged", d) }
     }
 
     private var shizukuHelper: ShizukuHelper? = null
@@ -123,8 +127,4 @@ class GameMapperPlugin : Plugin() {
     }
 
     private fun emitToJS(eventName: String, data: JSObject) { try { notifyListeners(eventName, data) } catch (e: Exception) { Log.e(TAG, "Emit failed: $eventName", e) } }
-
-    @JvmStatic fun emitGamepadButton(buttonName: String, value: Int, pressure: Float) { val d = JSObject(); d.put("buttonName", buttonName); d.put("value", value); d.put("pressure", pressure); instance?.notifyListeners("onGamepadButton", d) }
-    @JvmStatic fun emitGamepadAxis(axes: FloatArray) { val d = JSObject(); val a = JSArray(); for (v in axes) a.put(v.toDouble()); d.put("axes", a); instance?.notifyListeners("onGamepadAxis", d) }
-    @JvmStatic fun emitForegroundAppChanged(packageName: String) { val d = JSObject(); d.put("packageName", packageName); d.put("timestamp", System.currentTimeMillis()); instance?.notifyListeners("onForegroundAppChanged", d) }
 }

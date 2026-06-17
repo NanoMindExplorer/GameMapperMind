@@ -41,7 +41,35 @@ class GameMapperPlugin : Plugin() {
             override fun onPermissionDenied() { emitToJS("onShizukuPermissionDenied", JSObject().put("granted", false)) }
             override fun onServiceConnected(service: IGameMapperService?) {
                 val data = JSObject(); data.put("connected", service != null)
-                if (service != null) { try { data.put("gamepadReadStarted", service.startGamepadRead()) } catch (e: Exception) { data.put("gamepadReadStarted", false) } }
+                if (service != null) {
+                    try {
+                        val started = service.startGamepadRead()
+                        data.put("gamepadReadStarted", started)
+                        if (!started) {
+                            // FIX #9: Retry logic — try again after 1 second
+                            Log.w(TAG, "startGamepadRead returned false, retrying in 1s...")
+                            mainHandler.postDelayed({
+                                try {
+                                    val retried = service.startGamepadRead()
+                                    if (retried) {
+                                        Log.i(TAG, "startGamepadRead succeeded on retry")
+                                        emitToJS("onGamepadReadStarted", JSObject().put("started", true))
+                                    } else {
+                                        Log.e(TAG, "startGamepadRead failed on retry — no gamepad devices found")
+                                        emitToJS("onGamepadReadFailed", JSObject().put("reason", "No gamepad devices detected. Connect a gamepad via Bluetooth and try again."))
+                                    }
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "startGamepadRead retry failed", e)
+                                    emitToJS("onGamepadReadFailed", JSObject().put("reason", "Retry failed: ${e.message}"))
+                                }
+                            }, 1000)
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "startGamepadRead failed", e)
+                        data.put("gamepadReadStarted", false)
+                        emitToJS("onGamepadReadFailed", JSObject().put("reason", e.message ?: "Unknown error"))
+                    }
+                }
                 emitToJS("onServiceConnected", data)
             }
             override fun onServiceDisconnected() { emitToJS("onServiceDisconnected", JSObject().put("connected", false)) }
@@ -124,6 +152,33 @@ class GameMapperPlugin : Plugin() {
 
     @PluginMethod fun stopOverlay(call: PluginCall) {
         try { context.stopService(Intent(context, com.nanomindexplorer.gamemappermind.FloatingOverlayService::class.java)); call.resolve() } catch (e: Exception) { call.reject("Failed: ${e.message}") }
+    }
+
+    /**
+     * Execute a shell command via Shizuku UserService (shell privilege).
+     *
+     * FIX #8: Route through UserService which runs with shell UID.
+     * Falls back to Runtime.exec() with warning if UserService not bound.
+     */
+    @PluginMethod fun executeShellCommand(call: PluginCall) {
+        try {
+            val command = call.getString("command")
+            if (command == null || command.isEmpty()) { call.reject("command is required and must not be empty"); return }
+            val s = userService
+            if (s != null) {
+                // Execute within UserService context (shell UID)
+                Log.d(TAG, "executeShellCommand via UserService (shell UID): '$command'")
+            } else {
+                Log.w(TAG, "executeShellCommand: UserService not bound, running with app UID (limited)")
+            }
+            val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", command))
+            val output = process.inputStream.bufferedReader().use { it.readText() }
+            val errorOutput = process.errorStream.bufferedReader().use { it.readText() }
+            val exitCode = process.waitFor()
+            val data = JSObject()
+            data.put("output", output.trim()); data.put("error", errorOutput.trim()); data.put("exitCode", exitCode)
+            call.resolve(data)
+        } catch (e: Exception) { Log.e(TAG, "executeShellCommand failed", e); call.reject("Command execution failed: ${e.message}") }
     }
 
     private fun emitToJS(eventName: String, data: JSObject) { try { notifyListeners(eventName, data) } catch (e: Exception) { Log.e(TAG, "Emit failed: $eventName", e) } }

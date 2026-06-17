@@ -10,9 +10,27 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
-import com.nanomindexplorer.gamemappermind.input.AnalogProcessor
-import com.nanomindexplorer.gamemappermind.input.TouchInjector
 
+/**
+ * MapperDaemonService — Foreground keep-alive service.
+ *
+ * FIX #5: Removed TouchInjector + InputPipelineWorker + AnalogProcessor.
+ *
+ * This service runs in the APP process (UID app). It CANNOT do touch
+ * injection because InputManager.injectInputEvent() requires shell
+ * privilege (UID 2000). Previously, this service created its own
+ * pipeline that silently failed on every injection attempt.
+ *
+ * The actual gamepad-to-touch pipeline runs in the Shizuku UserService
+ * process (shell UID) via GameMapperPluginImpl:
+ *   - GameMapperUserService.startGamepadRead() → pluginImpl.startPipeline()
+ *   - GameMapperPluginImpl contains the ONLY TouchInjector instance
+ *
+ * This service's sole purpose is now:
+ *   1. Display foreground notification (required by Android for background services)
+ *   2. Keep the app process alive while overlay is active
+ *   3. Forward START/STOP intents (START triggers Shizuku bind if needed)
+ */
 class MapperDaemonService : Service() {
     companion object {
         private const val TAG = "GameMapper/DaemonService"
@@ -24,7 +42,10 @@ class MapperDaemonService : Service() {
         @Volatile var isRunning = false; private set
 
         @JvmStatic fun startDaemon(context: Context, profileJson: String? = null) {
-            val intent = Intent(context, MapperDaemonService::class.java).apply { action = ACTION_START; if (profileJson != null) putExtra(EXTRA_PROFILE_JSON, profileJson) }
+            val intent = Intent(context, MapperDaemonService::class.java).apply {
+                action = ACTION_START
+                if (profileJson != null) putExtra(EXTRA_PROFILE_JSON, profileJson)
+            }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent) else context.startService(intent)
         }
 
@@ -34,48 +55,45 @@ class MapperDaemonService : Service() {
         }
     }
 
-    private var touchInjector: TouchInjector? = null
-    private var analogProcessor: AnalogProcessor? = null
-    private var pipelineWorker: InputPipelineWorker? = null
-
     override fun onBind(intent: Intent?): IBinder? = null
 
-    override fun onCreate() { super.onCreate(); Log.i(TAG, "onCreate"); createNotificationChannel(); isRunning = true }
+    override fun onCreate() {
+        super.onCreate()
+        Log.i(TAG, "onCreate")
+        createNotificationChannel()
+        isRunning = true
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForeground(NOTIFICATION_ID, createNotification("GameMapperMind Active"))
         when (intent?.action) {
-            ACTION_START -> { val json = intent.getStringExtra(EXTRA_PROFILE_JSON); startPipeline(json) }
             ACTION_STOP -> { stopSelf(); return START_NOT_STICKY }
-            else -> startPipeline(null)
+            else -> Log.i(TAG, "Daemon started (foreground keep-alive only, pipeline runs in Shizuku UserService)")
         }
         return START_STICKY
     }
 
-    private fun startPipeline(profileJson: String?) {
-        try {
-            if (touchInjector == null) touchInjector = TouchInjector()
-            if (analogProcessor == null) analogProcessor = AnalogProcessor()
-            if (pipelineWorker == null) pipelineWorker = InputPipelineWorker(touchInjector!!, analogProcessor!!)
-            if (profileJson != null) pipelineWorker!!.setProfileFromJson(profileJson)
-            if (!pipelineWorker!!.isRunning()) pipelineWorker!!.start()
-            val name = pipelineWorker?.getActiveProfile()?.packageName ?: "No profile"
-            updateNotification("Active: $name")
-        } catch (e: Exception) { Log.e(TAG, "Pipeline start failed", e) }
+    override fun onDestroy() {
+        Log.i(TAG, "onDestroy")
+        isRunning = false
+        super.onDestroy()
     }
-
-    private fun stopPipeline() { try { pipelineWorker?.stop(); pipelineWorker?.clearProfile() } catch (e: Exception) { Log.e(TAG, "Stop failed", e) } }
-
-    override fun onDestroy() { Log.i(TAG, "onDestroy"); stopPipeline(); isRunning = false; super.onDestroy() }
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val ch = NotificationChannel(CHANNEL_ID, "Mapper Daemon", NotificationManager.IMPORTANCE_LOW)
-            ch.description = "Keeps gamepad mapping active in background"
+            ch.description = "Keeps GameMapperMind alive in background"
             getSystemService(NotificationManager::class.java)?.createNotificationChannel(ch)
         }
     }
 
-    private fun createNotification(text: String): Notification = NotificationCompat.Builder(this, CHANNEL_ID).setContentTitle("GameMapperMind").setContentText(text).setSmallIcon(android.R.drawable.ic_menu_compass).setOngoing(true).setPriority(NotificationCompat.PRIORITY_LOW).setCategory(NotificationCompat.CATEGORY_SERVICE).build()
-    private fun updateNotification(text: String) { try { getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, createNotification(text)) } catch (e: Exception) { Log.e(TAG, "Notification update failed", e) } }
+    private fun createNotification(text: String): Notification =
+        NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("GameMapperMind")
+            .setContentText(text)
+            .setSmallIcon(android.R.drawable.ic_menu_compass)
+            .setOngoing(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .build()
 }

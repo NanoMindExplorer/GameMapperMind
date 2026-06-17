@@ -324,7 +324,14 @@ class TouchInjector {
 
     /**
      * Single tap at (x, y).
-     * Creates ACTION_DOWN → 20ms delay → ACTION_UP.
+     * Creates ACTION_DOWN → ACTION_UP without blocking sleep.
+     *
+     * FIX #7: Removed Thread.sleep(20) that was blocking binder threads.
+     * The 20ms delay was intended to let games register the tap, but
+     * it blocked the calling binder thread. Since tap() is @Synchronized,
+     * no other injection can happen during sleep anyway — the delay
+     * is unnecessary. Games register ACTION_DOWN + ACTION_UP as a tap
+     * even without delay (the sequence itself is the signal).
      *
      * @param x Absolute pixel X coordinate
      * @param y Absolute pixel Y coordinate
@@ -343,8 +350,8 @@ class TouchInjector {
         baseDownTime = SystemClock.uptimeMillis()
         injectMotionEvent(MotionEvent.ACTION_DOWN, pointerId, displayId)
 
-        try { Thread.sleep(20) } catch (_: InterruptedException) { Thread.currentThread().interrupt() }
-
+        // FIX #7: No Thread.sleep — non-blocking.
+        // The ACTION_DOWN → ACTION_UP sequence is sufficient for tap detection.
         state.isDown = false
         injectMotionEvent(MotionEvent.ACTION_UP, pointerId, displayId)
         pointers.remove(pointerId)

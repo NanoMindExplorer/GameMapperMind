@@ -126,25 +126,19 @@ class GameMapperPluginImpl(
      * Parse profile JSON, override screen dimensions with actual DisplayMetrics,
      * then pass to pipeline.
      *
-     * Step [8] fix: The screenWidth/screenHeight in the JSON come from the
-     * React WebView (window.screen.availWidth), which may differ from the
-     * physical screen due to density scaling or compatibility mode.
-     *
-     * Since touchX/touchY are percentages [0.0..1.0], they are
-     * screen-independent. Only the multiplier needs to be correct.
-     * We override screenWidth/screenHeight with DisplayMetrics values
-     * from the shell process (authoritative).
-     *
-     * Mathematical proof:
-     *   touchX = buttonPixelX / webViewScreenWidth (in React)
-     *   pixelX = touchX × actualScreenWidth (in pipeline)
-     *   If webViewScreenWidth ≠ actualScreenWidth:
-     *     pixelX = (buttonPixelX / webViewScreenWidth) × actualScreenWidth
-     *   This gives the correct physical pixel because touchX is a ratio,
-     *   not an absolute coordinate.
+     * FIX #10: Guard — if pipeline not started, auto-start it first.
+     * Previously, setProfile could be called before startPipeline,
+     * causing all events to be dropped by Guard 1 in onButtonEvent.
+     * Now setProfile auto-starts the pipeline if needed.
      */
     fun setProfile(profileJson: String): Boolean {
         try {
+            // FIX #10: Auto-start pipeline if not running
+            if (!pipelineStarted) {
+                Log.w(TAG, "setProfile: pipeline not started, auto-starting...")
+                startPipeline()
+            }
+
             val obj = JSONObject(profileJson)
 
             // Override screen dimensions with actual DisplayMetrics
@@ -261,6 +255,45 @@ class GameMapperPluginImpl(
      * Used by InputPipelineWorker untuk konversi koordinat.
      */
     fun getScreenHeight(): Int = cachedScreenHeight
+
+    // ============================================================
+    // FIX #2: Direct injection delegate methods.
+    // These replace the separate TouchInjector that was in GameMapperUserService.
+    // All injection now goes through this SINGLE TouchInjector instance,
+    // ensuring shared pointer state and no ID collisions.
+    // ============================================================
+
+    fun tap(x: Float, y: Float, displayId: Int) {
+        touchInjector.tap(x, y, displayId)
+    }
+
+    fun swipe(startX: Float, startY: Float, endX: Float, endY: Float, durationMs: Long, displayId: Int) {
+        touchInjector.swipe(startX, startY, endX, endY, durationMs, displayId)
+    }
+
+    fun multiTouchDown(pointerIds: List<Int>, coords: List<Pair<Float, Float>>, displayId: Int) {
+        touchInjector.multiTouchDown(pointerIds, coords, displayId)
+    }
+
+    fun multiTouchMove(pointerIds: List<Int>, coords: List<Pair<Float, Float>>, displayId: Int) {
+        touchInjector.multiTouchMove(pointerIds, coords, displayId)
+    }
+
+    fun touchUp(pointerId: Int, displayId: Int) {
+        touchInjector.touchUp(pointerId, displayId)
+    }
+
+    fun analogMove(pointerId: Int, centerX: Float, centerY: Float, targetX: Float, targetY: Float, displayId: Int) {
+        touchInjector.analogMove(pointerId, centerX, centerY, targetX, targetY, displayId)
+    }
+
+    fun releaseAnalogStick(pointerId: Int, displayId: Int) {
+        touchInjector.touchUp(pointerId, displayId)
+    }
+
+    fun getDiagnosticInfo(): String {
+        return touchInjector.getDiagnosticInfo()
+    }
 
     fun cleanup() {
         stopPipeline()

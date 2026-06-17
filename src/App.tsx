@@ -72,7 +72,7 @@ export default function App() {
   // Load onboarding state from Preferences on mount
   React.useEffect(() => {
     import('@capacitor/preferences').then(({ Preferences }) => {
-      Preferences.get({ key: 'nexion_onboarding' }).then((res) => {
+      Preferences.get({ key: 'gamemapper_onboarding' }).then((res) => {
         if (res.value) {
           try {
             const parsed = JSON.parse(res.value) as OnboardingState;
@@ -92,7 +92,7 @@ export default function App() {
     setShowOnboarding(false);
     try {
       const { Preferences } = await import('@capacitor/preferences');
-      await Preferences.set({ key: 'nexion_onboarding', value: JSON.stringify(state) });
+      await Preferences.set({ key: 'gamemapper_onboarding', value: JSON.stringify(state) });
     } catch (e) { console.warn('Failed to persist onboarding state', e); }
     handleLogMessage('SYSTEM: Onboarding completed. Welcome to GameMapperMind!');
   };
@@ -111,7 +111,7 @@ export default function App() {
     setShowOnboarding(false);
     try {
       const { Preferences } = await import('@capacitor/preferences');
-      await Preferences.set({ key: 'nexion_onboarding', value: JSON.stringify(skipped) });
+      await Preferences.set({ key: 'gamemapper_onboarding', value: JSON.stringify(skipped) });
     } catch (e) {}
     handleLogMessage('SYSTEM: Onboarding skipped. You can re-run it from settings.');
   };
@@ -119,7 +119,7 @@ export default function App() {
   // Persistence
   React.useEffect(() => {
     import('@capacitor/preferences').then(({ Preferences }) => {
-      Preferences.get({ key: 'nexion_profiles' }).then((res) => {
+      Preferences.get({ key: 'gamemapper_profiles' }).then((res) => {
         if (res.value) {
           try {
             const parsed = JSON.parse(res.value);
@@ -130,13 +130,13 @@ export default function App() {
         }
       }).catch(e => console.warn('capacitor get profiles error', e));
 
-      Preferences.get({ key: 'nexion_active_profile' }).then((res) => {
+      Preferences.get({ key: 'gamemapper_active_profile' }).then((res) => {
         if (res.value) {
           setActiveProfileId(res.value);
         }
       }).catch(e => console.warn('capacitor get active profile error', e));
 
-      Preferences.get({ key: 'nexion_macros' }).then((res) => {
+      Preferences.get({ key: 'gamemapper_macros' }).then((res) => {
         if (res.value) {
           try {
             const parsed = JSON.parse(res.value);
@@ -147,7 +147,7 @@ export default function App() {
         }
       }).catch(e => console.warn('capacitor get macros error', e));
 
-      Preferences.get({ key: 'nexion_settings' }).then((res) => {
+      Preferences.get({ key: 'gamemapper_settings' }).then((res) => {
         if (res.value) {
            try {
              const parsed = JSON.parse(res.value);
@@ -162,14 +162,14 @@ export default function App() {
   const saveProfilesToStorage = async (newProfiles: GamepadProfile[]) => {
     try {
       const { Preferences } = await import('@capacitor/preferences');
-      await Preferences.set({ key: 'nexion_profiles', value: JSON.stringify(newProfiles) });
+      await Preferences.set({ key: 'gamemapper_profiles', value: JSON.stringify(newProfiles) });
     } catch(e) { console.warn('Failed to save profiles', e); }
   };
 
   const saveMacrosToStorage = async (newMacros: GamepadMacro[]) => {
     try {
       const { Preferences } = await import('@capacitor/preferences');
-      await Preferences.set({ key: 'nexion_macros', value: JSON.stringify(newMacros) });
+      await Preferences.set({ key: 'gamemapper_macros', value: JSON.stringify(newMacros) });
     } catch(e) { console.warn('Failed to save macros', e); }
   };
 
@@ -179,7 +179,7 @@ export default function App() {
   const saveSettingsToStorage = async (socket: string, polling: number) => {
     try {
       const { Preferences } = await import('@capacitor/preferences');
-      await Preferences.set({ key: 'nexion_settings', value: JSON.stringify({ socketIpcName: socket, inputPolling: polling }) });
+      await Preferences.set({ key: 'gamemapper_settings', value: JSON.stringify({ socketIpcName: socket, inputPolling: polling }) });
     } catch(e) { console.warn('Failed to save settings', e); }
   };
 
@@ -224,7 +224,7 @@ export default function App() {
     setActiveProfileId(id);
     try {
       const { Preferences } = await import('@capacitor/preferences');
-      await Preferences.set({ key: 'nexion_active_profile', value: id });
+      await Preferences.set({ key: 'gamemapper_active_profile', value: id });
     } catch(e) { console.warn('Failed to save active profile', e); }
     syncActiveProfileIdOnServer(id);
   };
@@ -881,7 +881,7 @@ export default function App() {
       <footer className="border-t border-slate-900 py-6 bg-slate-950 mt-auto text-center text-[10px] font-mono text-slate-500">
         <div className="max-w-7xl mx-auto px-4 flex flex-col items-center gap-3">
           <div className="flex flex-col sm:flex-row justify-between items-center w-full gap-3">
-             <span>🎮 Gamepad Mapper Mind – Nexion Orchestrator Platform</span>
+             <span>🎮 Gamepad Mapper Mind – GameMapper Orchestrator Platform</span>
              <span className="text-indigo-400/80">Author Signature: @author NanoMind Explorer</span>
              <span>© 2026 NanoMind Systems Inc.</span>
           </div>

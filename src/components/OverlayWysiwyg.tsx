@@ -108,9 +108,9 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
   const [customScreenshotUrl, setCustomScreenshotUrl] = React.useState<string | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = React.useState(false);
-  const [nexionPos, setNexionPos] = React.useState({ x: 50, y: 10 });
-  const [isDraggingNexion, setIsDraggingNexion] = React.useState(false);
-  const nexionDragHasMoved = React.useRef(false);
+  const [gamemapperPos, setGamemapperPos] = React.useState({ x: 50, y: 10 });
+  const [isDraggingGamemapper, setIsDraggingGamemapper] = React.useState(false);
+  const gamemapperDragHasMoved = React.useRef(false);
   const [showPalette, setShowPalette] = React.useState(false);
 
     // Sync opacity local state with profile if provided on load
@@ -152,16 +152,16 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
 
   const handleDragEnd = () => {
     setIsDragging(false);
-    setIsDraggingNexion(false);
+    setIsDraggingGamemapper(false);
   };
 
   const handleDragMove = (e: React.MouseEvent) => {
-    if (isDraggingNexion) {
-      nexionDragHasMoved.current = true;
+    if (isDraggingGamemapper) {
+      gamemapperDragHasMoved.current = true;
       const container = e.currentTarget.getBoundingClientRect();
       const x = Math.max(0, Math.min(100, ((e.clientX - container.left) / container.width) * 100));
       const y = Math.max(0, Math.min(100, ((e.clientY - container.top) / container.height) * 100));
-      setNexionPos({ x, y });
+      setGamemapperPos({ x, y });
       return;
     }
 
@@ -320,7 +320,7 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
     };
   }, []);
 
-  const forcePointerEvents = showPalette || isDragging || isDraggingNexion;
+  const forcePointerEvents = showPalette || isDragging || isDraggingGamemapper;
 
   const containerClass = isNativeOverlay 
     ? `relative w-screen h-screen overflow-hidden group select-none touch-none ${forcePointerEvents ? 'pointer-events-auto bg-slate-900/60 backdrop-blur-sm' : 'pointer-events-none'}`
@@ -515,13 +515,13 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
           onMouseLeave={handleDragEnd}
           // Added touch events for mobile compatibility
           onTouchMove={(e) => {
-            if (isDraggingNexion) {
-              nexionDragHasMoved.current = true;
+            if (isDraggingGamemapper) {
+              gamemapperDragHasMoved.current = true;
               const touch = e.touches[0];
               const container = e.currentTarget.getBoundingClientRect();
               const x = Math.max(0, Math.min(100, ((touch.clientX - container.left) / container.width) * 100));
               const y = Math.max(0, Math.min(100, ((touch.clientY - container.top) / container.height) * 100));
-              setNexionPos({ x, y });
+              setGamemapperPos({ x, y });
               return;
             }
             if (!isDragging || !selectedButtonId) return;
@@ -541,25 +541,25 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
             <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(255,255,255,0.015)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.015)_1px,transparent_1px)] bg-[size:24px_24px] opacity-100" />
           )}
 
-          {/* Floating Action Button to toggle Palette (Nexion Hub) */}
+          {/* Floating Action Button to toggle Palette (GameMapper Hub) */}
           {!isNativeOverlay && (
             <div 
               className={`absolute z-50 shadow-[0_0_15px_rgba(99,102,241,0.6)] cursor-pointer pointer-events-auto flex flex-col items-center select-none touch-none ${showPalette ? 'scale-110' : 'opacity-70 flex hover:opacity-100'}`}
-              style={{ left: `${nexionPos.x}%`, top: `${nexionPos.y}%`, transform: 'translate(-50%, -50%)', transition: isDraggingNexion ? 'none' : 'opacity 0.3s' }}
+              style={{ left: `${gamemapperPos.x}%`, top: `${gamemapperPos.y}%`, transform: 'translate(-50%, -50%)', transition: isDraggingGamemapper ? 'none' : 'opacity 0.3s' }}
               onMouseDown={(e) => {
                 e.stopPropagation();
-                nexionDragHasMoved.current = false;
-                setIsDraggingNexion(true);
+                gamemapperDragHasMoved.current = false;
+                setIsDraggingGamemapper(true);
               }}
               onTouchStart={(e) => {
                 e.stopPropagation();
-                nexionDragHasMoved.current = false;
-                setIsDraggingNexion(true);
+                gamemapperDragHasMoved.current = false;
+                setIsDraggingGamemapper(true);
               }}
               onClick={(e) => {
                 e.stopPropagation();
-                if (nexionDragHasMoved.current) {
-                  nexionDragHasMoved.current = false;
+                if (gamemapperDragHasMoved.current) {
+                  gamemapperDragHasMoved.current = false;
                   return;
                 }
                 if (showPalette) {
@@ -569,9 +569,9 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
               }}
             >
                <div className={`w-12 h-12 ${showPalette ? 'bg-indigo-600' : 'bg-slate-900/80'} rounded-full border-2 ${showPalette ? 'border-indigo-300' : 'border-indigo-500'} flex items-center justify-center backdrop-blur shadow-xl overflow-hidden hover:bg-indigo-500 transition-colors`}>
-                 <img src={AppIcon} alt="Nexion" className={`w-7 h-7 ${showPalette ? 'opacity-100' : 'opacity-80'}`} />
+                 <img src={AppIcon} alt="GameMapper" className={`w-7 h-7 ${showPalette ? 'opacity-100' : 'opacity-80'}`} />
                </div>
-               {!showPalette && <div className="text-[9px] font-bold tracking-widest text-indigo-300 mt-2 drop-shadow-md text-center bg-slate-900/80 px-2.5 py-0.5 rounded-full border border-indigo-500/40">NEXION</div>}
+               {!showPalette && <div className="text-[9px] font-bold tracking-widest text-indigo-300 mt-2 drop-shadow-md text-center bg-slate-900/80 px-2.5 py-0.5 rounded-full border border-indigo-500/40">GAMEMAPPER</div>}
             </div>
           )}
 
@@ -853,7 +853,7 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
                 }}
                 onTouchMove={(e) => {
                   // Issue #31 fix: stop propagation so the container's touch
-                  // handler doesn't try to drag the nexion FAB at the same time.
+                  // handler doesn't try to drag the gamemapper FAB at the same time.
                   e.stopPropagation();
                   if (isNativeOverlay && !showPalette) {
                     const { x: injectX, y: injectY } = percentToAbsolutePixels(btn.x, btn.y);

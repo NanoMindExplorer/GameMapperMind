@@ -338,7 +338,7 @@ export default function GameSelector({ profiles, activeProfileId, onProfileSelec
                     udev / Kernel Virtual Event injection parameters
                   </div>
                   <p className="text-[10px] text-slate-400 leading-normal text-justify">
-                    Nexion uses raw memory address layouts inside Shizuku's Isolated boundaries. The mapped device listens strictly on the evdev channel to fetch controller triggers before passing offsets into the <code className="font-mono text-indigo-400 bg-slate-900 px-1 rounded">/dev/uinput</code> touch emulation stack.
+                    GameMapper uses raw memory address layouts inside Shizuku's Isolated boundaries. The mapped device listens strictly on the evdev channel to fetch controller triggers before passing offsets into the <code className="font-mono text-indigo-400 bg-slate-900 px-1 rounded">/dev/uinput</code> touch emulation stack.
                   </p>
                 </div>
 

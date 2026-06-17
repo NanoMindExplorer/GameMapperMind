@@ -1,5 +1,6 @@
 apply plugin: 'com.android.application'
 apply plugin: 'kotlin-android'
+apply plugin: 'kotlinx-serialization'
 
 android {
     namespace = "com.nanomindexplorer.gamemappermind"
@@ -132,6 +133,9 @@ dependencies {
     implementation "dev.rikka.shizuku:api:$shizuku_version"
     implementation "dev.rikka.shizuku:provider:$shizuku_version"
     implementation "androidx.webkit:webkit:1.8.0"
+
+    // Kotlin Serialization (FASE 4 — ProfileModels.kt + ProfileValidator.kt)
+    implementation "org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3"
 
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"

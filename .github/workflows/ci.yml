@@ -240,6 +240,18 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x android/gradlew
 
+      - name: Setup Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install npm deps + build web assets + sync Capacitor
+        run: |
+          npm ci
+          npx vite build
+          npx cap sync android
+
       - name: Run unit tests
         working-directory: android
         run: ./gradlew :app:testDebugUnitTest --stacktrace

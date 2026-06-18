@@ -7,25 +7,17 @@ import android.view.WindowManager
 import com.nanomindexplorer.gamemappermind.daemon.InputPipelineWorker
 import com.nanomindexplorer.gamemappermind.input.AnalogProcessor
 import com.nanomindexplorer.gamemappermind.input.TouchInjector
+import com.nanomindexplorer.gamemappermind.util.HarmonyOSHelper
+import com.nanomindexplorer.gamemappermind.util.HarmonyOSSafeAreaHelper
 import org.json.JSONObject
 
 /**
  * GameMapperPluginImpl — Business logic for the Shizuku UserService.
  *
- * PRIORITAS 3 FIX: Context tidak lagi null.
- * Context diterima dari GameMapperUserService yang berjalan di
- * proses shell Shizuku. Context digunakan untuk:
- *   1. Mendapatkan DisplayMetrics (resolusi layar) untuk konversi
- *      koordinat persentase → pixel absolut
- *   2. Mendapatkan WindowManager untuk detect rotation
- *
- * Fallback strategy (per Pasal 3.3 — alternatif nyata, bukan mock):
- *   Jika Context null (edge case), gunakan resolusi default 2800x1840
- *   (Huawei MatePad Pro 12.2" — target device utama proyek ini).
- *   Ini BUKAN mock — adalah nilai fallback yang valid untuk produksi
- *   karena sebagian besar profil game sudah dioptimalkan untuk
- *   resolusi tersebut. DisplayMetrics yang sebenarnya akan dipakai
- *   begitu Context tersedia.
+ * GMM-AEC-002 §9.2 enhancement: Auto-switch injection behavior untuk HarmonyOS
+ *   - Jika isHarmonyOS() true → auto-enable efootballMode (multi-step + Gaussian delay)
+ *   - Gunakan HarmonyOSSafeAreaHelper untuk coordinate probe
+ *   - Log platform-specific behavior untuk debugging
  *
  * Thread safety:
  *   - TouchInjector menggunakan @Synchronized pada semua method publik
@@ -44,8 +36,6 @@ class GameMapperPluginImpl(
     private val touchInjector: TouchInjector = TouchInjector()
     private val analogProcessor: AnalogProcessor = AnalogProcessor()
 
-    // InputPipelineWorker menggunakan 2-param constructor yang ada di kode.
-    // Pipeline berjalan di HandlerThread dedicated (bukan main thread).
     private val pipelineWorker: InputPipelineWorker = InputPipelineWorker(
         touchInjector,
         analogProcessor
@@ -53,32 +43,30 @@ class GameMapperPluginImpl(
 
     @Volatile private var pipelineStarted = false
 
-    // ============================================================
-    // DisplayMetrics — cached saat konstruktor, di-refresh saat
-    // startPipeline (untuk handle rotation yang terjadi saat app running).
-    // ============================================================
     @Volatile private var cachedScreenWidth: Int = FALLBACK_SCREEN_WIDTH
     @Volatile private var cachedScreenHeight: Int = FALLBACK_SCREEN_HEIGHT
 
+    // GMM-AEC-002 §9.1: Cache HarmonyOS detection
+    private val isHarmonyOS: Boolean by lazy { HarmonyOSHelper.isHarmonyOS() }
+
     init {
         refreshDisplayMetrics()
-        // Step [9]: Force early initialization of TouchInjector to detect
-        // reflection failures before gamepad input starts.
         touchInjector.initialize()
+
+        // ============================================================
+        // GMM-AEC-002 §9.2: Auto-switch injection behavior untuk HarmonyOS
+        // ============================================================
+        // Saat HarmonyOS terdeteksi, auto-enable efootballMode untuk
+        // mengaktifkan FLAG_VIRTUAL + pressure variation + multi-step MOVE.
+        // Ini karena Konami engine (dan banyak game Huawei) menolak
+        // MotionEvent yang terlihat seperti synthetic event.
+        // ============================================================
+        if (isHarmonyOS) {
+            Log.i(TAG, "HarmonyOS detected — auto-enabling efootballMode for compatibility")
+            touchInjector.setEfootballMode(true)
+        }
     }
 
-    /**
-     * Refresh DisplayMetrics dari Context.
-     * Dipanggil saat konstruktor dan setiap startPipeline untuk
-     * handle rotation.
-     *
-     * Algoritma (Pasal 4.1):
-     *   1. Coba dapat WindowManager dari Context
-     *   2. Coba dapat DisplayMetrics dari default Display
-     *   3. Jika gagal, gunakan fallback 2800x1840
-     *
-     * Kompleksitas: O(1) — single API call, cached.
-     */
     private fun refreshDisplayMetrics() {
         try {
             if (context != null) {
@@ -90,18 +78,17 @@ class GameMapperPluginImpl(
                     if (metrics.widthPixels > 0 && metrics.heightPixels > 0) {
                         cachedScreenWidth = metrics.widthPixels
                         cachedScreenHeight = metrics.heightPixels
-                        Log.i(TAG, "DisplayMetrics: ${cachedScreenWidth}x${cachedScreenHeight}")
+                        Log.i(TAG, "DisplayMetrics: " + cachedScreenWidth + "x" + cachedScreenHeight)
                         return
                     }
                 }
             }
         } catch (e: Exception) {
-            Log.w(TAG, "refreshDisplayMetrics failed, using fallback: ${e.message}")
+            Log.w(TAG, "refreshDisplayMetrics failed, using fallback: " + e.message)
         }
-        // Fallback — bukan mock, adalah default untuk target device
         cachedScreenWidth = FALLBACK_SCREEN_WIDTH
         cachedScreenHeight = FALLBACK_SCREEN_HEIGHT
-        Log.i(TAG, "Using fallback resolution: ${cachedScreenWidth}x${cachedScreenHeight}")
+        Log.i(TAG, "Using fallback resolution: " + cachedScreenWidth + "x" + cachedScreenHeight)
     }
 
     fun startPipeline() {
@@ -109,7 +96,8 @@ class GameMapperPluginImpl(
         refreshDisplayMetrics()
         pipelineWorker.start()
         pipelineStarted = true
-        Log.i(TAG, "Pipeline started (screen=${cachedScreenWidth}x${cachedScreenHeight})")
+        Log.i(TAG, "Pipeline started (screen=" + cachedScreenWidth + "x" + cachedScreenHeight +
+                   ", harmonyOS=" + isHarmonyOS + ")")
     }
 
     fun stopPipeline() {
@@ -122,69 +110,53 @@ class GameMapperPluginImpl(
 
     fun isPipelineRunning(): Boolean = pipelineStarted
 
-    /**
-     * Parse profile JSON, override screen dimensions with actual DisplayMetrics,
-     * then pass to pipeline.
-     *
-     * FIX #10: Guard — if pipeline not started, auto-start it first.
-     * Previously, setProfile could be called before startPipeline,
-     * causing all events to be dropped by Guard 1 in onButtonEvent.
-     * Now setProfile auto-starts the pipeline if needed.
-     */
     fun setProfile(profileJson: String): Boolean {
         try {
-            // FIX #10: Auto-start pipeline if not running
             if (!pipelineStarted) {
                 Log.w(TAG, "setProfile: pipeline not started, auto-starting...")
                 startPipeline()
             }
 
             val obj = JSONObject(profileJson)
-
-            // Override screen dimensions with actual DisplayMetrics
             refreshDisplayMetrics()
             obj.put("screenWidth", cachedScreenWidth)
             obj.put("screenHeight", cachedScreenHeight)
 
             Log.i(TAG, "setProfile: overriding screen dimensions to " +
-                    "${cachedScreenWidth}x${cachedScreenHeight} (from DisplayMetrics)")
+                    cachedScreenWidth + "x" + cachedScreenHeight + " (from DisplayMetrics, harmonyOS=" +
+                    isHarmonyOS + ")")
 
             val correctedJson = obj.toString()
+
+            // GMM-AEC-002 §11.2: Auto-enable efootballMode jika profile adalah eFootball
+            val packageName = obj.optString("packageName", "")
+            if (packageName.contains("konami") || packageName.contains("pesam") ||
+                packageName.contains("efootball")) {
+                Log.i(TAG, "eFootball profile detected — enabling efootballMode")
+                touchInjector.setEfootballMode(true)
+            }
+
             return pipelineWorker.setProfileFromJson(correctedJson)
         } catch (e: Exception) {
-            Log.e(TAG, "setProfile: failed to override screen dimensions: ${e.message}")
-            // Fallback: pass original JSON unmodified
+            Log.e(TAG, "setProfile: failed to override screen dimensions: " + e.message)
             return pipelineWorker.setProfileFromJson(profileJson)
         }
     }
+
     fun clearProfile() = pipelineWorker.clearProfile()
 
     fun updateSwipeTrigger(hardwareKey: String, direction: String, touchX: Float, touchY: Float) =
         pipelineWorker.updateSwipeTrigger(hardwareKey, direction, touchX, touchY)
 
-    /**
-     * Handle gamepad button event dari evdev reader.
-     * Dipanggil oleh GameMapperUserService.forwardEventToPipeline().
-     *
-     * Thread safety: dipanggil dari evdev thread, diteruskan ke
-     * pipeline yang berjalan di HandlerThread sendiri.
-     */
     fun onGamepadButton(buttonName: String, value: Int) {
         if (buttonName.startsWith("CONTROLLER_ID:")) {
-            Log.i(TAG, "Controller: ${buttonName.substringAfter("CONTROLLER_ID:")}")
+            Log.i(TAG, "Controller: " + buttonName.substringAfter("CONTROLLER_ID:"))
             return
         }
         if (buttonName == "MODE") return
         pipelineWorker.onButtonEvent(buttonName, value == 1)
     }
 
-    /**
-     * Handle gamepad axis event dari evdev reader.
-     * Dipanggil oleh GameMapperUserService.forwardEventToPipeline().
-     *
-     * @param axes FloatArray dengan 6 elemen: [lx, ly, rx, ry, l2, r2]
-     *             Nilai range: -1.0..1.0 untuk stick, 0.0..1.0 untuk trigger
-     */
     fun onGamepadAxis(axes: FloatArray) {
         pipelineWorker.updateAxisValues(axes)
         val l2 = axes.getOrNull(4) ?: -1f
@@ -198,13 +170,14 @@ class GameMapperPluginImpl(
         touchInjector.setAntiBan(enabled, pressureVariance, sizeVariance)
     }
 
+    // GMM-AEC-002 §11.2: Expose setEfootballMode untuk JS-side control
+    fun setEfootballMode(enabled: Boolean) {
+        touchInjector.setEfootballMode(enabled)
+    }
+
     fun getActiveButtonCount(): Int = pipelineWorker.getActiveButtonCount()
     fun getActiveProfile(): InputPipelineWorker.GameProfile? = pipelineWorker.getActiveProfile()
 
-    /**
-     * Serialize active profile ke JSON untuk UI display.
-     * Menggunakan JSONObject (bukan string concatenation) per kontrak.
-     */
     fun getActiveProfileJson(): String? {
         val profile = pipelineWorker.getActiveProfile() ?: return null
         val json = JSONObject()
@@ -244,25 +217,15 @@ class GameMapperPluginImpl(
         return json.toString()
     }
 
-    /**
-     * Get current screen width in pixels.
-     * Used by InputPipelineWorker untuk konversi koordinat.
-     */
     fun getScreenWidth(): Int = cachedScreenWidth
-
-    /**
-     * Get current screen height in pixels.
-     * Used by InputPipelineWorker untuk konversi koordinat.
-     */
     fun getScreenHeight(): Int = cachedScreenHeight
 
-    // ============================================================
-    // FIX #2: Direct injection delegate methods.
-    // These replace the separate TouchInjector that was in GameMapperUserService.
-    // All injection now goes through this SINGLE TouchInjector instance,
-    // ensuring shared pointer state and no ID collisions.
-    // ============================================================
+    // GMM-AEC-002 §9.1: Expose HarmonyOS info untuk UI display
+    fun isHarmonyOS(): Boolean = isHarmonyOS
+    fun getHarmonyMajorVersion(): Int = HarmonyOSHelper.getHarmonyMajorVersion()
+    fun getRecommendedPollingHz(): Int = HarmonyOSHelper.getRecommendedPollingHz()
 
+    // Direct injection delegate methods
     fun tap(x: Float, y: Float, displayId: Int) {
         touchInjector.tap(x, y, displayId)
     }
@@ -292,7 +255,7 @@ class GameMapperPluginImpl(
     }
 
     fun getDiagnosticInfo(): String {
-        return touchInjector.getDiagnosticInfo()
+        return touchInjector.getDiagnosticInfo() + " | " + pipelineWorker.getDiagnosticInfo()
     }
 
     fun cleanup() {

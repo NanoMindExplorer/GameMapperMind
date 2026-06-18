@@ -3,6 +3,10 @@ apply plugin: 'kotlin-android'
 apply plugin: 'kotlinx-serialization'
 
 android {
+    aaptOptions {
+        cruncherEnabled = false
+    }
+
     namespace = "com.nanomindexplorer.gamemappermind"
     compileSdk = rootProject.ext.compileSdkVersion
 

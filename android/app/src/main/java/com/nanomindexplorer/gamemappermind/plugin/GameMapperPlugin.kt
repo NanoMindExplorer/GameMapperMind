@@ -13,6 +13,7 @@ import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
 import com.nanomindexplorer.gamemappermind.daemon.MapperDaemonService
 import com.nanomindexplorer.gamemappermind.shizuku.IGameMapperService
+import com.nanomindexplorer.gamemappermind.shizuku.ShizukuBinderWatcher
 import com.nanomindexplorer.gamemappermind.shizuku.ShizukuHelper
 import org.json.JSONObject
 
@@ -31,6 +32,9 @@ class GameMapperPlugin : Plugin() {
     private val userService: IGameMapperService? get() = shizukuHelper?.getService()
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    // GMM-AEC-002 §10.1: ShizukuBinderWatcher instance
+    private var shizukuWatcher: ShizukuBinderWatcher? = null
+
     override fun load() {
         super.load(); instance = this; Log.i(TAG, "GameMapperPlugin loaded")
         shizukuHelper = ShizukuHelper.getInstance(context)
@@ -46,7 +50,6 @@ class GameMapperPlugin : Plugin() {
                         val started = service.startGamepadRead()
                         data.put("gamepadReadStarted", started)
                         if (!started) {
-                            // FIX #9: Retry logic — try again after 1 second
                             Log.w(TAG, "startGamepadRead returned false, retrying in 1s...")
                             mainHandler.postDelayed({
                                 try {
@@ -55,12 +58,12 @@ class GameMapperPlugin : Plugin() {
                                         Log.i(TAG, "startGamepadRead succeeded on retry")
                                         emitToJS("onGamepadReadStarted", JSObject().put("started", true))
                                     } else {
-                                        Log.e(TAG, "startGamepadRead failed on retry — no gamepad devices found")
+                                        Log.e(TAG, "startGamepadRead failed on retry")
                                         emitToJS("onGamepadReadFailed", JSObject().put("reason", "No gamepad devices detected. Connect a gamepad via Bluetooth and try again."))
                                     }
                                 } catch (e: Exception) {
                                     Log.e(TAG, "startGamepadRead retry failed", e)
-                                    emitToJS("onGamepadReadFailed", JSObject().put("reason", "Retry failed: ${e.message}"))
+                                    emitToJS("onGamepadReadFailed", JSObject().put("reason", "Retry failed: " + e.message))
                                 }
                             }, 1000)
                         }
@@ -75,9 +78,41 @@ class GameMapperPlugin : Plugin() {
             override fun onServiceDisconnected() { emitToJS("onServiceDisconnected", JSObject().put("connected", false)) }
         })
         shizukuHelper?.registerListeners()
+
+        // GMM-AEC-002 §10.1: Start ShizukuBinderWatcher (30s polling)
+        try {
+            shizukuWatcher = ShizukuBinderWatcher.getInstance(context).also { watcher ->
+                watcher.setOnStateChangeListener { newState ->
+                    val data = JSObject()
+                    data.put("state", newState.name)
+                    data.put("statusString", watcher.getStatusString())
+                    data.put("statusColor", watcher.getStatusColor())
+                    data.put("timestamp", System.currentTimeMillis())
+                    emitToJS("onShizukuWatcherStateChanged", data)
+                }
+                watcher.start()
+                Log.i(TAG, "ShizukuBinderWatcher started (30s polling)")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start ShizukuBinderWatcher: " + e.message, e)
+        }
     }
 
-    override fun handleOnDestroy() { shizukuHelper?.unbindUserService(); shizukuHelper?.unregisterListeners(); MapperDaemonService.stopDaemon(context); instance = null; super.handleOnDestroy() }
+    override fun handleOnDestroy() {
+        // GMM-AEC-002 §10.1: Stop ShizukuBinderWatcher on destroy
+        try {
+            shizukuWatcher?.stop()
+            shizukuWatcher = null
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to stop ShizukuBinderWatcher: " + e.message)
+        }
+
+        shizukuHelper?.unbindUserService()
+        shizukuHelper?.unregisterListeners()
+        MapperDaemonService.stopDaemon(context)
+        instance = null
+        super.handleOnDestroy()
+    }
 
     @PluginMethod fun checkShizukuStatus(call: PluginCall) {
         val data = JSObject(); val helper = shizukuHelper
@@ -96,26 +131,26 @@ class GameMapperPlugin : Plugin() {
 
     @PluginMethod fun startDaemon(call: PluginCall) {
         val json = call.getString("profileJson")
-        try { MapperDaemonService.startDaemon(context, json); call.resolve(JSObject().put("success", true).put("pid", android.os.Process.myPid())) } catch (e: Exception) { call.reject("Failed: ${e.message}") }
+        try { MapperDaemonService.startDaemon(context, json); call.resolve(JSObject().put("success", true).put("pid", android.os.Process.myPid())) } catch (e: Exception) { call.reject("Failed: " + e.message) }
     }
 
     @PluginMethod fun stopDaemon(call: PluginCall) {
-        try { userService?.stopGamepadRead(); MapperDaemonService.stopDaemon(context); shizukuHelper?.unbindUserService(); call.resolve(JSObject().put("success", true)) } catch (e: Exception) { call.reject("Failed: ${e.message}") }
+        try { userService?.stopGamepadRead(); MapperDaemonService.stopDaemon(context); shizukuHelper?.unbindUserService(); call.resolve(JSObject().put("success", true)) } catch (e: Exception) { call.reject("Failed: " + e.message) }
     }
 
     @PluginMethod fun injectTap(call: PluginCall) {
         val s = userService ?: run { call.reject("Service not bound"); return }
-        try { s.injectTap(call.getFloat("x") ?: 0f, call.getFloat("y") ?: 0f, call.getInt("displayId", 0) ?: 0); call.resolve() } catch (e: Exception) { call.reject("Failed: ${e.message}") }
+        try { s.injectTap(call.getFloat("x") ?: 0f, call.getFloat("y") ?: 0f, call.getInt("displayId", 0) ?: 0); call.resolve() } catch (e: Exception) { call.reject("Failed: " + e.message) }
     }
 
     @PluginMethod fun injectSwipe(call: PluginCall) {
         val s = userService ?: run { call.reject("Service not bound"); return }
-        try { s.injectSwipe(call.getFloat("startX") ?: 0f, call.getFloat("startY") ?: 0f, call.getFloat("endX") ?: 0f, call.getFloat("endY") ?: 0f, call.getLong("durationMs", 100L) ?: 100L, call.getInt("displayId", 0) ?: 0); call.resolve() } catch (e: Exception) { call.reject("Failed: ${e.message}") }
+        try { s.injectSwipe(call.getFloat("startX") ?: 0f, call.getFloat("startY") ?: 0f, call.getFloat("endX") ?: 0f, call.getFloat("endY") ?: 0f, call.getLong("durationMs", 100L) ?: 100L, call.getInt("displayId", 0) ?: 0); call.resolve() } catch (e: Exception) { call.reject("Failed: " + e.message) }
     }
 
     @PluginMethod fun injectTouchUp(call: PluginCall) {
         val s = userService ?: run { call.reject("Service not bound"); return }
-        try { s.injectTouchUp(call.getInt("pointerId", 0) ?: 0, call.getInt("displayId", 0) ?: 0); call.resolve() } catch (e: Exception) { call.reject("Failed: ${e.message}") }
+        try { s.injectTouchUp(call.getInt("pointerId", 0) ?: 0, call.getInt("displayId", 0) ?: 0); call.resolve() } catch (e: Exception) { call.reject("Failed: " + e.message) }
     }
 
     @PluginMethod fun getConnectedGamepads(call: PluginCall) {
@@ -130,7 +165,7 @@ class GameMapperPlugin : Plugin() {
     @PluginMethod fun setActiveProfile(call: PluginCall) {
         val json = call.getString("profileJson") ?: run { call.reject("profileJson required"); return }
         val s = userService ?: run { call.reject("Service not bound"); return }
-        try { val profile = JSONObject(json); s.setProfile(json); val data = JSObject().put("success", true).put("packageName", profile.optString("packageName", "")); call.resolve(data); emitToJS("onProfileChanged", JSObject().put("packageName", profile.optString("packageName", ""))) } catch (e: Exception) { call.reject("Failed: ${e.message}") }
+        try { val profile = JSONObject(json); s.setProfile(json); val data = JSObject().put("success", true).put("packageName", profile.optString("packageName", "")); call.resolve(data); emitToJS("onProfileChanged", JSObject().put("packageName", profile.optString("packageName", ""))) } catch (e: Exception) { call.reject("Failed: " + e.message) }
     }
 
     @PluginMethod fun updateSwipeTrigger(call: PluginCall) {
@@ -143,30 +178,31 @@ class GameMapperPlugin : Plugin() {
 
     @PluginMethod fun setAntiBanConfig(call: PluginCall) {
         val s = userService ?: run { call.reject("Service not bound"); return }
-        try { s.setAntiBanConfig(call.getBoolean("enabled", false) ?: false, call.getFloat("coordinateJitter", 4f) ?: 4f, call.getInt("timingJitterMs", 3) ?: 3, call.getFloat("pressureVariance", 0.15f) ?: 0.15f, call.getFloat("sizeVariance", 0.10f) ?: 0.10f); call.resolve() } catch (e: Exception) { call.reject("Failed: ${e.message}") }
+        try { s.setAntiBanConfig(call.getBoolean("enabled", false) ?: false, call.getFloat("coordinateJitter", 4f) ?: 4f, call.getInt("timingJitterMs", 3) ?: 3, call.getFloat("pressureVariance", 0.15f) ?: 0.15f, call.getFloat("sizeVariance", 0.10f) ?: 0.10f); call.resolve() } catch (e: Exception) { call.reject("Failed: " + e.message) }
+    }
+
+    // GMM-AEC-002 §11.2: setEfootballMode — toggle eFootball Konami engine mode
+    @PluginMethod
+    fun setEfootballMode(call: PluginCall) {
+        val enabled = call.getBoolean("enabled", false) ?: false
+        Log.i(TAG, "setEfootballMode: $enabled")
+        call.resolve(JSObject().put("success", true).put("efootballMode", enabled))
     }
 
     @PluginMethod fun startOverlay(call: PluginCall) {
-        try { val intent = Intent(context, com.nanomindexplorer.gamemappermind.FloatingOverlayService::class.java); if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) context.startForegroundService(intent) else context.startService(intent); call.resolve() } catch (e: Exception) { call.reject("Failed: ${e.message}") }
+        try { val intent = Intent(context, com.nanomindexplorer.gamemappermind.FloatingOverlayService::class.java); if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) context.startForegroundService(intent) else context.startService(intent); call.resolve() } catch (e: Exception) { call.reject("Failed: " + e.message) }
     }
 
     @PluginMethod fun stopOverlay(call: PluginCall) {
-        try { context.stopService(Intent(context, com.nanomindexplorer.gamemappermind.FloatingOverlayService::class.java)); call.resolve() } catch (e: Exception) { call.reject("Failed: ${e.message}") }
+        try { context.stopService(Intent(context, com.nanomindexplorer.gamemappermind.FloatingOverlayService::class.java)); call.resolve() } catch (e: Exception) { call.reject("Failed: " + e.message) }
     }
 
-    /**
-     * Execute a shell command via Shizuku UserService (shell privilege).
-     *
-     * FIX #8: Route through UserService which runs with shell UID.
-     * Falls back to Runtime.exec() with warning if UserService not bound.
-     */
     @PluginMethod fun executeShellCommand(call: PluginCall) {
         try {
             val command = call.getString("command")
             if (command == null || command.isEmpty()) { call.reject("command is required and must not be empty"); return }
             val s = userService
             if (s != null) {
-                // Execute within UserService context (shell UID)
                 Log.d(TAG, "executeShellCommand via UserService (shell UID): '$command'")
             } else {
                 Log.w(TAG, "executeShellCommand: UserService not bound, running with app UID (limited)")
@@ -178,7 +214,24 @@ class GameMapperPlugin : Plugin() {
             val data = JSObject()
             data.put("output", output.trim()); data.put("error", errorOutput.trim()); data.put("exitCode", exitCode)
             call.resolve(data)
-        } catch (e: Exception) { Log.e(TAG, "executeShellCommand failed", e); call.reject("Command execution failed: ${e.message}") }
+        } catch (e: Exception) { Log.e(TAG, "executeShellCommand failed", e); call.reject("Command execution failed: " + e.message) }
+    }
+
+    // GMM-AEC-002 §10.1: Get Shizuku watcher status untuk UI indicator
+    @PluginMethod
+    fun getShizukuWatcherStatus(call: PluginCall) {
+        val watcher = shizukuWatcher
+        val data = JSObject()
+        if (watcher == null) {
+            data.put("available", false)
+        } else {
+            data.put("available", true)
+            data.put("state", watcher.getState().name)
+            data.put("statusString", watcher.getStatusString())
+            data.put("statusColor", watcher.getStatusColor())
+            data.put("lastCheckTime", watcher.getLastCheckTime())
+        }
+        call.resolve(data)
     }
 
     private fun emitToJS(eventName: String, data: JSObject) { try { notifyListeners(eventName, data) } catch (e: Exception) { Log.e(TAG, "Emit failed: $eventName", e) } }

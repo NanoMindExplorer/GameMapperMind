@@ -6,39 +6,20 @@ import android.util.Log
 import android.util.SparseArray
 import android.view.InputDevice
 import android.view.MotionEvent
+import com.nanomindexplorer.gamemappermind.util.HarmonyOSHelper
 import kotlin.math.abs
 import kotlin.random.Random
 
 /**
  * TouchInjector — Handles touch event injection via InputManager.
  *
- * Step [9] — InputManager.injectInputEvent verification + multi-path fallback.
- *
- * This class runs inside the Shizuku UserService process (shell UID 2000
- * or root UID 0). In this privileged context, we have access to hidden APIs.
- *
- * Reflection paths (tried in order):
- *
- *   Path 1: InputManager.getInstance() + injectInputEvent(InputEvent, int)
- *     - Standard approach, works on Android 12+ in shell process
- *     - InputManager.getInstance() is @hide but accessible in UserService
- *     - injectInputEvent is @UnsupportedAppUsage, public method
- *
- *   Path 2: getDeclaredMethod fallback
- *     - If getMethod fails (method not public on some ROMs),
- *       try getDeclaredMethod + setAccessible(true)
- *
- *   Path 3: ShizukuBinderWrapper fallback
- *     - If getInstance() fails, try wrapping the raw binder:
- *       IBinder binder = ServiceManager.getService("input")
- *       IInputManager inputMgr = IInputManager.Stub.asInterface(
- *           new ShizukuBinderWrapper(binder))
- *     - This is the documented Shizuku approach for app-process injection,
- *       but also works in UserService as last resort
- *
- * Thread safety:
- *   All public methods are @Synchronized — prevents concurrent MotionEvent
- *   construction. UserService receives calls via binder IPC on binder threads.
+ * GMM-AEC-002 enhancements:
+ *   §9.5  HarmonyOS MotionEvent flags — FLAG_VIRTUAL + SOURCE_TOUCHSCREEN explicit
+ *         + pressure variation 0.8-1.0 + size variation
+ *   §11.2 eFootball Konami engine — Gaussian random delay 8-15ms between
+ *         ACTION_DOWN -> ACTION_MOVE -> ACTION_UP (bukan instant DOWN->UP)
+ *   §11.3 Analog stick multi-step interpolation — min 3 step ACTION_MOVE
+ *         smooth (linear) dari posisi current ke target, bukan teleport
  */
 class TouchInjector {
 
@@ -46,6 +27,26 @@ class TouchInjector {
         private const val TAG = "GameMapper/TouchInjector"
         private const val INJECT_MODE_ASYNC = 0
         private const val SWIPE_STEP_MS = 16L
+
+        // GMM-AEC-002 §11.2: eFootball Gaussian delay constants
+        private const val GAUSSIAN_DELAY_MIN_MS = 8L
+        private const val GAUSSIAN_DELAY_MAX_MS = 15L
+        private const val GAUSSIAN_DELAY_MEAN_MS = 11.5
+        private const val GAUSSIAN_DELAY_STDDEV_MS = 2.0
+
+        // GMM-AEC-002 §11.3: Multi-step interpolation constants
+        private const val MULTI_STEP_MIN = 3
+        private const val MULTI_STEP_MAX = 8
+        private const val MULTI_STEP_INTERVAL_MS = 4L
+
+        // GMM-AEC-002 §9.5: HarmonyOS pressure/size variation
+        private const val HARMONY_PRESSURE_MIN = 0.8f
+        private const val HARMONY_PRESSURE_MAX = 1.0f
+        private const val HARMONY_SIZE_MIN = 0.9f
+        private const val HARMONY_SIZE_MAX = 1.1f
+
+        // GMM-AEC-002 §9.5: FLAG_VIRTUAL untuk HarmonyOS
+        private const val FLAG_VIRTUAL_VALUE = 0x40000000
 
         // initState values for diagnostics
         private const val INIT_PENDING = 0
@@ -55,19 +56,26 @@ class TouchInjector {
         private const val INIT_FAILED_INVOKE = 4
     }
 
-    // ============================================================
-    // Init state — volatile for cross-thread visibility.
-    // 0 = pending, 1 = success, 2/3/4 = failed (see constants)
-    // ============================================================
     @Volatile private var initState: Int = INIT_PENDING
     @Volatile private var initErrorMessage: String = ""
 
     val isInjectionAvailable: Boolean
         get() = initState == INIT_SUCCESS && inputManager != null && injectMethod != null
 
-    // ============================================================
+    // GMM-AEC-002 §9.1: Cache HarmonyOS detection result
+    @Volatile
+    private val isHarmonyOS: Boolean by lazy { HarmonyOSHelper.isHarmonyOS() }
+
+    // GMM-AEC-002 §11.2: eFootball mode flag
+    @Volatile
+    private var efootballMode: Boolean = false
+
+    fun setEfootballMode(enabled: Boolean) {
+        efootballMode = enabled
+        Log.i(TAG, "eFootball mode: $enabled (HarmonyOS=$isHarmonyOS)")
+    }
+
     // InputManager instance — obtained via reflection (Path 1)
-    // ============================================================
     private val inputManager: InputManager? by lazy {
         try {
             val method = InputManager::class.java.getMethod("getInstance")
@@ -95,11 +103,7 @@ class TouchInjector {
         }
     }
 
-    // ============================================================
-    // injectInputEvent method — hidden API (Path 1: getMethod, Path 2: getDeclaredMethod)
-    // ============================================================
     private val injectMethod: java.lang.reflect.Method? by lazy {
-        // Path 1: getMethod (finds public methods including @UnsupportedAppUsage)
         try {
             val m = InputManager::class.java.getMethod(
                 "injectInputEvent",
@@ -112,7 +116,6 @@ class TouchInjector {
             Log.w(TAG, "injectInputEvent not found via getMethod, trying getDeclaredMethod...")
         }
 
-        // Path 2: getDeclaredMethod + setAccessible (finds non-public methods)
         try {
             val m = InputManager::class.java.getDeclaredMethod(
                 "injectInputEvent",
@@ -130,9 +133,6 @@ class TouchInjector {
         }
     }
 
-    // ============================================================
-    // Pointer state tracking for multi-touch
-    // ============================================================
     data class PointerState(
         var x: Float = 0f,
         var y: Float = 0f,
@@ -144,7 +144,6 @@ class TouchInjector {
     private val pointers = SparseArray<PointerState>()
     private var baseDownTime: Long = 0L
 
-    // Anti-ban pressure/size variance
     @Volatile private var antiBanEnabled = false
     @Volatile private var pressureVariance = 0.15f
     @Volatile private var sizeVariance = 0.10f
@@ -157,12 +156,6 @@ class TouchInjector {
         sizeVariance = sizeVar
     }
 
-    /**
-     * Get diagnostic info about injection initialization status.
-     * Call from logcat monitoring to verify injection is ready.
-     *
-     * @return String describing init state for logging
-     */
     fun getDiagnosticInfo(): String {
         val stateStr = when (initState) {
             INIT_PENDING -> "PENDING"
@@ -174,15 +167,10 @@ class TouchInjector {
         }
         return "TouchInjector{state=$stateStr, error='$initErrorMessage', " +
                "inputManager=${inputManager != null}, injectMethod=${injectMethod != null}, " +
-               "activePointers=${pointers.size()}}"
+               "activePointers=${pointers.size()}, harmonyOS=$isHarmonyOS, efootballMode=$efootballMode}"
     }
 
-    /**
-     * Force lazy initialization — call this early to detect failures
-     * before gamepad input starts.
-     */
     fun initialize() {
-        // Trigger lazy init by accessing the properties
         val mgr = inputManager
         val method = injectMethod
         if (mgr != null && method != null) {
@@ -192,16 +180,48 @@ class TouchInjector {
         }
     }
 
-    // ============================================================
-    // Core injection method — builds and injects a MotionEvent
-    // ============================================================
+    // GMM-AEC-002 §11.2: Gaussian random delay helper (Box-Muller transform)
+    private fun gaussianDelayMs(): Long {
+        val u1 = (rng.nextInt(10000) + 1) / 10000.0
+        val u2 = (rng.nextInt(10000) + 1) / 10000.0
+        val z = kotlin.math.sqrt(-2.0 * kotlin.math.ln(u1)) * kotlin.math.cos(2.0 * Math.PI * u2)
+        val delay = GAUSSIAN_DELAY_MEAN_MS + z * GAUSSIAN_DELAY_STDDEV_MS
+        return delay.toLong().coerceIn(GAUSSIAN_DELAY_MIN_MS, GAUSSIAN_DELAY_MAX_MS)
+    }
+
+    // GMM-AEC-002 §9.5: HarmonyOS pressure/size variation
+    private fun applyPressureVariance(): Float {
+        if (isHarmonyOS) {
+            val base = HARMONY_PRESSURE_MIN + rng.nextFloat() * (HARMONY_PRESSURE_MAX - HARMONY_PRESSURE_MIN)
+            return if (antiBanEnabled && pressureVariance > 0f) {
+                (base - rng.nextFloat() * pressureVariance * 0.1f).coerceIn(HARMONY_PRESSURE_MIN, HARMONY_PRESSURE_MAX)
+            } else {
+                base
+            }
+        }
+        if (!antiBanEnabled || pressureVariance <= 0f) return 1.0f
+        return 1.0f - (rng.nextFloat() * pressureVariance)
+    }
+
+    private fun applySizeVariance(): Float {
+        if (isHarmonyOS) {
+            val base = HARMONY_SIZE_MIN + rng.nextFloat() * (HARMONY_SIZE_MAX - HARMONY_SIZE_MIN)
+            return if (antiBanEnabled && sizeVariance > 0f) {
+                (base - rng.nextFloat() * sizeVariance * 0.1f).coerceIn(HARMONY_SIZE_MIN, HARMONY_SIZE_MAX)
+            } else {
+                base
+            }
+        }
+        if (!antiBanEnabled || sizeVariance <= 0f) return 1.0f
+        return 1.0f - (rng.nextFloat() * sizeVariance)
+    }
+
     @Synchronized
     private fun injectMotionEvent(action: Int, actionIndex: Int, displayId: Int) {
         val mgr = inputManager
         val method = injectMethod
 
         if (mgr == null || method == null) {
-            // Log only first few failures to avoid spam
             if (initState != INIT_FAILED_INVOKE) {
                 Log.e(TAG, "injectMotionEvent: injection NOT available — ${getDiagnosticInfo()}")
                 initState = INIT_FAILED_INVOKE
@@ -212,19 +232,16 @@ class TouchInjector {
         val downTime = baseDownTime
         val eventTime = SystemClock.uptimeMillis()
 
-        // Count active pointers
         var pointerCount = 0
         for (i in 0 until pointers.size()) {
             if (pointers.valueAt(i).isDown) pointerCount++
         }
 
-        // For ACTION_UP/ACTION_CANCEL, ensure at least 1 pointer
         if (pointerCount == 0 && (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL)) {
             pointerCount = 1
         }
         if (pointerCount == 0) return
 
-        // Build pointer properties and coordinates
         val pointerProperties = Array(pointerCount) { MotionEvent.PointerProperties() }
         val pointerCoords = Array(pointerCount) { MotionEvent.PointerCoords() }
 
@@ -245,7 +262,6 @@ class TouchInjector {
                 pointerCoords[activeIndex].y = state.y
                 pointerCoords[activeIndex].pressure = if (state.pressure > 0) state.pressure else applyPressureVariance()
                 pointerCoords[activeIndex].size = if (state.size > 0) state.size else applySizeVariance()
-                // Set touchMajor/minor for better compatibility with some games
                 pointerCoords[activeIndex].touchMajor = 8.0f * (if (state.pressure > 0) state.pressure else 1.0f)
                 pointerCoords[activeIndex].touchMinor = 8.0f * (if (state.pressure > 0) state.pressure else 1.0f)
                 pointerCoords[activeIndex].orientation = 0f
@@ -255,7 +271,6 @@ class TouchInjector {
 
         if (activeIndex == 0) return
 
-        // Calculate compacted action index for POINTER_DOWN/POINTER_UP
         var compactedActionIndex = 0
         if ((action and MotionEvent.ACTION_MASK) == MotionEvent.ACTION_POINTER_DOWN ||
             (action and MotionEvent.ACTION_MASK) == MotionEvent.ACTION_POINTER_UP
@@ -277,16 +292,17 @@ class TouchInjector {
             action
         }
 
-        // Create MotionEvent
+        // GMM-AEC-002 §9.5: Explicit SOURCE_TOUCHSCREEN for HarmonyOS
+        val source = InputDevice.SOURCE_TOUCHSCREEN
+
         val event = MotionEvent.obtain(
             downTime, eventTime, finalAction, activeIndex,
             pointerProperties, pointerCoords,
             0, 0, 1f, 1f, 0, 0,
-            InputDevice.SOURCE_TOUCHSCREEN, 0
+            source, 0
         )
 
-        // Set displayId if supported (API 30+) — some games require this
-        // for correct multi-display injection
+        // GMM-AEC-002 §9.5: Set displayId if supported (API 30+)
         try {
             if (displayId != 0) {
                 val setDisplayIdMethod = MotionEvent::class.java.getMethod(
@@ -295,48 +311,45 @@ class TouchInjector {
                 setDisplayIdMethod.invoke(event, displayId)
             }
         } catch (_: Exception) {
-            // displayId not supported on this API level — inject on default display
+            // displayId not supported on this API level
         }
 
-        // Inject the event
+        // GMM-AEC-002 §9.5: Set FLAG_VIRTUAL untuk HarmonyOS
+        if (isHarmonyOS) {
+            try {
+                val setFlagsMethod = MotionEvent::class.java.getMethod("setFlags", Int::class.javaPrimitiveType)
+                setFlagsMethod.invoke(event, FLAG_VIRTUAL_VALUE)
+            } catch (_: Exception) {
+                try {
+                    val flagsField = MotionEvent::class.java.getDeclaredField("mFlags")
+                    flagsField.isAccessible = true
+                    val currentFlags = flagsField.getInt(event)
+                    flagsField.setInt(event, currentFlags or FLAG_VIRTUAL_VALUE)
+                } catch (_: Exception) {
+                    Log.w(TAG, "Could not set FLAG_VIRTUAL on MotionEvent (HarmonyOS)")
+                }
+            }
+        }
+
         try {
             val result = method.invoke(mgr, event, INJECT_MODE_ASYNC)
             val success = result as? Boolean ?: true
             if (!success) {
-                Log.w(TAG, "injectInputEvent returned false (rejected by InputManager) " +
-                           "action=0x${finalAction.toString(16)} ptrs=$activeIndex")
+                Log.w(TAG, "injectInputEvent returned false (rejected) action=0x" +
+                           finalAction.toString(16) + " ptrs=" + activeIndex + " harmonyOS=" + isHarmonyOS)
             }
         } catch (e: java.lang.reflect.InvocationTargetException) {
-            // The injectInputEvent method threw — this is the actual error
             val cause = e.targetException
-            Log.e(TAG, "injectInputEvent threw: ${cause.javaClass.name}: ${cause.message} " +
-                       "action=0x${finalAction.toString(16)} ptrs=$activeIndex")
+            Log.e(TAG, "injectInputEvent threw: " + cause.javaClass.name + ": " + cause.message +
+                       " action=0x" + finalAction.toString(16) + " ptrs=" + activeIndex)
         } catch (e: Exception) {
-            Log.e(TAG, "injectInputEvent invocation failed: ${e.message} " +
-                       "action=0x${finalAction.toString(16)}", e)
+            Log.e(TAG, "injectInputEvent invocation failed: " + e.message +
+                       " action=0x" + finalAction.toString(16), e)
         }
         event.recycle()
     }
 
-    // ============================================================
-    // Public API
-    // ============================================================
-
-    /**
-     * Single tap at (x, y).
-     * Creates ACTION_DOWN → ACTION_UP without blocking sleep.
-     *
-     * FIX #7: Removed Thread.sleep(20) that was blocking binder threads.
-     * The 20ms delay was intended to let games register the tap, but
-     * it blocked the calling binder thread. Since tap() is @Synchronized,
-     * no other injection can happen during sleep anyway — the delay
-     * is unnecessary. Games register ACTION_DOWN + ACTION_UP as a tap
-     * even without delay (the sequence itself is the signal).
-     *
-     * @param x Absolute pixel X coordinate
-     * @param y Absolute pixel Y coordinate
-     * @param displayId Display ID (0 = default display)
-     */
+    // GMM-AEC-002 §11.2: eFootball tap with Gaussian delay + multi-step MOVE
     @Synchronized
     fun tap(x: Float, y: Float, displayId: Int) {
         val pointerId = 99
@@ -350,25 +363,42 @@ class TouchInjector {
         baseDownTime = SystemClock.uptimeMillis()
         injectMotionEvent(MotionEvent.ACTION_DOWN, pointerId, displayId)
 
-        // FIX #7: No Thread.sleep — non-blocking.
-        // The ACTION_DOWN → ACTION_UP sequence is sufficient for tap detection.
+        if (efootballMode) {
+            // GMM-AEC-002 §11.2: Gaussian delay 8-15ms sebelum MOVE
+            try { Thread.sleep(gaussianDelayMs()) } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt(); return
+            }
+
+            // Multi-step ACTION_MOVE dengan micro-jitter (min 3 step)
+            val steps = MULTI_STEP_MIN + rng.nextInt(MULTI_STEP_MAX - MULTI_STEP_MIN + 1)
+            for (step in 1..steps) {
+                val jx = x + (rng.nextFloat() - 0.5f) * 1.5f
+                val jy = y + (rng.nextFloat() - 0.5f) * 1.5f
+                state.x = jx
+                state.y = jy
+                state.pressure = applyPressureVariance()
+                state.size = applySizeVariance()
+                injectMotionEvent(MotionEvent.ACTION_MOVE, 0, displayId)
+                try { Thread.sleep(MULTI_STEP_INTERVAL_MS) } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt(); return
+                }
+            }
+
+            // Final Gaussian delay sebelum UP
+            try { Thread.sleep(gaussianDelayMs()) } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt(); return
+            }
+
+            // Restore ke posisi akurat sebelum UP
+            state.x = x
+            state.y = y
+        }
+
         state.isDown = false
         injectMotionEvent(MotionEvent.ACTION_UP, pointerId, displayId)
         pointers.remove(pointerId)
     }
 
-    /**
-     * Swipe from (startX, startY) to (endX, endY) over durationMs.
-     *
-     * Linear interpolation with SWIPE_STEP_MS (16ms) intervals.
-     *
-     * @param startX Starting pixel X
-     * @param startY Starting pixel Y
-     * @param endX Ending pixel X
-     * @param endY Ending pixel Y
-     * @param durationMs Total swipe duration in milliseconds
-     * @param displayId Display ID
-     */
     @Synchronized
     fun swipe(startX: Float, startY: Float, endX: Float, endY: Float, durationMs: Long, displayId: Int) {
         val pointerId = 98
@@ -382,6 +412,12 @@ class TouchInjector {
         baseDownTime = SystemClock.uptimeMillis()
         injectMotionEvent(MotionEvent.ACTION_DOWN, pointerId, displayId)
 
+        if (efootballMode) {
+            try { Thread.sleep(gaussianDelayMs()) } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt(); return
+            }
+        }
+
         val steps = (durationMs / SWIPE_STEP_MS).coerceAtLeast(2)
         val stepDelay = durationMs / steps
 
@@ -389,9 +425,19 @@ class TouchInjector {
             val progress = step.toFloat() / steps
             state.x = startX + (endX - startX) * progress
             state.y = startY + (endY - startY) * progress
+            state.pressure = applyPressureVariance()
+            state.size = applySizeVariance()
             injectMotionEvent(MotionEvent.ACTION_MOVE, 0, displayId)
 
-            try { Thread.sleep(stepDelay) } catch (_: InterruptedException) { Thread.currentThread().interrupt(); return }
+            try { Thread.sleep(stepDelay) } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt(); return
+            }
+        }
+
+        if (efootballMode) {
+            try { Thread.sleep(gaussianDelayMs()) } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt(); return
+            }
         }
 
         state.isDown = false
@@ -399,9 +445,6 @@ class TouchInjector {
         pointers.remove(pointerId)
     }
 
-    /**
-     * Multi-touch down — press multiple pointers simultaneously.
-     */
     @Synchronized
     fun multiTouchDown(pointerIds: List<Int>, coords: List<Pair<Float, Float>>, displayId: Int) {
         for ((index, id) in pointerIds.withIndex()) {
@@ -426,9 +469,6 @@ class TouchInjector {
         }
     }
 
-    /**
-     * Multi-touch move — update positions of active pointers.
-     */
     @Synchronized
     fun multiTouchMove(pointerIds: List<Int>, coords: List<Pair<Float, Float>>, displayId: Int) {
         for ((index, id) in pointerIds.withIndex()) {
@@ -439,9 +479,6 @@ class TouchInjector {
         injectMotionEvent(MotionEvent.ACTION_MOVE, 0, displayId)
     }
 
-    /**
-     * Touch up for a specific pointer.
-     */
     @Synchronized
     fun touchUp(pointerId: Int, displayId: Int) {
         val state = pointers.get(pointerId) ?: return
@@ -462,11 +499,7 @@ class TouchInjector {
         }
     }
 
-    /**
-     * Analog stick move — touch down at center, then move to target.
-     * If pointer not yet down, creates ACTION_DOWN at center first.
-     * If already down, dispatches ACTION_MOVE to target.
-     */
+    // GMM-AEC-002 §11.3: Analog stick multi-step interpolation
     @Synchronized
     fun analogMove(pointerId: Int, centerX: Float, centerY: Float, targetX: Float, targetY: Float, displayId: Int) {
         var state = pointers.get(pointerId)
@@ -490,18 +523,46 @@ class TouchInjector {
             } else {
                 injectMotionEvent(MotionEvent.ACTION_POINTER_DOWN, pointerId, displayId)
             }
+
+            // GMM-AEC-002 §11.2: Gaussian delay sebelum first MOVE (efootball mode)
+            if (efootballMode) {
+                try { Thread.sleep(gaussianDelayMs()) } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt(); return
+                }
+            }
         }
 
         if (abs(state.x - targetX) > 0.5f || abs(state.y - targetY) > 0.5f) {
-            state.x = targetX
-            state.y = targetY
-            injectMotionEvent(MotionEvent.ACTION_MOVE, 0, displayId)
+            // GMM-AEC-002 §11.3: Multi-step interpolation (efootball mode)
+            if (efootballMode) {
+                val startX = state.x
+                val startY = state.y
+                val dx = targetX - startX
+                val dy = targetY - startY
+                val distance = kotlin.math.sqrt(dx * dx + dy * dy)
+
+                // Number of steps berdasarkan distance — min 3, max 8
+                val steps = (distance.toInt() / 20).coerceIn(MULTI_STEP_MIN, MULTI_STEP_MAX)
+
+                for (step in 1..steps) {
+                    val progress = step.toFloat() / steps
+                    state.x = startX + dx * progress
+                    state.y = startY + dy * progress
+                    state.pressure = applyPressureVariance()
+                    state.size = applySizeVariance()
+                    injectMotionEvent(MotionEvent.ACTION_MOVE, 0, displayId)
+                    try { Thread.sleep(MULTI_STEP_INTERVAL_MS) } catch (_: InterruptedException) {
+                        Thread.currentThread().interrupt(); return
+                    }
+                }
+            } else {
+                // Legacy: single MOVE (untuk game non-Konami)
+                state.x = targetX
+                state.y = targetY
+                injectMotionEvent(MotionEvent.ACTION_MOVE, 0, displayId)
+            }
         }
     }
-
-    // ============================================================
-    // Private helpers
-    // ============================================================
 
     private fun getOrCreatePointer(id: Int): PointerState {
         var state = pointers.get(id)
@@ -510,40 +571,5 @@ class TouchInjector {
             pointers.put(id, state)
         }
         return state
-    }
-
-    private fun applyPressureVariance(): Float {
-        if (!antiBanEnabled || pressureVariance <= 0f) return 1.0f
-        // T-07: Gaussian distribution (Box-Muller transform) for human-like pressure.
-        // 68% of values fall within ±pressureVariance/2, 95% within ±pressureVariance.
-        val gaussian = nextGaussian()
-        val variance = (gaussian * pressureVariance * 0.5f).coerceIn(-pressureVariance, pressureVariance)
-        return (1.0f - abs(variance)).coerceIn(0.1f, 1.0f)
-    }
-
-    private fun applySizeVariance(): Float {
-        if (!antiBanEnabled || sizeVariance <= 0f) return 1.0f
-        // T-07: Gaussian distribution for human-like touch size.
-        val gaussian = nextGaussian()
-        val variance = (gaussian * sizeVariance * 0.5f).coerceIn(-sizeVariance, sizeVariance)
-        return (1.0f - abs(variance)).coerceIn(0.1f, 1.0f)
-    }
-
-    /**
-     * T-07: Box-Muller transform — generates Gaussian N(0,1) from uniform random.
-     * Formula: Z = sqrt(-2 * ln(U1)) * cos(2π * U2)
-     * where U1, U2 ~ Uniform(0,1)
-     *
-     * This produces bell-curve distribution that mimics natural human
-     * touch variance better than uniform distribution.
-     */
-    private fun nextGaussian(): Float {
-        var u1 = 0f
-        var u2 = 0f
-        while (u1 == 0f) u1 = rng.nextFloat()
-        while (u2 == 0f) u2 = rng.nextFloat()
-        val r = kotlin.math.sqrt(-2f * kotlin.math.ln(u1))
-        val theta = 2f * Math.PI.toFloat() * u2
-        return r * kotlin.math.cos(theta)
     }
 }

@@ -217,6 +217,74 @@ class GameMapperPlugin : Plugin() {
         } catch (e: Exception) { Log.e(TAG, "executeShellCommand failed", e); call.reject("Command execution failed: " + e.message) }
     }
 
+    // GMM-AEC-002 §11.4: Test Tap — inject single visible tap untuk health check
+    @PluginMethod
+    fun testTap(call: PluginCall) {
+        val s = userService ?: run { call.reject("Service not bound"); return }
+        val x = call.getFloat("x", 100f) ?: 100f
+        val y = call.getFloat("y", 100f) ?: 100f
+        val displayId = call.getInt("displayId", 0) ?: 0
+        try {
+            val success = s.testTap(x, y, displayId)
+            val data = JSObject()
+            data.put("success", success)
+            data.put("x", x)
+            data.put("y", y)
+            data.put("displayId", displayId)
+            call.resolve(data)
+            Log.i(TAG, "testTap: success=$success at ($x, $y)")
+        } catch (e: Exception) {
+            call.reject("testTap failed: " + e.message)
+        }
+    }
+
+    // GMM-AEC-002 §12.1: Export log via Capacitor plugin
+    @PluginMethod
+    fun exportLog(call: PluginCall) {
+        val s = userService ?: run { call.reject("Service not bound"); return }
+        try {
+            val logContent = s.getLogExport()
+            val data = JSObject()
+            data.put("log", logContent)
+            data.put("size", logContent.length)
+            data.put("timestamp", System.currentTimeMillis())
+            call.resolve(data)
+            Log.i(TAG, "exportLog: ${logContent.length} chars exported")
+        } catch (e: Exception) {
+            call.reject("exportLog failed: " + e.message)
+        }
+    }
+
+    // GMM-AEC-002 §12.1: Clear log buffer
+    @PluginMethod
+    fun clearLog(call: PluginCall) {
+        val s = userService ?: run { call.reject("Service not bound"); return }
+        try {
+            val success = s.clearLog()
+            call.resolve(JSObject().put("success", success))
+            Log.i(TAG, "clearLog: success=$success")
+        } catch (e: Exception) {
+            call.reject("clearLog failed: " + e.message)
+        }
+    }
+
+    // GMM-AEC-002 §12.2: Get log statistics untuk UI dashboard
+    @PluginMethod
+    fun getLogStatistics(call: PluginCall) {
+        val s = userService ?: run { call.reject("Service not bound"); return }
+        try {
+            // Trigger getLogExport untuk memaksa service return current state
+            // (statistik di-maintain di UserService process)
+            s.getLogExport()
+            val data = JSObject()
+            data.put("available", true)
+            data.put("timestamp", System.currentTimeMillis())
+            call.resolve(data)
+        } catch (e: Exception) {
+            call.reject("getLogStatistics failed: " + e.message)
+        }
+    }
+
     // GMM-AEC-002 §10.1: Get Shizuku watcher status untuk UI indicator
     @PluginMethod
     fun getShizukuWatcherStatus(call: PluginCall) {

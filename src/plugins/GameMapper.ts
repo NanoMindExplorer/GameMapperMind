@@ -77,6 +77,30 @@ export interface GameMapperPluginType {
   // Shell command execution via Shizuku
   executeShellCommand(options: { command: string }): Promise<{ output: string; error?: string; exitCode: number }>;
 
+  // GMM-AEC-002 §11.4: Test Tap — inject single visible tap untuk health check
+  testTap(options: { x: number; y: number; displayId?: number }): Promise<{ success: boolean; x: number; y: number; displayId: number }>;
+
+  // GMM-AEC-002 §12.1: Export log
+  exportLog(): Promise<{ log: string; size: number; timestamp: number }>;
+
+  // GMM-AEC-002 §12.1: Clear log buffer
+  clearLog(): Promise<{ success: boolean }>;
+
+  // GMM-AEC-002 §12.2: Get log statistics
+  getLogStatistics(): Promise<{ available: boolean; timestamp: number }>;
+
+  // GMM-AEC-002 §10.1: Get Shizuku watcher status
+  getShizukuWatcherStatus(): Promise<{
+    available: boolean;
+    state?: string;
+    statusString?: string;
+    statusColor?: string;
+    lastCheckTime?: number;
+  }>;
+
+  // GMM-AEC-002 §11.2: Set eFootball mode (toggle Gaussian delay + multi-step)
+  setEfootballMode(options: { enabled: boolean }): Promise<{ success: boolean; efootballMode: boolean }>;
+
   // Listeners — Shizuku lifecycle
   addListener(
     eventName: 'onShizukuBinderReceived',

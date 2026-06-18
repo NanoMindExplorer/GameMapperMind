@@ -316,17 +316,26 @@ class GameMapperUserService : IGameMapperService.Stub {
     // ============================================================
     private fun applyCoordinateJitterX(x: Float): Float {
         if (!antiBan.enabled || antiBan.coordinateJitter <= 0f) return x
-        return x + (rng.nextFloat() - 0.5f) * 2f * antiBan.coordinateJitter
+        // T-07: Gaussian jitter (Box-Muller) for human-like coordinate variance.
+        val jitter = (nextGaussian() * antiBan.coordinateJitter * 0.5f)
+            .coerceIn(-antiBan.coordinateJitter, antiBan.coordinateJitter)
+        return x + jitter
     }
 
     private fun applyCoordinateJitterY(y: Float): Float {
         if (!antiBan.enabled || antiBan.coordinateJitter <= 0f) return y
-        return y + (rng.nextFloat() - 0.5f) * 2f * antiBan.coordinateJitter
+        // T-07: Gaussian jitter for Y axis.
+        val jitter = (nextGaussian() * antiBan.coordinateJitter * 0.5f)
+            .coerceIn(-antiBan.coordinateJitter, antiBan.coordinateJitter)
+        return y + jitter
     }
 
     private fun applyTimingJitter() {
         if (!antiBan.enabled || antiBan.timingJitterMs <= 0) return
-        val delay = rng.nextInt(0, antiBan.timingJitterMs * 2) - antiBan.timingJitterMs
+        // T-07: Gaussian jitter for timing — bell curve around 0.
+        val delay = (nextGaussian() * antiBan.timingJitterMs * 0.5f)
+            .toInt()
+            .coerceIn(-antiBan.timingJitterMs, antiBan.timingJitterMs)
         if (delay > 0) {
             try {
                 Thread.sleep(delay.toLong())
@@ -334,6 +343,20 @@ class GameMapperUserService : IGameMapperService.Stub {
                 Thread.currentThread().interrupt()
             }
         }
+    }
+
+    /**
+     * T-07: Box-Muller transform for Gaussian N(0,1) distribution.
+     * Z = sqrt(-2 * ln(U1)) * cos(2π * U2)
+     */
+    private fun nextGaussian(): Float {
+        var u1 = 0f
+        var u2 = 0f
+        while (u1 == 0f) u1 = rng.nextFloat()
+        while (u2 == 0f) u2 = rng.nextFloat()
+        val r = kotlin.math.sqrt(-2f * kotlin.math.ln(u1))
+        val theta = 2f * Math.PI.toFloat() * u2
+        return r * kotlin.math.cos(theta)
     }
 
     override fun setAntiBanConfig(

@@ -154,6 +154,17 @@ export interface GameMapperPluginType {
     eventName: 'onForegroundAppChanged',
     listenerFunc: (data: { packageName: string; timestamp: number }) => void
   ): Promise<PluginListenerHandle>;
+
+  // GMM-AEC-002 §10.4: Shizuku watcher state changes
+  addListener(
+    eventName: 'onShizukuWatcherStateChanged',
+    listenerFunc: (data: {
+      state: string;
+      statusString: string;
+      statusColor: string;
+      timestamp: number;
+    }) => void
+  ): Promise<PluginListenerHandle>;
 }
 
 const GameMapper = registerPlugin<GameMapperPluginType>('GameMapper');

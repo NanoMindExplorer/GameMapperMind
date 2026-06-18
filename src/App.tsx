@@ -112,7 +112,6 @@ function getEffectiveScreenSize() {
 }
 
 export default function App() {
-  const { checkShizukuStatus, executeShizukuCommand, injectInput, stopDaemon, resetButtonPointers } = useShizuku();
   const { startOverlay, stopOverlay } = useInputInjector();
   const [shizukuState, setShizukuState] = React.useState<ShizukuState>({
     status: 'DISCONNECTED',
@@ -334,7 +333,6 @@ export default function App() {
       // Cancel any in-flight swipe timeouts (Issue #13 fix).
       cancelPendingSwipes();
       // Release any allocated button pointers (Issue #12 fix).
-      resetButtonPointers();
       // Notify macro engine + other listeners.
       window.dispatchEvent(new CustomEvent('emergency-kill'));
       if (overlayActive) {
@@ -607,7 +605,6 @@ export default function App() {
 
   const handleKillSwitch = async () => {
     cancelPendingSwipes();
-    resetButtonPointers();
     window.dispatchEvent(new CustomEvent('emergency-kill'));
     if (overlayActive) {
       await stopOverlay();

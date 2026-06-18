@@ -214,7 +214,7 @@ class InputPipelineWorker(
      *   - Profile change (untuk clean state)
      */
     fun releaseAllPointers() {
-        Log.i(TAG, "releaseAllPointers() — releasing ${buttonPointers.size()} active button pointers")
+        Log.i(TAG, "releaseAllPointers() — releasing ${buttonPointers.size} active button pointers")
         releaseAllPointersInternal()
 
         analogProcessor.reset(leftStickState)
@@ -228,7 +228,7 @@ class InputPipelineWorker(
     private fun releaseAllPointersInternal() {
         val profile = activeProfile ?: return
         val displayId = profile.displayId
-        val iterator = buttonPointers.values().iterator()
+        val iterator = buttonPointers.values.iterator()
         var released = 0
         while (iterator.hasNext()) {
             val ptrId = iterator.next()
@@ -440,7 +440,7 @@ class InputPipelineWorker(
                "interval=${pollIntervalMs}ms, " +
                "profile=${activeProfile?.packageName ?: "null"}, " +
                "activeButtons=${buttonStates.count { it.value }}, " +
-               "activePointers=${buttonPointers.size()}, " +
+               "activePointers=${buttonPointers.size}, " +
                "droppedEvents=$droppedEvents}"
     }
 }

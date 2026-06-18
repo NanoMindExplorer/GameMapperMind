@@ -63,7 +63,6 @@ class TouchInjector {
         get() = initState == INIT_SUCCESS && inputManager != null && injectMethod != null
 
     // GMM-AEC-002 §9.1: Cache HarmonyOS detection result
-    @Volatile
     private val isHarmonyOS: Boolean by lazy { HarmonyOSHelper.isHarmonyOS() }
 
     // GMM-AEC-002 §11.2: eFootball mode flag

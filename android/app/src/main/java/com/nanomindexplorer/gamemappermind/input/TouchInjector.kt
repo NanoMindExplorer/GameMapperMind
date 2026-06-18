@@ -514,11 +514,36 @@ class TouchInjector {
 
     private fun applyPressureVariance(): Float {
         if (!antiBanEnabled || pressureVariance <= 0f) return 1.0f
-        return 1.0f - (rng.nextFloat() * pressureVariance)
+        // T-07: Gaussian distribution (Box-Muller transform) for human-like pressure.
+        // 68% of values fall within ±pressureVariance/2, 95% within ±pressureVariance.
+        val gaussian = nextGaussian()
+        val variance = (gaussian * pressureVariance * 0.5f).coerceIn(-pressureVariance, pressureVariance)
+        return (1.0f - variance.absoluteValue).coerceIn(0.1f, 1.0f)
     }
 
     private fun applySizeVariance(): Float {
         if (!antiBanEnabled || sizeVariance <= 0f) return 1.0f
-        return 1.0f - (rng.nextFloat() * sizeVariance)
+        // T-07: Gaussian distribution for human-like touch size.
+        val gaussian = nextGaussian()
+        val variance = (gaussian * sizeVariance * 0.5f).coerceIn(-sizeVariance, sizeVariance)
+        return (1.0f - variance.absoluteValue).coerceIn(0.1f, 1.0f)
+    }
+
+    /**
+     * T-07: Box-Muller transform — generates Gaussian N(0,1) from uniform random.
+     * Formula: Z = sqrt(-2 * ln(U1)) * cos(2π * U2)
+     * where U1, U2 ~ Uniform(0,1)
+     *
+     * This produces bell-curve distribution that mimics natural human
+     * touch variance better than uniform distribution.
+     */
+    private fun nextGaussian(): Float {
+        var u1 = 0f
+        var u2 = 0f
+        while (u1 == 0f) u1 = rng.nextFloat()
+        while (u2 == 0f) u2 = rng.nextFloat()
+        val r = kotlin.math.sqrt(-2f * kotlin.math.ln(u1))
+        val theta = 2f * Math.PI.toFloat() * u2
+        return r * kotlin.math.cos(theta)
     }
 }

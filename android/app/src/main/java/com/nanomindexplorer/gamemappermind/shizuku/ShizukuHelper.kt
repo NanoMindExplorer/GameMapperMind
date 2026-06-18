@@ -1,14 +1,18 @@
 package com.nanomindexplorer.gamemappermind.shizuku
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.util.Log
 import androidx.annotation.Keep
+import androidx.core.app.NotificationCompat
 import rikka.shizuku.Shizuku
 
 /**
@@ -110,12 +114,19 @@ class ShizukuHelper(private val context: Context) {
     // ============================================================
     private val binderReceivedListener = Shizuku.OnBinderReceivedListener {
         Log.d(TAG, "Shizuku binder received — Shizuku is running")
+        // T-03: Auto-recovery — when binder comes back, auto-rebind if we had permission before
+        if (checkPermission()) {
+            Log.i(TAG, "T-03: Shizuku recovered, auto-rebinding UserService...")
+            bindUserService()
+        }
         callback?.onBinderReceived()
     }
 
     private val binderDeadListener = Shizuku.OnBinderDeadListener {
         Log.w(TAG, "Shizuku binder dead — Shizuku stopped or crashed")
         gameMapperService = null
+        // T-03: Show user notification about Shizuku death
+        showShizukuDeathNotification()
         callback?.onBinderDead()
     }
 
@@ -355,6 +366,36 @@ class ShizukuHelper(private val context: Context) {
             Shizuku.getVersion()
         } catch (e: Exception) {
             -1
+        }
+    }
+
+    /**
+     * T-03: Show notification when Shizuku binder dies.
+     * Uses Android NotificationManager to inform user that Shizuku
+     * has stopped and needs to be restarted.
+     */
+    private fun showShizukuDeathNotification() {
+        try {
+            val nm = context.getSystemService(android.content.Context.NOTIFICATION_SERVICE) as NotificationManager
+            val channelId = "shizuku_status"
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val channel = NotificationChannel(channelId, "Shizuku Status", NotificationManager.IMPORTANCE_HIGH)
+                channel.description = "Notifies when Shizuku connection is lost or restored"
+                nm.createNotificationChannel(channel)
+            }
+
+            val notification = NotificationCompat.Builder(context, channelId)
+                .setContentTitle("GameMapperMind: Shizuku Disconnected")
+                .setContentText("Shizuku has stopped. Touch injection is paused. Restart Shizuku to resume.")
+                .setSmallIcon(android.R.drawable.ic_dialog_alert)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setAutoCancel(true)
+                .build()
+
+            nm.notify(2001, notification)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to show Shizuku death notification: ${e.message}")
         }
     }
 }

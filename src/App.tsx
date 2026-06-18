@@ -113,6 +113,7 @@ function getEffectiveScreenSize() {
 
 export default function App() {
   const { startOverlay, stopOverlay } = useInputInjector();
+  const { stopDaemon, checkShizukuStatus, injectInput } = useShizuku();
   const [shizukuState, setShizukuState] = React.useState<ShizukuState>({
     status: 'DISCONNECTED',
     daemonRunning: false,

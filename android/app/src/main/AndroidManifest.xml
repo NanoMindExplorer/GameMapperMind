@@ -45,6 +45,7 @@
             android:name=".daemon.MapperDaemonService"
             android:exported="false"
             android:foregroundServiceType="specialUse">
+            android:stopWithTask="false"
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Gamepad Mapping Daemon"
@@ -71,6 +72,37 @@
             android:exported="true"
             android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
     </application>
+                   <!-- ============================================================ -->
+        <!-- GMM-AEC-002 §10.3: BootCompletedReceiver — auto-restart     -->
+        <!-- service setelah device reboot                               -->
+        <!-- ============================================================ -->
+        <receiver
+            android:name=".shizuku.BootCompletedReceiver"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.RECEIVE_BOOT_COMPLETED">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+
+        <!-- ============================================================ -->
+        <!-- GMM-AEC-002 §10.2: FixShizukuReceiver — action "Perbaiki    -->
+        <!-- Sekarang" dari notification ShizukuBinderWatcher             -->
+        <!-- ============================================================ -->
+        <receiver
+            android:name=".shizuku.FixShizukuReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.nanomindexplorer.gamemappermind.FIX_SHIZUKU_NOW" />
+            </intent-filter>
+        </receiver>
+    </application>
 
     <!-- Permissions -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
@@ -79,6 +111,16 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+        <!-- ============================================================ -->
+    <!-- GMM-AEC-002 §10.3: BootCompleted permission                   -->
+    <!-- ============================================================ -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- ============================================================ -->
+    <!-- GMM-AEC-002 §9.3: WakeLock untuk cegah PowerGenie kill       -->
+    <!-- ============================================================ -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.REQUEST_FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <!-- Shizuku Permission -->
     <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />

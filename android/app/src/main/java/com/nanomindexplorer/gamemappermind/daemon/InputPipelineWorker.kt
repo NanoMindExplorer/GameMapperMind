@@ -5,6 +5,7 @@ import android.os.HandlerThread
 import android.util.Log
 import com.nanomindexplorer.gamemappermind.input.AnalogProcessor
 import com.nanomindexplorer.gamemappermind.input.TouchInjector
+import com.nanomindexplorer.gamemappermind.util.HarmonyOSHelper
 import org.json.JSONObject
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
@@ -45,12 +46,40 @@ class InputPipelineWorker(
 ) {
     companion object {
         private const val TAG = "GameMapper/PipelineWorker"
-        private const val POLL_INTERVAL_MS = 4L
+
+        // ============================================================
+        // GMM-AEC-002 §12.4: Polling rate hard cap
+        // ============================================================
+        // Sebelumnya: POLL_INTERVAL_MS = 4L (250Hz) — terlalu tinggi, unstable
+        // Sekarang: dynamic berdasarkan platform
+        //   - HarmonyOS: max 120Hz (interval 8ms)
+        //   - Android murni: max 200Hz (interval 5ms)
+        // ============================================================
+        private const val POLL_INTERVAL_MS_HARMONY = 8L   // 125Hz (headroom di atas 120Hz)
+        private const val POLL_INTERVAL_MS_ANDROID = 5L   // 200Hz
+        private const val POLL_INTERVAL_MS_LEGACY = 4L    // 250Hz (fallback/testing)
+
         private const val SWIPE_DURATION_MS = 80L
         private const val MIN_POINTER_ID = 10
         private const val MAX_POINTER_ID = 109
     }
 
+    /**
+     * Resolusi polling interval saat ini.
+     * Di-set saat start() berdasarkan platform detection.
+     */
+    @Volatile
+    private var pollIntervalMs: Long = POLL_INTERVAL_MS_ANDROID
+
+    /**
+     * Get polling interval yang aktif.
+     */
+    fun getPollIntervalMs(): Long = pollIntervalMs
+
+    /**
+     * Get polling rate dalam Hz.
+     */
+    fun getPollingHz(): Int = (1000 / pollIntervalMs).toInt()
     // ============================================================
     // Profile data types
     // ============================================================
@@ -219,11 +248,19 @@ class InputPipelineWorker(
             Log.w(TAG, "start() called but pipeline already running")
             return
         }
+
+        // ============================================================
+        // GMM-AEC-002 §12.4: Resolve polling interval based on platform
+        // ============================================================
+        val isHarmony = HarmonyOSHelper.isHarmonyOS()
+        pollIntervalMs = if (isHarmony) POLL_INTERVAL_MS_HARMONY else POLL_INTERVAL_MS_ANDROID
+        Log.i(TAG, "Polling interval: ${pollIntervalMs}ms (${getPollingHz()}Hz, HarmonyOS=$isHarmony)")
+
         running = true
         pipelineThread = HandlerThread("InputPipelineThread").also { it.start() }
         pipelineHandler = Handler(pipelineThread!!.looper)
         pipelineHandler?.post(pollRunnable)
-        Log.i(TAG, "Pipeline started at ${1000 / POLL_INTERVAL_MS}Hz (profile=${activeProfile?.packageName ?: "null"})")
+        Log.i(TAG, "Pipeline started at ${getPollingHz()}Hz (profile=${activeProfile?.packageName ?: "null"})")
     }
 
     fun stop() {
@@ -238,9 +275,93 @@ class InputPipelineWorker(
         pipelineHandler = null
         analogProcessor.reset(leftStickState)
         analogProcessor.reset(rightStickState)
+
+        // ============================================================
+        // GMM-AEC-002 §11.6: Release SEMUA pointer ID saat stop
+        // untuk cegah ghost pointer yang stuck di game state
+        // ============================================================
+        releaseAllPointersInternal()
+
         buttonStates.clear()
         buttonPointers.clear()
         Log.i(TAG, "Pipeline stopped (dropped $droppedEvents events during session)")
+    }
+
+    /**
+     * GMM-AEC-002 §11.6: Release SEMUA pointer ID saat gamepad disconnected
+     * atau app pause — tidak boleh ada "ghost pointer" yang stuck.
+     *
+     * Method ini TIDAK stop pipeline — hanya release semua active pointer.
+     * Pipeline bisa lanjut jalan saat gamepad reconnect / app resume.
+     *
+     * Dipanggil dari:
+     *   - Gamepad disconnect event (GameMapperUserService)
+     *   - App onPause (MainActivity)
+     *   - Profile change (untuk clean state)
+     */
+    fun releaseAllPointers() {
+        Log.i(TAG, "releaseAllPointers() — releasing ${buttonPointers.size()} active button pointers")
+        releaseAllPointersInternal()
+
+        // Reset analog stick states juga
+        analogProcessor.reset(leftStickState)
+        analogProcessor.reset(rightStickState)
+
+        // Reset button states
+        buttonStates.clear()
+        buttonPointers.clear()
+        nextPointerId.set(MIN_POINTER_ID)
+    }
+
+    /**
+     * Internal helper — release semua pointer tanpa reset state tracking.
+     */
+    private fun releaseAllPointersInternal() {
+        val profile = activeProfile ?: return
+        val displayId = profile.displayId
+        val iterator = buttonPointers.values().iterator()
+        var released = 0
+        while (iterator.hasNext()) {
+            val ptrId = iterator.next()
+            try {
+                touchInjector.touchUp(ptrId, displayId)
+                released++
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to release pointer $ptrId: ${e.message}")
+            }
+        }
+        // Juga release analog stick pointers (id 0 dan 1)
+        try {
+            touchInjector.touchUp(0, displayId)
+            touchInjector.touchUp(1, displayId)
+            released += 2
+        } catch (_: Exception) {}
+        Log.i(TAG, "releaseAllPointersInternal: released $released pointers")
+        /**
+     * Get count of events dropped due to missing profile.
+     * Useful for diagnostics — if > 0, profile wasn't set before gamepad input started.
+     */
+    fun getDroppedEventCount(): Int = droppedEvents
+
+}
+       /**
+     * Get count of events dropped due to missing profile.
+     * Useful for diagnostics — if > 0, profile wasn't set before gamepad input started.
+     */
+    fun getDroppedEventCount(): Int = droppedEvents
+
+    /**
+     * Get diagnostic info string untuk UI display.
+     */
+    fun getDiagnosticInfo(): String {
+        return "Pipeline{running=$running, pollingHz=${getPollingHz()}, " +
+               "interval=${pollIntervalMs}ms, " +
+               "profile=${activeProfile?.packageName ?: "null"}, " +
+               "activeButtons=${buttonStates.count { it.value }}, " +
+               "activePointers=${buttonPointers.size()}, " +
+               "droppedEvents=$droppedEvents}"
+    }
+}
     }
 
     // ============================================================
@@ -254,10 +375,9 @@ class InputPipelineWorker(
             if (profile != null) {
                 processAnalogSticks(profile)
             }
-            pipelineHandler?.postDelayed(this, POLL_INTERVAL_MS)
+            pipelineHandler?.postDelayed(this, pollIntervalMs)
         }
     }
-
     /**
      * Process analog stick movement → touch injection.
      *

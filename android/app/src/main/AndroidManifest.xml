@@ -28,7 +28,6 @@
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
 
-        <!-- Shizuku v3 Support -->
         <meta-data android:name="moe.shizuku.client.V3_SUPPORT" android:value="true" />
 
         <service
@@ -44,8 +43,8 @@
         <service
             android:name=".daemon.MapperDaemonService"
             android:exported="false"
-            android:foregroundServiceType="specialUse">
-            android:stopWithTask="false"
+            android:foregroundServiceType="specialUse"
+            android:stopWithTask="false">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Gamepad Mapping Daemon"
@@ -63,19 +62,7 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_config" />
         </service>
-        
-        <provider
-            android:name="rikka.shizuku.ShizukuProvider"
-            android:authorities="${applicationId}.shizuku"
-            android:multiprocess="false"
-            android:enabled="true"
-            android:exported="true"
-            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
-    </application>
-                   <!-- ============================================================ -->
-        <!-- GMM-AEC-002 §10.3: BootCompletedReceiver — auto-restart     -->
-        <!-- service setelah device reboot                               -->
-        <!-- ============================================================ -->
+
         <receiver
             android:name=".shizuku.BootCompletedReceiver"
             android:enabled="true"
@@ -90,10 +77,6 @@
             </intent-filter>
         </receiver>
 
-        <!-- ============================================================ -->
-        <!-- GMM-AEC-002 §10.2: FixShizukuReceiver — action "Perbaiki    -->
-        <!-- Sekarang" dari notification ShizukuBinderWatcher             -->
-        <!-- ============================================================ -->
         <receiver
             android:name=".shizuku.FixShizukuReceiver"
             android:enabled="true"
@@ -102,30 +85,27 @@
                 <action android:name="com.nanomindexplorer.gamemappermind.FIX_SHIZUKU_NOW" />
             </intent-filter>
         </receiver>
+
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
     </application>
 
-    <!-- Permissions -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-        <!-- ============================================================ -->
-    <!-- GMM-AEC-002 §10.3: BootCompleted permission                   -->
-    <!-- ============================================================ -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-
-    <!-- ============================================================ -->
-    <!-- GMM-AEC-002 §9.3: WakeLock untuk cegah PowerGenie kill       -->
-    <!-- ============================================================ -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.REQUEST_FOREGROUND_SERVICE_SPECIAL_USE" />
-
-    <!-- Shizuku Permission -->
     <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
-    
-    <!-- Allows the app to see Shizuku on Android 11+ -->
+
     <queries>
         <provider android:authorities="moe.shizuku.manager.shizuku.provider" />
         <package android:name="moe.shizuku.privileged.api" />

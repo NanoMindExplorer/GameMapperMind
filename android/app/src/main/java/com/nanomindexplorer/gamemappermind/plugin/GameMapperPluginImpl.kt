@@ -221,7 +221,7 @@ class GameMapperPluginImpl(
     fun getScreenHeight(): Int = cachedScreenHeight
 
     // GMM-AEC-002 §9.1: Expose HarmonyOS info untuk UI display
-    fun isHarmonyOS(): Boolean = isHarmonyOS
+    fun getHarmonyOSStatus(): Boolean = isHarmonyOS
     fun getHarmonyMajorVersion(): Int = HarmonyOSHelper.getHarmonyMajorVersion()
     fun getRecommendedPollingHz(): Int = HarmonyOSHelper.getRecommendedPollingHz()
 

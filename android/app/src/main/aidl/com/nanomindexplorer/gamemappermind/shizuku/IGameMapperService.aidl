@@ -88,4 +88,21 @@ interface IGameMapperService {
     // Status
     // ============================================================
     boolean isAlive() = 11;
+
+    // ============================================================
+    // GMM-AEC-002 §11.4: Injection Health Check — Test Tap
+    // Inject single visible tap di koordinat tertentu untuk verifikasi
+    // ============================================================
+    boolean testTap(float x, float y, int displayId) = 14;
+
+    // ============================================================
+    // GMM-AEC-002 §12.1: Native Daemon Log Export
+    // Get formatted log string (max 500 entries)
+    // ============================================================
+    String getLogExport() = 15;
+
+    // ============================================================
+    // GMM-AEC-002 §12.1: Clear log buffer
+    // ============================================================
+    boolean clearLog() = 16;
 }

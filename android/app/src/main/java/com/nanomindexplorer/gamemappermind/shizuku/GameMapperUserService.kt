@@ -224,6 +224,49 @@ class GameMapperUserService : IGameMapperService.Stub {
     override fun isAlive(): Boolean = true
 
     // ============================================================
+    // GMM-AEC-002 §11.4: Injection Health Check — Test Tap
+    // ============================================================
+    override fun testTap(x: Float, y: Float, displayId: Int): Boolean {
+        val startTime = System.currentTimeMillis()
+        return try {
+            Log.i(TAG, "testTap: (" + x + ", " + y + ") displayId=" + displayId)
+            pluginImpl.tap(x, y, displayId)
+            val latency = System.currentTimeMillis() - startTime
+            com.nanomindexplorer.gamemappermind.util.NativeDaemonLogger.logInjection(
+                action = "TEST_TAP",
+                x = x, y = y,
+                pointerId = 99,
+                result = "OK",
+                latencyMs = latency
+            )
+            true
+        } catch (e: Exception) {
+            val latency = System.currentTimeMillis() - startTime
+            Log.e(TAG, "testTap failed: " + e.message, e)
+            com.nanomindexplorer.gamemappermind.util.NativeDaemonLogger.logInjection(
+                action = "TEST_TAP",
+                x = x, y = y,
+                pointerId = 99,
+                result = "ERROR",
+                latencyMs = latency,
+                errorMessage = e.message
+            )
+            false
+        }
+    }
+
+    // GMM-AEC-002 §12.1: Native Daemon Log Export
+    override fun getLogExport(): String {
+        return com.nanomindexplorer.gamemappermind.util.NativeDaemonLogger.getLogExport()
+    }
+
+    // GMM-AEC-002 §12.1: Clear log buffer
+    override fun clearLog(): Boolean {
+        com.nanomindexplorer.gamemappermind.util.NativeDaemonLogger.clearLog()
+        return true
+    }
+
+    // ============================================================
     // Profile Management
     // ============================================================
 

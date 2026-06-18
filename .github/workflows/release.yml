@@ -205,46 +205,29 @@ jobs:
             echo "::error::            ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD"
             exit 1
           fi
-          echo "$KEYSTORE_BASE64" | base64 -d > android/app/release.keystore
-          echo "Keystore decoded successfully"
+          echo "$KEYSTORE_BASE64" | base64 -d > android/app/game-mapper-mind.keystore
+          echo "Keystore decoded to android/app/game-mapper-mind.keystore"
+          ls -la android/app/game-mapper-mind.keystore
 
       - name: Build release APK
         if: github.event.inputs.build_type == 'release' || startsWith(github.ref, 'refs/tags/v')
         working-directory: android
         env:
-          KEYSTORE_PATH: release.keystore
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           VERSION_NAME: ${{ needs.pre-validate.outputs.version_name }}
           VERSION_CODE: ${{ needs.pre-validate.outputs.version_code }}
         run: |
-          # Patch build.gradle to use the release keystore (one-shot, not committed)
-          # This is necessary because we don't want to commit keystore config to the repo.
+          # Patch build.gradle version from tag (one-shot, not committed)
+          # The signingConfigs.release block in build.gradle already:
+          #   - Reads KEYSTORE_PASSWORD and KEY_PASSWORD env vars
+          #   - Looks for game-mapper-mind.keystore (decoded in previous step)
+          #   - Uses keyAlias "game-mapper-mind" (default, matches secret)
+          # So we only need to patch the version from the tag.
           python3 - <<'PYEOF'
           import re
           with open('app/build.gradle', 'r') as f:
               content = f.read()
-          # Insert signingConfigs block if not present
-          if 'signingConfigs' not in content:
-              signing_block = """
-              signingConfigs {
-                  release {
-                      storeFile file(System.env.KEYSTORE_PATH ?: 'release.keystore')
-                      storePassword System.env.KEYSTORE_PASSWORD ?: ''
-                      keyAlias System.env.KEY_ALIAS ?: ''
-                      keyPassword System.env.KEY_PASSWORD ?: ''
-                  }
-              }
-              """
-              content = content.replace('android {', 'android {\n' + signing_block, 1)
-          # Replace buildTypes.release.signingConfig
-          content = re.sub(
-              r'signingConfig\s+\S*debug\S*',
-              'signingConfig signingConfigs.release',
-              content
-          )
-          # Set version
           if 'System.env.VERSION_NAME' not in content:
               content = re.sub(
                   r'versionName\s+"[^"]*"',
@@ -256,9 +239,11 @@ jobs:
                   'versionCode Integer.parseInt(System.env.VERSION_CODE ?: "1")',
                   content
               )
-          with open('app/build.gradle', 'w') as f:
-              f.write(content)
-          print("Patched build.gradle for release signing")
+              with open('app/build.gradle', 'w') as f:
+                  f.write(content)
+              print("Patched build.gradle version from env")
+          else:
+              print("build.gradle already uses env vars for version")
           PYEOF
 
           ./gradlew assembleRelease --stacktrace
@@ -276,7 +261,7 @@ jobs:
 
       - name: Cleanup keystore
         if: always()
-        run: rm -f android/app/release.keystore
+        run: rm -f android/app/game-mapper-mind.keystore
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4

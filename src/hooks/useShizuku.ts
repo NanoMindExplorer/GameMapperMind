@@ -16,26 +16,6 @@ export function normalizeHardwareKey(raw: string): string {
   return HARDWARE_KEY_ALIASES[raw.toUpperCase()] ?? raw;
 }
 
-const BUTTON_POINTER_POOL_START = 10;
-const BUTTON_POINTER_POOL_END = 19;
-const buttonPointerPool: Map<string, number> = new Map();
-
-function allocateButtonPointer(virtualKey: string): number | null {
-  if (buttonPointerPool.has(virtualKey)) return buttonPointerPool.get(virtualKey)!;
-  for (let id = BUTTON_POINTER_POOL_START; id <= BUTTON_POINTER_POOL_END; id++) {
-    let inUse = false;
-    for (const v of buttonPointerPool.values()) { if (v === id) { inUse = true; break; } }
-    if (!inUse) { buttonPointerPool.set(virtualKey, id); return id; }
-  }
-  return null;
-}
-
-function releaseButtonPointer(virtualKey: string): number | null {
-  const id = buttonPointerPool.get(virtualKey);
-  if (id !== undefined) { buttonPointerPool.delete(virtualKey); return id; }
-  return null;
-}
-
 export const useShizuku = () => {
   const checkShizukuStatus = async (currentState: ShizukuState): Promise<ShizukuState> => {
     if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
@@ -99,32 +79,12 @@ export const useShizuku = () => {
     return true;
   };
 
+  // GMM-AEC-002: injectInput deprecated — Path A (JS-side injection) dihapus
+  // Semua injection sekarang via native pipeline (Path B):
+  //   evdev → GameMapperUserService → InputPipelineWorker → TouchInjector
+  // Method ini di-keep untuk backward compatibility tapi hanya log warning.
   const injectInput = async (cmd: string) => {
-    if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
-      const parts = cmd.trim().split(/\s+/);
-      const action = parts[0]?.toLowerCase();
-      const x = parseFloat(parts[1] ?? '0');
-      const y = parseFloat(parts[2] ?? '0');
-      const virtualKey = parts[3];
-
-      try {
-        if (action === 'down') {
-          const id = virtualKey ? allocateButtonPointer(virtualKey) ?? 99 : 99;
-          await GameMapper.injectTap({ x, y, displayId: 0 }); // Tap for instant press
-        } else if (action === 'move') {
-          const id = virtualKey ? buttonPointerPool.get(virtualKey) ?? 99 : 99;
-          // For move, we use swipe with same start/end (instant move)
-          await GameMapper.injectSwipe({ startX: x, startY: y, endX: x, endY: y, durationMs: 1, displayId: 0 });
-        } else if (action === 'up') {
-          const id = virtualKey ? releaseButtonPointer(virtualKey) ?? 99 : 99;
-          // Touch up is implicit in tap (down+up). For hold, we need injectTouchUp
-          await GameMapper.injectTouchUp({ pointerId: id, displayId: 0 });
-        } else if (action === 'tap') {
-          await GameMapper.injectTap({ x, y, displayId: 0 });
-        }
-        return true;
-      } catch (e) { console.error('Injection error', e); }
-    }
+    console.warn('[DEPRECATED] injectInput called — use native pipeline (Path B) instead. cmd:', cmd);
     return false;
   };
 
@@ -134,6 +94,5 @@ export const useShizuku = () => {
   return {
     checkShizukuStatus, requestShizukuPermission, executeShizukuCommand,
     startDaemon, stopDaemon, injectInput, checkBattery, requestBatteryIgnore,
-    resetButtonPointers: () => buttonPointerPool.clear(),
   };
 };

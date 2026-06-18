@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { ShizukuState } from '../types';
 import { useShizuku } from '../hooks/useShizuku';
+import ShizukuStatusIndicator from './ShizukuStatusIndicator';
 
 interface ShizukuPanelProps {
   shizukuState: ShizukuState;

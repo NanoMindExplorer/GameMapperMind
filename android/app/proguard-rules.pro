@@ -49,6 +49,98 @@
     public *;
 }
 
+# ============================================================
+# GMM-AEC-002: Keep rules untuk class baru (Batch 1-4)
+# ============================================================
+
+# === GMM-AEC-002 §9.1: HarmonyOS detection ===
+-keep class com.nanomindexplorer.gamemappermind.util.HarmonyOSHelper { *; }
+-keep class com.nanomindexplorer.gamemappermind.util.HarmonyOSHelper$* { *; }
+
+# === GMM-AEC-002 §9.4: Safe area probe ===
+-keep class com.nanomindexplorer.gamemappermind.util.HarmonyOSSafeAreaHelper { *; }
+-keep class com.nanomindexplorer.gamemappermind.util.HarmonyOSSafeAreaHelper$* { *; }
+
+# === GMM-AEC-002 §12.1: Native daemon logger ===
+-keep class com.nanomindexplorer.gamemappermind.util.NativeDaemonLogger { *; }
+-keep class com.nanomindexplorer.gamemappermind.util.NativeDaemonLogger$LogEntry { *; }
+
+# === GMM-AEC-002 §10.1: Shizuku binder watcher ===
+-keep class com.nanomindexplorer.gamemappermind.shizuku.ShizukuBinderWatcher { *; }
+-keep class com.nanomindexplorer.gamemappermind.shizuku.ShizukuBinderWatcher$WatcherState { *; }
+-keep class com.nanomindexplorer.gamemappermind.shizuku.ShizukuBinderWatcher$* { *; }
+
+# === GMM-AEC-002 §10.2: FixShizukuReceiver + BootCompletedReceiver ===
+-keep class com.nanomindexplorer.gamemappermind.shizuku.FixShizukuReceiver { *; }
+-keep class com.nanomindexplorer.gamemappermind.shizuku.BootCompletedReceiver { *; }
+
+# === GMM-AEC-002: GameMapperUserService (referenced from AIDL) ===
+-keep class com.nanomindexplorer.gamemappermind.shizuku.GameMapperUserService { *; }
+-keep class com.nanomindexplorer.gamemappermind.shizuku.GameMapperUserService$* { *; }
+
+# === GMM-AEC-002: GameMapperPluginImpl (referenced from GameMapperUserService) ===
+-keep class com.nanomindexplorer.gamemappermind.plugin.GameMapperPluginImpl { *; }
+
+# === GMM-AEC-002: InputPipelineWorker (referenced from GameMapperPluginImpl) ===
+-keep class com.nanomindexplorer.gamemappermind.daemon.InputPipelineWorker { *; }
+-keep class com.nanomindexplorer.gamemappermind.daemon.InputPipelineWorker$* { *; }
+
+# === GMM-AEC-002: TouchInjector + AnalogProcessor (referenced from InputPipelineWorker) ===
+-keep class com.nanomindexplorer.gamemappermind.input.TouchInjector { *; }
+-keep class com.nanomindexplorer.gamemappermind.input.TouchInjector$PointerState { *; }
+-keep class com.nanomindexplorer.gamemappermind.input.AnalogProcessor { *; }
+-keep class com.nanomindexplorer.gamemappermind.input.AnalogProcessor$* { *; }
+
+# === GMM-AEC-002: MapperDaemonService (referenced from AndroidManifest.xml) ===
+-keep class com.nanomindexplorer.gamemappermind.daemon.MapperDaemonService { *; }
+
+# === GMM-AEC-002: IGameMapperService AIDL interface ===
+-keep interface com.nanomindexplorer.gamemappermind.shizuku.IGameMapperService { *; }
+-keep class com.nanomindexplorer.gamemappermind.shizuku.IGameMapperService$* { *; }
+
+# === GMM-AEC-002: GameMapperPlugin Capacitor plugin ===
+-keep class com.nanomindexplorer.gamemappermind.plugin.GameMapperPlugin { *; }
+-keepclassmembers class com.nanomindexplorer.gamemappermind.plugin.GameMapperPlugin {
+    @com.getcapacitor.annotation.CapacitorPlugin <methods>;
+    @com.getcapacitor.annotation.PluginMethod <methods>;
+    public *;
+}
+
+# === GMM-AEC-002: Reflection targets (InputManager.injectInputEvent) ===
+-keep class android.hardware.input.InputManager { *; }
+-keepclassmembers class android.hardware.input.InputManager {
+    public *;
+}
+
+# === GMM-AEC-002: MotionEvent reflection (setDisplayId, setFlags, mFlags) ===
+-keep class android.view.MotionEvent { *; }
+-keepclassmembers class android.view.MotionEvent {
+    public *;
+    private *;
+}
+
+# === GMM-AEC-002 §11.3: kotlinx-serialization (ProfileModels, etc.) ===
+-keepattributes *Annotation*, InnerClasses
+-dontnote kotlinx.serialization.AnnotationsKt
+-keepclassmembers class kotlinx.serialization.json.** {
+    *** Companion;
+}
+-keepclasseswithmembers class kotlinx.serialization.json.** {
+    kotlinx.serialization.KSerializer serializer(...);
+}
+
+# === GMM-AEC-002: Keep all classes in shizuku package (AIDL-generated + reflection) ===
+-keep class com.nanomindexplorer.gamemappermind.shizuku.** { *; }
+
+# === GMM-AEC-002: Keep all classes in daemon package ===
+-keep class com.nanomindexplorer.gamemappermind.daemon.** { *; }
+
+# === GMM-AEC-002: Keep all classes in input package ===
+-keep class com.nanomindexplorer.gamemappermind.input.** { *; }
+
+# === GMM-AEC-002: Keep all classes in util package ===
+-keep class com.nanomindexplorer.gamemappermind.util.** { *; }
+
 # === Input pipeline classes (used via reflection in shell process) ===
 -keep class com.nanomindexplorer.gamemappermind.input.TouchInjector { *; }
 -keep class com.nanomindexplorer.gamemappermind.input.AnalogProcessor { *; }

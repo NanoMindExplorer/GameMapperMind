@@ -518,7 +518,7 @@ class TouchInjector {
         // 68% of values fall within ±pressureVariance/2, 95% within ±pressureVariance.
         val gaussian = nextGaussian()
         val variance = (gaussian * pressureVariance * 0.5f).coerceIn(-pressureVariance, pressureVariance)
-        return (1.0f - variance.absoluteValue).coerceIn(0.1f, 1.0f)
+        return (1.0f - abs(variance)).coerceIn(0.1f, 1.0f)
     }
 
     private fun applySizeVariance(): Float {
@@ -526,7 +526,7 @@ class TouchInjector {
         // T-07: Gaussian distribution for human-like touch size.
         val gaussian = nextGaussian()
         val variance = (gaussian * sizeVariance * 0.5f).coerceIn(-sizeVariance, sizeVariance)
-        return (1.0f - variance.absoluteValue).coerceIn(0.1f, 1.0f)
+        return (1.0f - abs(variance)).coerceIn(0.1f, 1.0f)
     }
 
     /**

@@ -14,41 +14,19 @@ import kotlin.math.abs
 /**
  * InputPipelineWorker — Gamepad event → Touch injection pipeline.
  *
- * Step [6] fix: Lifecycle guards + thread safety + O(1) lookup.
- *
- * GMM-AEC-002 §12.4 fix: Polling rate hard cap.
+ * GMM-AEC-002 §12.4: Polling rate hard cap.
  *   - HarmonyOS: max 120Hz (interval 8ms)
  *   - Android murni: max 200Hz (interval 5ms)
  *   - Sebelumnya: 250Hz (4ms) — menyebabkan instability
  *
- * GMM-AEC-002 §11.6 fix: Release SEMUA pointer ID saat gamepad disconnect
+ * GMM-AEC-002 §11.6: Release SEMUA pointer ID saat gamepad disconnect
  * atau app pause — tidak boleh ada "ghost pointer" yang stuck di game state.
  *
- * Thread model:
- *   - Thread A (evdev): onButtonEvent(), onTriggerEvent(), updateAxisValues()
- *   - Thread B (pipeline): pollRunnable → processAnalogSticks()
- *   - Thread C (AIDL binder): setProfileFromJson(), clearProfile(), start(), stop()
- *
- * All three threads can run concurrently. Thread safety measures:
- *   - activeProfile: @Volatile (visibility across threads)
- *   - running: @Volatile
- *   - lastAxes: @Volatile + copyOf() on write (immutable snapshot)
- *   - buttonStates: ConcurrentHashMap (thread-safe)
- *   - buttonPointers: ConcurrentHashMap (thread-safe)
- *   - nextPointerId: AtomicInteger (atomic increment, no race)
- *   - mappingLookup: ConcurrentHashMap (rebuilt on profile change, O(1) lookup)
- *
- * Lifecycle contract:
- *   1. start() → starts polling thread
- *   2. setProfileFromJson() → sets active profile (can be called before or after start)
- *   3. onButtonEvent() → processes button press (requires running + profile)
- *   4. stop() → stops polling, releases all pointers
- *   5. releaseAllPointers() → release SEMUA pointer ID tanpa stop pipeline
- *      (untuk gamepad disconnect / app pause)
- *
- * If onButtonEvent is called before profile is set:
- *   → Event is logged as DROPPED and returned (not crashed)
- *   → Once profile is set, subsequent events flow normally
+ * Thread safety:
+ *   - activeProfile: @Volatile
+ *   - buttonStates/buttonPointers/mappingLookup: ConcurrentHashMap
+ *   - nextPointerId: AtomicInteger (atomic increment)
+ *   - lastAxes: @Volatile + copyOf() on write
  */
 class InputPipelineWorker(
     private val touchInjector: TouchInjector,
@@ -57,46 +35,22 @@ class InputPipelineWorker(
     companion object {
         private const val TAG = "GameMapper/PipelineWorker"
 
-        // ============================================================
         // GMM-AEC-002 §12.4: Polling rate hard cap
-        // ============================================================
-        // Sebelumnya: POLL_INTERVAL_MS = 4L (250Hz) — terlalu tinggi, unstable
-        // Sekarang: dynamic berdasarkan platform
-        //   - HarmonyOS: max 120Hz (interval 8ms)
-        //   - Android murni: max 200Hz (interval 5ms)
-        //
-        // Resolution dilakukan sekali saat init (cached di @Volatile Long)
-        // karena HarmonyOSHelper.isHarmonyOS() juga cached.
-        // ============================================================
-        private const val POLL_INTERVAL_MS_HARMONY = 8L   // 125Hz (sedikit di atas 120Hz untuk headroom)
+        private const val POLL_INTERVAL_MS_HARMONY = 8L   // 125Hz (headroom di atas 120Hz)
         private const val POLL_INTERVAL_MS_ANDROID = 5L   // 200Hz
-        private const val POLL_INTERVAL_MS_LEGACY = 4L    // 250Hz (untuk fallback/testing)
+        private const val POLL_INTERVAL_MS_LEGACY = 4L    // 250Hz (fallback/testing)
 
         private const val SWIPE_DURATION_MS = 80L
         private const val MIN_POINTER_ID = 10
         private const val MAX_POINTER_ID = 109
     }
 
-    /**
-     * Resolusi polling interval saat ini.
-     * Di-set saat start() berdasarkan platform detection.
-     */
     @Volatile
     private var pollIntervalMs: Long = POLL_INTERVAL_MS_ANDROID
 
-    /**
-     * Get polling interval yang aktif.
-     */
     fun getPollIntervalMs(): Long = pollIntervalMs
-
-    /**
-     * Get polling rate dalam Hz.
-     */
     fun getPollingHz(): Int = (1000 / pollIntervalMs).toInt()
 
-    // ============================================================
-    // Profile data types
-    // ============================================================
     data class ButtonMapping(
         val hardwareKey: String,
         val touchX: Float,
@@ -123,62 +77,22 @@ class InputPipelineWorker(
         val rightStick: AnalogConfig?
     )
 
-    // ============================================================
-    // Pipeline state — all @Volatile or thread-safe
-    // ============================================================
     @Volatile private var activeProfile: GameProfile? = null
-
-    // O(1) button lookup — rebuilt whenever profile changes.
-    // Key = hardwareKey (e.g., "A", "LB"), Value = ButtonMapping
     private val mappingLookup = ConcurrentHashMap<String, ButtonMapping>()
-
     private var pipelineThread: HandlerThread? = null
     private var pipelineHandler: Handler? = null
     @Volatile private var running = false
 
-    // Analog stick states — accessed from pipeline thread only (processAnalogSticks)
     private val leftStickState = AnalogProcessor.AnalogState()
     private val rightStickState = AnalogProcessor.AnalogState()
 
-    // Button states — thread-safe (accessed from evdev + trigger threads)
     private val buttonStates = ConcurrentHashMap<String, Boolean>()
     private val buttonPointers = ConcurrentHashMap<String, Int>()
-
-    // Pointer ID allocator — atomic, thread-safe
-    // Range: 10..109 (100 slots, matches TouchInjector capacity)
     private val nextPointerId = AtomicInteger(MIN_POINTER_ID)
 
     @Volatile private var lastAxes = FloatArray(6)
-
-    // Drop counter for diagnostics — reset on profile set
     @Volatile private var droppedEvents = 0
 
-    // ============================================================
-    // Profile management
-    // ============================================================
-
-    /**
-     * Parse profile JSON and set as active profile.
-     *
-     * Expected JSON format:
-     * {
-     *   "packageName": "com.tencent.ig",
-     *   "screenWidth": 2800,
-     *   "screenHeight": 1840,
-     *   "displayId": 0,
-     *   "buttons": [
-     *     {"hardwareKey": "A", "touchX": 0.92, "touchY": 0.78, "actionType": "tap"},
-     *     {"hardwareKey": "LB", "touchX": 0.50, "touchY": 0.50, "actionType": "swipe", "swipeDirection": "UP"}
-     *   ],
-     *   "leftStick": {"centerX": 0.3, "centerY": 0.7, "radius": 0.15, "deadzone": 0.15, "smoothing": 0.3},
-     *   "rightStick": {"centerX": 0.7, "centerY": 0.7, "radius": 0.15, "deadzone": 0.15, "smoothing": 0.3}
-     * }
-     *
-     * touchX/touchY are percentages [0.0..1.0] of screen dimensions.
-     * centerX/centerY/radius are percentages [0.0..1.0] of screen dimensions.
-     *
-     * @return true if parse succeeded, false on error
-     */
     fun setProfileFromJson(json: String): Boolean {
         try {
             val obj = JSONObject(json)
@@ -208,7 +122,6 @@ class InputPipelineWorker(
                 rightStick
             )
 
-            // Reset analog states and button tracking
             analogProcessor.reset(leftStickState)
             analogProcessor.reset(rightStickState)
             buttonStates.clear()
@@ -216,7 +129,6 @@ class InputPipelineWorker(
             nextPointerId.set(MIN_POINTER_ID)
             droppedEvents = 0
 
-            // Rebuild O(1) lookup map
             mappingLookup.clear()
             for (m in buttonMappings) {
                 mappingLookup[m.hardwareKey] = m
@@ -253,19 +165,13 @@ class InputPipelineWorker(
         Log.i(TAG, "Profile cleared")
     }
 
-    // ============================================================
-    // Pipeline lifecycle
-    // ============================================================
-
     fun start() {
         if (running) {
             Log.w(TAG, "start() called but pipeline already running")
             return
         }
 
-        // ============================================================
         // GMM-AEC-002 §12.4: Resolve polling interval based on platform
-        // ============================================================
         val isHarmony = HarmonyOSHelper.isHarmonyOS()
         pollIntervalMs = if (isHarmony) POLL_INTERVAL_MS_HARMONY else POLL_INTERVAL_MS_ANDROID
         Log.i(TAG, "Polling interval: ${pollIntervalMs}ms (${getPollingHz()}Hz, HarmonyOS=$isHarmony)")
@@ -290,10 +196,7 @@ class InputPipelineWorker(
         analogProcessor.reset(leftStickState)
         analogProcessor.reset(rightStickState)
 
-        // ============================================================
         // GMM-AEC-002 §11.6: Release SEMUA pointer ID saat stop
-        // untuk cegah ghost pointer yang stuck di game state
-        // ============================================================
         releaseAllPointersInternal()
 
         buttonStates.clear()
@@ -305,9 +208,6 @@ class InputPipelineWorker(
      * GMM-AEC-002 §11.6: Release SEMUA pointer ID saat gamepad disconnected
      * atau app pause — tidak boleh ada "ghost pointer" yang stuck.
      *
-     * Method ini TIDAK stop pipeline — hanya release semua active pointer.
-     * Pipeline bisa lanjut jalan saat gamepad reconnect / app resume.
-     *
      * Dipanggil dari:
      *   - Gamepad disconnect event (GameMapperUserService)
      *   - App onPause (MainActivity)
@@ -317,23 +217,16 @@ class InputPipelineWorker(
         Log.i(TAG, "releaseAllPointers() — releasing ${buttonPointers.size()} active button pointers")
         releaseAllPointersInternal()
 
-        // Reset analog stick states juga
         analogProcessor.reset(leftStickState)
         analogProcessor.reset(rightStickState)
 
-        // Reset button states
         buttonStates.clear()
         buttonPointers.clear()
         nextPointerId.set(MIN_POINTER_ID)
     }
 
-    /**
-     * Internal helper — release semua pointer tanpa reset state tracking.
-     */
     private fun releaseAllPointersInternal() {
         val profile = activeProfile ?: return
-        // TouchInjector tidak punya method "release all", jadi kita iterasi
-        // buttonPointers dan release satu per satu.
         val displayId = profile.displayId
         val iterator = buttonPointers.values().iterator()
         var released = 0
@@ -355,10 +248,6 @@ class InputPipelineWorker(
         Log.i(TAG, "releaseAllPointersInternal: released $released pointers")
     }
 
-    // ============================================================
-    // Analog stick polling — runs on pipeline thread
-    // ============================================================
-
     private val pollRunnable = object : Runnable {
         override fun run() {
             if (!running) return
@@ -370,17 +259,6 @@ class InputPipelineWorker(
         }
     }
 
-    /**
-     * Process analog stick movement → touch injection.
-     *
-     * Coordinate calculation (§2.4):
-     *   pixelX = centerX_percent × screenWidth
-     *   pixelY = centerY_percent × screenHeight
-     *   radius_pixels = radius_percent × screenWidth  (use width for both axes
-     *                   to maintain circular movement zone)
-     *
-     * Example: centerX=0.3, screenWidth=2800 → pixelX = 0.3 × 2800 = 840px
-     */
     private fun processAnalogSticks(profile: GameProfile) {
         if (profile.leftStick != null) {
             val config = AnalogProcessor.AnalogConfig(
@@ -418,41 +296,18 @@ class InputPipelineWorker(
         }
     }
 
-    // ============================================================
-    // Gamepad event handlers — called from evdev thread
-    // ============================================================
-
     fun updateAxisValues(axes: FloatArray) {
         if (axes.size >= 6) {
             lastAxes = axes.copyOf()
         }
     }
 
-    /**
-     * Handle gamepad button press/release.
-     *
-     * Lifecycle guard (Step [6]):
-     *   - If pipeline not running → log warning, return
-     *   - If profile not set → increment droppedEvents, return
-     *   - If button not mapped → return (normal for unmapped buttons)
-     *
-     * Coordinate calculation (§2.4):
-     *   pixelX = touchX_percent × screenWidth
-     *   pixelY = touchY_percent × screenHeight
-     *
-     * Example: touchX=0.92, screenWidth=2800 → pixelX = 0.92 × 2800 = 2576px
-     *
-     * @param buttonName Evdev button name ("A", "B", "LB", "UP", etc.)
-     * @param isPressed true = button down, false = button up
-     */
     fun onButtonEvent(buttonName: String, isPressed: Boolean) {
-        // Guard 1: Pipeline must be running
         if (!running) {
             Log.w(TAG, "onButtonEvent('$buttonName', $isPressed) — pipeline NOT running, dropping")
             return
         }
 
-        // Guard 2: Profile must be set
         val profile = activeProfile
         if (profile == null) {
             droppedEvents++
@@ -462,18 +317,14 @@ class InputPipelineWorker(
             return
         }
 
-        // Guard 3: Button must be mapped (O(1) lookup)
         val mapping = mappingLookup[buttonName]
         if (mapping == null) {
-            // Unmapped button — normal, don't log (too noisy)
             return
         }
 
-        // Track button state (thread-safe)
         val wasPressed = buttonStates[buttonName] ?: false
         buttonStates[buttonName] = isPressed
 
-        // Calculate pixel coordinates from percentages
         val pixelX = mapping.touchX * profile.screenWidth
         val pixelY = mapping.touchY * profile.screenHeight
 
@@ -490,7 +341,6 @@ class InputPipelineWorker(
                 }
             }
             else -> {
-                // "tap" or "hold" — same behavior: DOWN on press, UP on release
                 if (isPressed && !wasPressed) {
                     val ptr = allocatePointer(buttonName)
                     touchInjector.analogMove(ptr, pixelX, pixelY, pixelX, pixelY, profile.displayId)
@@ -506,12 +356,6 @@ class InputPipelineWorker(
         }
     }
 
-    /**
-     * Handle analog trigger (L2/R2) press.
-     *
-     * Trigger threshold: value > 0.3 → pressed, value ≤ 0.3 → released
-     * This prevents accidental triggers from stick drift.
-     */
     fun onTriggerEvent(triggerName: String, value: Float) {
         if (!running) return
         val profile = activeProfile ?: return
@@ -544,23 +388,6 @@ class InputPipelineWorker(
         }
     }
 
-    // ============================================================
-    // Helpers
-    // ============================================================
-
-    /**
-     * Calculate swipe end point based on direction.
-     *
-     * Swipe distance = 15% of screen dimension (§5.2: no magic numbers)
-     *
-     * Mathematical derivation:
-     *   distX = screenWidth × 0.15
-     *   distY = screenHeight × 0.15
-     *   UP:    endY = startY - distY (clamped to ≥0)
-     *   DOWN:  endY = startY + distY (clamped to ≤screenHeight)
-     *   LEFT:  endX = startX - distX (clamped to ≥0)
-     *   RIGHT: endX = startX + distX (clamped to ≤screenWidth)
-     */
     private fun calculateSwipeEnd(
         startX: Float, startY: Float,
         direction: String,
@@ -582,20 +409,13 @@ class InputPipelineWorker(
         val updated = profile.buttonMappings.filter { it.hardwareKey != hardwareKey }.toMutableList()
         updated.add(ButtonMapping(hardwareKey, touchX, touchY, "swipe", direction))
         activeProfile = profile.copy(buttonMappings = updated)
-        // Rebuild lookup map
         mappingLookup.clear()
         for (m in updated) mappingLookup[m.hardwareKey] = m
     }
 
-    /**
-     * Allocate a pointer ID for a button.
-     * Thread-safe via AtomicInteger.getAndIncrement().
-     * Wraps around at MAX_POINTER_ID to prevent overflow.
-     */
     private fun allocatePointer(hardwareKey: String): Int {
         buttonPointers[hardwareKey]?.let { return it }
         val ptr = nextPointerId.getAndIncrement()
-        // Wrap around if exceeded max
         if (ptr > MAX_POINTER_ID) {
             nextPointerId.set(MIN_POINTER_ID)
         }
@@ -611,20 +431,10 @@ class InputPipelineWorker(
     }
 
     fun isRunning(): Boolean = running
-
     fun getActiveProfile(): GameProfile? = activeProfile
-
     fun getActiveButtonCount(): Int = buttonStates.count { it.value }
-
-    /**
-     * Get count of events dropped due to missing profile.
-     * Useful for diagnostics — if > 0, profile wasn't set before gamepad input started.
-     */
     fun getDroppedEventCount(): Int = droppedEvents
 
-    /**
-     * Get diagnostic info string untuk UI display.
-     */
     fun getDiagnosticInfo(): String {
         return "Pipeline{running=$running, pollingHz=${getPollingHz()}, " +
                "interval=${pollIntervalMs}ms, " +

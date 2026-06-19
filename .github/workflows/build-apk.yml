@@ -43,6 +43,7 @@ jobs:
       - name: Build Android APK
         run: |
           cd android
+          gradle wrapper
           ./gradlew assembleDebug
 
       - name: Upload APK Artifact

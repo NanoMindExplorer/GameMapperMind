@@ -73,16 +73,30 @@ class GamepadListenerService : Service() {
                 newProcessMethod.isAccessible = true
                 
                 val absRanges = mutableMapOf<String, Pair<Int, Int>>()
+                val gamepadDevices = mutableSetOf<String>()
+                
                 try {
-                    val pProcess = newProcessMethod.invoke(null, arrayOf("sh", "-c", "getevent -p"), null as Array<String>?, null as String?) as Process
+                    val pProcess = newProcessMethod.invoke(null, arrayOf("sh", "-c", "getevent -lp"), null as Array<String>?, null as String?) as Process
                     val pReader = BufferedReader(InputStreamReader(pProcess.inputStream))
                     var pLine: String?
-                    var currentEvdev: String? = null
+                    var currentDevicePath: String? = null
+                    var currentDeviceIsGamepad = false
+                    
                     while (pReader.readLine().also { pLine = it } != null) {
                         val line = pLine!!
                         if (line.contains("add device")) {
-                            currentEvdev = line
-                        } else if (line.contains("ABS_")) {
+                            if (currentDeviceIsGamepad && currentDevicePath != null) {
+                                gamepadDevices.add(currentDevicePath)
+                            }
+                            // Extract path like: add device 1: /dev/input/event4
+                            val pathMatch = Regex("/dev/input/event\\d+").find(line)
+                            currentDevicePath = pathMatch?.value
+                            currentDeviceIsGamepad = false
+                        } else if (line.contains("BTN_A") || line.contains("BTN_GAMEPAD") || line.contains("ABS_HAT0X")) {
+                            currentDeviceIsGamepad = true
+                        }
+                        
+                        if (line.contains("ABS_")) {
                             val parts = line.trim().split(Regex("\\s+"))
                             val axisName = parts.find { it.startsWith("ABS_") }
                             if (axisName != null) {
@@ -98,13 +112,24 @@ class GamepadListenerService : Service() {
                             }
                         }
                     }
+                    if (currentDeviceIsGamepad && currentDevicePath != null) {
+                        gamepadDevices.add(currentDevicePath)
+                    }
                     pProcess.destroy()
                 } catch (e: Exception) {
-                    Log.e("GameMapper", "Failed to parse getevent -p", e)
+                    Log.e("GameMapper", "Failed to parse getevent -lp", e)
                 }
 
-                // Menjalankan getevent -l
-                evdevProcess = newProcessMethod.invoke(null, arrayOf("sh", "-c", "getevent -l"), null as Array<String>?, null as String?) as Process
+                // Menjalankan getevent -l hanya untuk gamepad devices
+                val geteventCmd = if (gamepadDevices.isNotEmpty()) {
+                    "getevent -l " + gamepadDevices.joinToString(" ")
+                } else {
+                    // Fallback if none found, we might just use default to not break
+                    Log.w("GameMapper", "No explicit gamepad input device found. Capturing all.")
+                    "getevent -l"
+                }
+
+                evdevProcess = newProcessMethod.invoke(null, arrayOf("sh", "-c", geteventCmd), null as Array<String>?, null as String?) as Process
                 val processStream = evdevProcess?.inputStream
                 if (processStream == null) {
                     Log.e("GameMapper", "getevent stream is null. newProcess silently failed.")

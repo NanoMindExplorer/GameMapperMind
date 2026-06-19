@@ -60,21 +60,19 @@ export const useShizuku = () => {
     return true;
   };
 
-  const injectInput = async (cmd: string) => {
+  const injectInput = async (action: 'down' | 'move' | 'up' | 'tap', x?: number, y?: number, pointerId: number = 99) => {
     if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
-      const parts = cmd.split(' ');
-      const action = parts[0];
-      const x = parseFloat(parts[1]);
-      const y = parseFloat(parts[2]);
-      
       try {
         if (action === 'down') {
-          await TouchInjection.touchDown({ pointerId: 99, x, y });
+          if (x === undefined || y === undefined || isNaN(x) || isNaN(y)) { console.error("Invalid coordinates"); return false; }
+          await TouchInjection.touchDown({ pointerId, x, y });
         } else if (action === 'move') {
-          await TouchInjection.touchMove({ pointerId: 99, x, y });
+          if (x === undefined || y === undefined || isNaN(x) || isNaN(y)) { console.error("Invalid coordinates"); return false; }
+          await TouchInjection.touchMove({ pointerId, x, y });
         } else if (action === 'up') {
-          await TouchInjection.touchUp({ pointerId: 99 });
+          await TouchInjection.touchUp({ pointerId });
         } else if (action === 'tap') {
+          if (x === undefined || y === undefined || isNaN(x) || isNaN(y)) { console.error("Invalid coordinates"); return false; }
           await TouchInjection.injectTap({ x, y });
         }
         return true;

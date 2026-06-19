@@ -83,16 +83,14 @@ export default function MacroEngineComponent({ macros, onUpdateMacros, onLogMess
        const action = selectedMacro.actions[tickCount];
        onLogMessage(`[EVDEV INJECTION] Type: ${action.type} | Pointer: ${action.pointerId} | X: ${action.x || 0} | Y: ${action.y || 0}`);
        
-       let devCommand = '';
-       if (action.type === 'touch_down') {
-         devCommand = `input tap ${action.x || 500} ${action.y || 500}`;
-       } else if (action.type === 'touch_move') {
-         devCommand = `input swipe ${action.x || 500} ${action.y || 500} ${action.x || 500} ${action.y || 500} 50`;
-       }
+       let parsedAction: 'down' | 'move' | 'up' | 'tap' | null = null;
+       if (action.type === 'touch_down') parsedAction = 'down';
+       else if (action.type === 'touch_move') parsedAction = 'move';
+       else if (action.type === 'touch_up') parsedAction = 'up';
        
-       if (devCommand) {
+       if (parsedAction) {
          try {
-           await injectInput(devCommand);
+           await injectInput(parsedAction, action.x, action.y, action.pointerId);
          } catch (e) {
            onLogMessage(`Macro Engine Error: Native execution failed.`);
          }

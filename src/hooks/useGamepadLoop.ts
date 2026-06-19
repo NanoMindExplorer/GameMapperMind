@@ -18,8 +18,13 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, active: boolea
     ...Array.from({ length: 8 }, (_, i) => ({ id: i + 2, isActive: false, type: 'button' as const }))
   ]);
 
+  const mapProfileRef = useRef(mapProfile);
   useEffect(() => {
-    if (!active || !mapProfile) return;
+    mapProfileRef.current = mapProfile;
+  }, [mapProfile]);
+
+  useEffect(() => {
+    if (!active) return;
     let buttonListener: any;
     let axisListener: any;
     let isCleanedUp = false;
@@ -41,8 +46,10 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, active: boolea
         if (isCleanedUp) return;
 
         buttonListener = await TouchInjection.addListener('onGamepadButton', async ({ buttonName, value }) => {
+          const currentProfile = mapProfileRef.current;
+          if (!currentProfile) return;
           const isPressed = value === 1;
-          const mapping = mapProfile?.buttons?.find((m: any) => m.mappedKey === buttonName);
+          const mapping = currentProfile.buttons?.find((m: any) => m.mappedKey === buttonName);
           
           if (!mapping || mapping.x === undefined || mapping.y === undefined) {
              lastState.current[buttonName] = isPressed;
@@ -77,6 +84,9 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, active: boolea
         }
 
         axisListener = await TouchInjection.addListener('onGamepadAxis', async ({ axes }) => {
+          const currentProfile = mapProfileRef.current;
+          if (!currentProfile) return;
+
           // Left stick
           const lx = axes[0] || 0;
           const ly = axes[1] || 0;
@@ -92,7 +102,7 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, active: boolea
           
           // 1. Left Stick (Pointer 0)
           const lMag = Math.sqrt(lx * lx + ly * ly);
-          const lMapping = mapProfile?.buttons?.find(b => b.mappedKey === 'L_STICK');
+          const lMapping = currentProfile.buttons?.find(b => b.mappedKey === 'L_STICK');
           const leftPointer = pointers.current.find(p => p.id === 0)!;
 
           if (lMapping) {
@@ -113,7 +123,7 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, active: boolea
 
           // 2. Right Stick (Pointer 1)
           const rMag = Math.sqrt(rx * rx + ry * ry);
-          const rMapping = mapProfile?.buttons?.find(b => b.mappedKey === 'R_STICK');
+          const rMapping = currentProfile.buttons?.find(b => b.mappedKey === 'R_STICK');
           const rightPointer = pointers.current.find(p => p.id === 1)!;
 
           if (rMapping) {
@@ -133,7 +143,7 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, active: boolea
           }
           
           // 3. L2 (Analog to Button emulation)
-          const mapL2 = mapProfile?.buttons?.find((m: any) => m.mappedKey === 'LT');
+          const mapL2 = currentProfile.buttons?.find((m: any) => m.mappedKey === 'LT');
           if (mapL2 && mapL2.x !== undefined && mapL2.y !== undefined) {
              const isL2Pressed = l2Analog > 0.0;
              const wasL2Pressed = lastState.current['LT_ANALOG'];
@@ -155,7 +165,7 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, active: boolea
           }
 
           // 4. R2 (Analog to Button emulation)
-          const mapR2 = mapProfile?.buttons?.find((m: any) => m.mappedKey === 'RT');
+          const mapR2 = currentProfile.buttons?.find((m: any) => m.mappedKey === 'RT');
           if (mapR2 && mapR2.x !== undefined && mapR2.y !== undefined) {
              const isR2Pressed = r2Analog > 0.0;
              const wasR2Pressed = lastState.current['RT_ANALOG'];

@@ -54,7 +54,8 @@
         <service
             android:name=".TouchDaemonService"
             android:exported="true"
-            android:permission="moe.shizuku.manager.permission.API_V23" />
+            android:permission="moe.shizuku.manager.permission.API_V23"
+        />
 
         <provider
             android:name="rikka.shizuku.ShizukuProvider"
@@ -62,7 +63,8 @@
             android:multiprocess="false"
             android:enabled="true"
             android:exported="true"
-            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL"
+        />
     </application>
 
     <!-- Permissions -->
@@ -74,7 +76,7 @@
 
     <!-- Shizuku Permission -->
     <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
-    
+
     <!-- Allows the app to see Shizuku on Android 11+ -->
     <queries>
         <provider android:authorities="moe.shizuku.manager.shizuku.provider" />

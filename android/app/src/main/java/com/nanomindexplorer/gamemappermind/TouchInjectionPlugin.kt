@@ -77,7 +77,9 @@ class TouchInjectionPlugin : Plugin() {
     @PluginMethod
     fun unbindService(call: PluginCall) {
         try {
+            touchService?.releaseAllPointers()
             Shizuku.unbindUserService(USER_SERVICE_ARGS, serviceConnection, true)
+            touchService = null
             call.resolve()
         } catch (e: Exception) {
             call.reject(e.localizedMessage)

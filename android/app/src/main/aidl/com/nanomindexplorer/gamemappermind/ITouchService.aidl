@@ -6,4 +6,5 @@ interface ITouchService {
     boolean touchUp(int pointerId);
     boolean injectTap(float x, float y);
     boolean isAlive();
+    boolean releaseAllPointers();
 }

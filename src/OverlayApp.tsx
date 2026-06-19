@@ -8,6 +8,7 @@ declare global {
   interface Window {
     AndroidOverlay?: {
       onReactReady: () => void;
+      setInteractive: (interactive: boolean) => void;
       closeOverlay: () => void;
     };
     injectConfig: (configJson: string) => void;
@@ -48,15 +49,25 @@ export default function OverlayApp() {
       try { setActiveAxes(JSON.parse(json)); } catch(e) {}
     };
 
+    const handleMessage = (e: MessageEvent) => {
+      try {
+        if (e.data) setProfile(typeof e.data === 'string' ? JSON.parse(e.data) : e.data);
+      } catch (err) {}
+    };
+    window.addEventListener('message', handleMessage);
+
     // Tell Android we are ready
-    if (window.AndroidOverlay) {
+    if (window.AndroidOverlay && typeof window.AndroidOverlay.onReactReady === 'function') {
       window.AndroidOverlay.onReactReady();
     } else {
       // Dev mode fallback
       setProfile(INITIAL_PROFILES[0]);
     }
     
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('message', handleMessage);
+    };
   }, []);
 
   if (!profile) return null;

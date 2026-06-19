@@ -33,10 +33,20 @@ class TouchDaemonService : Service() {
         override fun isAlive(): Boolean {
             return true
         }
+
+        override fun releaseAllPointers(): Boolean {
+            return this@TouchDaemonService.releaseAllPointers()
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? {
         return touchStub
+    }
+
+    // Clean up pointers if the service is destroyed
+    override fun onDestroy() {
+        super.onDestroy()
+        releaseAllPointers()
     }
 
     private val inputManager: InputManager? by lazy {
@@ -89,10 +99,6 @@ class TouchDaemonService : Service() {
             }
         }
         
-        if (pointerCount == 0 && ((action and MotionEvent.ACTION_MASK) == MotionEvent.ACTION_UP || (action and MotionEvent.ACTION_MASK) == MotionEvent.ACTION_CANCEL)) {
-            pointerCount = 1 
-        }
-
         if (pointerCount == 0) return false
 
         val pointerProperties = Array(pointerCount) { MotionEvent.PointerProperties() }
@@ -103,12 +109,7 @@ class TouchDaemonService : Service() {
             val pointerId = pointers.keyAt(i)
             val state = pointers.valueAt(i)
             
-            // For UP, we need to include the pointer going up. actionIndex here is passed as compactedIdx
-            val isActive = state.isDown || 
-                ((action and MotionEvent.ACTION_MASK) == MotionEvent.ACTION_POINTER_UP && activeIndex == actionIndex) ||
-                ((action and MotionEvent.ACTION_MASK) == MotionEvent.ACTION_UP)
-
-            if (isActive) {
+            if (state.isDown) {
                 pointerProperties[activeIndex].id = pointerId
                 pointerProperties[activeIndex].toolType = MotionEvent.TOOL_TYPE_FINGER
                 
@@ -187,23 +188,39 @@ class TouchDaemonService : Service() {
     fun touchUp(pointerId: Int): Boolean {
         val state = pointers.get(pointerId) ?: return false
         val compactedIdx = getCompactedIndex(pointerId)
-        state.isDown = false
-
+        
         var activeCount = 0
         for (i in 0 until pointers.size()) {
             if (pointers.valueAt(i).isDown) activeCount++
         }
 
-        return if (activeCount == 0) {
-            val result = injectMotionEvent(MotionEvent.ACTION_UP, 0)
+        val result = if (activeCount == 1) {
+            val res = injectMotionEvent(MotionEvent.ACTION_UP, 0)
             pointers.clear()
-            result
+            res
         } else {
             val action = MotionEvent.ACTION_POINTER_UP or (compactedIdx shl MotionEvent.ACTION_POINTER_INDEX_SHIFT)
-            val result = injectMotionEvent(action, compactedIdx)
+            val res = injectMotionEvent(action, compactedIdx)
             pointers.remove(pointerId)
-            result
+            res
         }
+        
+        state.isDown = false
+        return result
+    }
+
+    fun releaseAllPointers(): Boolean {
+        var anyReleased = false
+        for (i in 0 until pointers.size()) {
+            val pointerId = pointers.keyAt(i)
+            val state = pointers.valueAt(i)
+            if (state.isDown) {
+                touchUp(pointerId)
+                anyReleased = true
+            }
+        }
+        pointers.clear()
+        return anyReleased
     }
 
     fun injectTap(x: Float, y: Float): Boolean {

@@ -228,6 +228,12 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
 
   // Register togglePalette globally for Android
   React.useEffect(() => {
+    if (isNativeOverlay && typeof window !== 'undefined' && window.AndroidOverlay) {
+      window.AndroidOverlay.setInteractive(showPalette);
+    }
+  }, [showPalette, isNativeOverlay]);
+
+  React.useEffect(() => {
     window.togglePalette = (isOpen: boolean) => {
       setShowPalette(isOpen);
       if (!isOpen) {

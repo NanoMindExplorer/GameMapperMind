@@ -68,10 +68,42 @@ class GamepadListenerService : Service() {
         isListening = true
         Thread {
             try {
-                // Menjalankan getevent untuk membaca input mentah dari dev/input tanpa MENCURI FOKUS!
-                // Uses Shizuku to get process with root/shell privileges!
+                // Get min/max first using getevent -p
                 val newProcessMethod = rikka.shizuku.Shizuku::class.java.getDeclaredMethod("newProcess", Array<String>::class.java, Array<String>::class.java, String::class.java)
                 newProcessMethod.isAccessible = true
+                
+                val absRanges = mutableMapOf<String, Pair<Int, Int>>()
+                try {
+                    val pProcess = newProcessMethod.invoke(null, arrayOf("sh", "-c", "getevent -p"), null as Array<String>?, null as String?) as Process
+                    val pReader = BufferedReader(InputStreamReader(pProcess.inputStream))
+                    var pLine: String?
+                    var currentEvdev: String? = null
+                    while (pReader.readLine().also { pLine = it } != null) {
+                        val line = pLine!!
+                        if (line.contains("add device")) {
+                            currentEvdev = line
+                        } else if (line.contains("ABS_")) {
+                            val parts = line.trim().split(Regex("\\s+"))
+                            val axisName = parts.find { it.startsWith("ABS_") }
+                            if (axisName != null) {
+                                val minMatch = Regex("min\\s+(-?\\d+)").find(line)
+                                val maxMatch = Regex("max\\s+(-?\\d+)").find(line)
+                                if (minMatch != null && maxMatch != null) {
+                                    val min = minMatch.groupValues[1].toInt()
+                                    val max = maxMatch.groupValues[1].toInt()
+                                    if (max > min) {
+                                        absRanges[axisName] = Pair(min, max)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    pProcess.destroy()
+                } catch (e: Exception) {
+                    Log.e("GameMapper", "Failed to parse getevent -p", e)
+                }
+
+                // Menjalankan getevent -l
                 evdevProcess = newProcessMethod.invoke(null, arrayOf("sh", "-c", "getevent -l"), null as Array<String>?, null as String?) as Process
                 val processStream = evdevProcess?.inputStream
                 if (processStream == null) {
@@ -91,7 +123,11 @@ class GamepadListenerService : Service() {
                 
                 while (isListening && reader.readLine().also { line = it } != null) {
                     line?.let {
-                        if (it.contains("EV_KEY")) {
+                        if (it.contains("EV_SYN")) {
+                            if (it.contains("SYN_REPORT")) {
+                                TouchInjectionPlugin.emitGamepadAxis(floatArrayOf(lStickX, lStickY, rStickX, rStickY, l2Trigger, r2Trigger))
+                            }
+                        } else if (it.contains("EV_KEY")) {
                             val parts = it.trim().split(Regex("\\s+"))
                             if (parts.size >= 4) {
                                 val btnRaw = parts[2]
@@ -109,7 +145,8 @@ class GamepadListenerService : Service() {
                                 val axisType = parts[2]
                                 val valueHex = parts[3]
                                 try {
-                                    val rawVal = valueHex.toLong(16).toInt()
+                                    val hexNum = valueHex.toLong(16)
+                                    val rawVal = if (hexNum > 0x7FFFFFFF) (hexNum - 0x100000000L).toInt() else hexNum.toInt()
                                     when (axisType) {
                                         "ABS_HAT0Y" -> {
                                             when (rawVal) {
@@ -132,7 +169,12 @@ class GamepadListenerService : Service() {
                                             }
                                         }
                                         else -> {
-                                            val normalizedVal = rawVal.toFloat() / 32767f
+                                            val range = absRanges[axisType]
+                                            val min = range?.first ?: -32768
+                                            val max = range?.second ?: 32767
+                                            val mid = min + (max - min) / 2f
+                                            val half = (max - min) / 2f
+                                            val normalizedVal = if (half > 0) (rawVal - mid) / half else 0f
                                             val finalVal = normalizedVal.coerceIn(-1f, 1f)
                                             when (axisType) {
                                                 "ABS_X"  -> lStickX = finalVal
@@ -142,7 +184,6 @@ class GamepadListenerService : Service() {
                                                 "ABS_Z"  -> l2Trigger = finalVal
                                                 "ABS_RZ" -> r2Trigger = finalVal
                                             }
-                                            TouchInjectionPlugin.emitGamepadAxis(floatArrayOf(lStickX, lStickY, rStickX, rStickY, l2Trigger, r2Trigger))
                                         }
                                     }
                                 } catch (e: NumberFormatException) { }

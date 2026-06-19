@@ -8,7 +8,6 @@ declare global {
   interface Window {
     AndroidOverlay?: {
       onReactReady: () => void;
-      onCommand: (command: string) => void;
       closeOverlay: () => void;
     };
     injectConfig: (configJson: string) => void;

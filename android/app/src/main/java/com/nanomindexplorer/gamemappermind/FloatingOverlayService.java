@@ -207,10 +207,6 @@ public class FloatingOverlayService extends Service {
         }
 
         @JavascriptInterface
-        public void onCommand(String command) {
-        }
-
-        @JavascriptInterface
         public void closeOverlay() {
             new Handler(Looper.getMainLooper()).post(() -> {
                 stopSelf();

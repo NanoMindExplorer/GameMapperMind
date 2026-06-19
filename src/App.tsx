@@ -346,10 +346,10 @@ export default function App() {
           {/* Quick HUD State indications & Emergency Kill Switch */}
           <div className="flex items-center gap-4">
             <div className="hidden md:flex items-center gap-6 text-[10px] text-slate-400 font-mono pr-2 border-r border-slate-800">
-              <div className="flex items-center gap-2" title={connectedGamepad ? `${connectedGamepad.id}` : 'No gamepad connected'}>
-                <span className={`w-1.5 h-1.5 rounded-full ${connectedGamepad ? 'bg-green-500 animate-pulse' : 'bg-slate-600'}`}></span>
-                <span className={connectedGamepad ? 'text-green-400' : 'text-slate-500'}>
-                  GP: {connectedGamepad ? 'CONNECTED' : 'DISCONNECTED'}
+              <div className="flex items-center gap-2" title={shizukuState.status === 'RUNNING' || shizukuState.status === 'CONNECTED_SHIZUKU' ? `Shizuku Service Running` : 'No gamepad connected'}>
+                <span className={`w-1.5 h-1.5 rounded-full ${shizukuState.status === 'RUNNING' || shizukuState.status === 'CONNECTED_SHIZUKU' ? 'bg-green-500 animate-pulse' : 'bg-slate-600'}`}></span>
+                <span className={shizukuState.status === 'RUNNING' || shizukuState.status === 'CONNECTED_SHIZUKU' ? 'text-green-400' : 'text-slate-500'}>
+                  GP: {shizukuState.status === 'RUNNING' || shizukuState.status === 'CONNECTED_SHIZUKU' ? 'CONNECTED' : 'DISCONNECTED'}
                 </span>
               </div>
             </div>

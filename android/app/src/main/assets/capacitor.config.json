@@ -1,5 +1,12 @@
 {
-	"appId": "com.nanomindexplorer.gamemappermind",
+	"appId": "com.nanomind.gamemappermind",
 	"appName": "GameMapperMind",
-	"webDir": "dist"
+	"webDir": "dist",
+	"server": {
+		"androidScheme": "https"
+	},
+	"android": {
+		"captureInput": true,
+		"webContentsDebuggingEnabled": false
+	}
 }

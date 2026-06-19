@@ -7,9 +7,10 @@ export const useShizuku = () => {
     if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
       try {
         const { granted } = await TouchInjection.checkPermission();
+        const { daemonRunning } = await TouchInjection.checkDaemonRunning();
         return {
           ...currentState,
-          daemonRunning: granted, 
+          daemonRunning: !!daemonRunning, 
           status: granted ? 'CONNECTED_SHIZUKU' : 'DISCONNECTED'
         };
       } catch (err) {
@@ -33,7 +34,14 @@ export const useShizuku = () => {
   };
 
   const executeShizukuCommand = async (command: string) => {
-    // Stub
+    if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
+      try {
+        const result = await TouchInjection.executeShizukuCommand({ command });
+        return { output: result.output, error: result.error, exitCode: result.exitCode };
+      } catch (err: any) {
+        return { output: '', error: err.message || 'Error', exitCode: -1 };
+      }
+    }
     return { output: 'Legacy command disabled', error: '', exitCode: 0 };
   };
 
@@ -83,8 +91,20 @@ export const useShizuku = () => {
     return false;
   };
 
-  const checkBattery = async () => true;
-  const requestBatteryIgnore = async () => false;
+  const checkBattery = async () => {
+    if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
+        const { isIgnoring } = await TouchInjection.checkBattery();
+        return isIgnoring;
+    }
+    return true;
+  };
+  const requestBatteryIgnore = async () => {
+    if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
+        await TouchInjection.requestBatteryIgnore();
+        return true;
+    }
+    return false;
+  };
 
   return { checkShizukuStatus, requestShizukuPermission, executeShizukuCommand, startDaemon, stopDaemon, injectInput, checkBattery, requestBatteryIgnore };
 };

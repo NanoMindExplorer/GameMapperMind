@@ -223,8 +223,11 @@ class TouchDaemonService : Service() {
         return anyReleased
     }
 
+    private var nextTapId = 90
     fun injectTap(x: Float, y: Float): Boolean {
-        val id = 99 // Reserved ID for simple taps
+        val id = nextTapId
+        nextTapId++
+        if (nextTapId > 99) nextTapId = 90
         val downRes = touchDown(id, x, y)
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
             touchUp(id)

@@ -28,36 +28,7 @@ class MainActivity : BridgeActivity() {
         }
     }
 
-    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-        if ((event.source and InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD ||
-            (event.source and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK) {
-            bridge?.webView?.let {
-                it.dispatchKeyEvent(event)
-                return true
-            }
-        }
-        return super.onKeyDown(keyCode, event)
-    }
-
-    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
-        if ((event.source and InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD ||
-            (event.source and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK) {
-            bridge?.webView?.let {
-                it.dispatchKeyEvent(event)
-                return true
-            }
-        }
-        return super.onKeyUp(keyCode, event)
-    }
-
     override fun onGenericMotionEvent(event: MotionEvent): Boolean {
-        if ((event.source and InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD ||
-            (event.source and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK) {
-            bridge?.webView?.let {
-                it.dispatchGenericMotionEvent(event)
-                return true
-            }
-        }
         return super.onGenericMotionEvent(event)
     }
 }

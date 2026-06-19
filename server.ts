@@ -8,10 +8,31 @@ import { z } from "zod";
 const app = express();
 const PORT: number = parseInt(process.env.PORT ?? "3000", 10);
 
+const ALLOWED_ORIGINS = ["http://localhost:3000", "capacitor://localhost", "http://localhost"];
+
 app.use(cors({
-  origin: [/localhost/, /capacitor/],
+  origin: (origin, callback) => {
+    if (!origin || ALLOWED_ORIGINS.includes(origin) || origin.endsWith('.run.app')) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
   credentials: true
 }));
+
+const API_KEY = process.env.VITE_NEXION_API_KEY || "dev-secret-key-123";
+
+// Simple API Key Middleware
+app.use("/api", (req: Request, res: Response, next: NextFunction) => {
+  if (req.method === "OPTIONS") return next();
+  const authHeader = req.headers.authorization;
+  if (!authHeader || authHeader !== `Bearer ${API_KEY}`) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  next();
+});
 
 app.use(express.json({ limit: "1mb" }));
 

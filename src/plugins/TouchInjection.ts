@@ -9,6 +9,7 @@ export interface TouchInjectionPluginType {
   startOverlay(options: { profile: any }): Promise<void>;
   stopOverlay(): Promise<void>;
   checkPermission(): Promise<{ granted: boolean }>;
+  requestPermission(): Promise<{ granted: boolean, requested?: boolean }>;
   
   touchDown(options: { pointerId: number; x: number; y: number }): Promise<void>;
   touchMove(options: { pointerId: number; x: number; y: number }): Promise<void>;

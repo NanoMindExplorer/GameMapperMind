@@ -23,7 +23,7 @@ import {
 import AppIcon from '../icon.svg';
 
 import { useShizuku } from './hooks/useShizuku';
-import { useGamepad } from './hooks/useGamepad';
+import { useGamepadLoop } from './hooks/useGamepadLoop';
 import { useInputInjector } from './hooks/useInputInjector';
 
 export default function App() {
@@ -244,138 +244,7 @@ export default function App() {
 
   const activeProfile = profiles.find(p => p.id === activeProfileId) || profiles[0];
 
-  const handleInjectionCommand = React.useCallback((cmd: string) => {
-    if (typeof window !== 'undefined' && 'Capacitor' in window) {
-      if (shizukuState.status === 'CONNECTED_SHIZUKU') {
-        injectInput(cmd);
-      }
-    } else if (typeof window !== 'undefined' && (window as any).AndroidOverlay) {
-      (window as any).AndroidOverlay.onCommand(cmd);
-    } else {
-      console.log("[MOCK INJECT]", cmd);
-    }
-  }, [shizukuState.status, injectInput]);
-
-  const handleGamepadPress = React.useCallback(async (button: string, isPressed: boolean) => {
-    setActiveKeys(prev => {
-      if (isPressed && !prev.includes(button)) return [...prev, button];
-      if (!isPressed && prev.includes(button)) return prev.filter(k => k !== button);
-      return prev;
-    });
-
-    const mapping = activeProfile.buttons.find(b => b.mappedKey === button);
-    if (mapping) {
-      const screenW = Math.max(window.screen.width, window.screen.height);
-      const screenH = Math.min(window.screen.width, window.screen.height);
-      const x = Math.round((mapping.x / 100) * screenW);
-      const y = Math.round((mapping.y / 100) * screenH);
-
-      if (mapping.type === 'swipe') {
-        if (!isPressed) return; // Only trigger on press, ignore release
-
-        let targetX = x;
-        let targetY = y;
-        const distance = 250; // Fast swipe distance in pixels
-        
-        if (mapping.swipeDirection === 'UP') targetY = Math.max(0, y - distance);
-        else if (mapping.swipeDirection === 'DOWN') targetY = Math.min(screenH, y + distance);
-        else if (mapping.swipeDirection === 'LEFT') targetX = Math.max(0, x - distance);
-        else if (mapping.swipeDirection === 'RIGHT') targetX = Math.min(screenW, x + distance);
-
-        // Execute fast swipe sequence
-        handleInjectionCommand(`down ${x} ${y}`);
-        setTimeout(() => handleInjectionCommand(`move ${Math.round((x + targetX) / 2)} ${Math.round((y + targetY) / 2)}`), 30);
-        setTimeout(() => handleInjectionCommand(`move ${targetX} ${targetY}`), 60);
-        setTimeout(() => handleInjectionCommand(`up ${targetX} ${targetY}`), 90);
-        return;
-      }
-
-      if (isPressed) {
-        handleInjectionCommand(`down ${x} ${y}`);
-      } else {
-        handleInjectionCommand(`up ${x} ${y}`);
-      }
-    }
-  }, [activeProfile, handleInjectionCommand]);
-
-  const activeStickPointer = React.useRef<{
-    l_id: string | null; l_lastX: number; l_lastY: number;
-    r_id: string | null; r_lastX: number; r_lastY: number;
-  }>({ l_id: null, l_lastX: 0, l_lastY: 0, r_id: null, r_lastX: 0, r_lastY: 0 });
-
-  const handleGamepadAxis = React.useCallback(async (axes: { lx: number, ly: number, rx: number, ry: number }) => {
-    setActiveAxes(axes);
-    const lStickMapping = activeProfile.buttons.find(b => b.mappedKey === 'L_STICK');
-    const rStickMapping = activeProfile.buttons.find(b => b.mappedKey === 'R_STICK');
-    
-    // Process Left Stick
-    if (lStickMapping) {
-      const isNeutral = Math.abs(axes.lx) < 0.1 && Math.abs(axes.ly) < 0.1;
-      const screenW = Math.max(window.screen.width, window.screen.height);
-      const screenH = Math.min(window.screen.width, window.screen.height);
-      const baseX = Math.round((lStickMapping.x / 100) * screenW);
-      const baseY = Math.round((lStickMapping.y / 100) * screenH);
-
-      if (isNeutral) {
-        if (activeStickPointer.current.l_id === 'L_STICK') {
-          activeStickPointer.current.l_id = null;
-          handleInjectionCommand(`up ${activeStickPointer.current.l_lastX} ${activeStickPointer.current.l_lastY}`); 
-        }
-      } else {
-        const targetX = Math.round(baseX + (axes.lx * 150));
-        const targetY = Math.round(baseY + (axes.ly * 150));
-        const isSameAsLast = activeStickPointer.current.l_lastX === targetX && activeStickPointer.current.l_lastY === targetY;
-        
-        if (activeStickPointer.current.l_id !== 'L_STICK') {
-           activeStickPointer.current.l_id = 'L_STICK';
-           activeStickPointer.current.l_lastX = baseX;
-           activeStickPointer.current.l_lastY = baseY;
-           handleInjectionCommand(`down ${baseX} ${baseY}`);
-        }
-
-        if (!isSameAsLast) {
-          handleInjectionCommand(`move ${targetX} ${targetY}`);
-          activeStickPointer.current.l_lastX = targetX;
-          activeStickPointer.current.l_lastY = targetY;
-        }
-      }
-    }
-
-    // Process Right Stick
-    if (rStickMapping) {
-      const isNeutral = Math.abs(axes.rx) < 0.1 && Math.abs(axes.ry) < 0.1;
-      const screenW = Math.max(window.screen.width, window.screen.height);
-      const screenH = Math.min(window.screen.width, window.screen.height);
-      const baseX = Math.round((rStickMapping.x / 100) * screenW);
-      const baseY = Math.round((rStickMapping.y / 100) * screenH);
-
-      if (isNeutral) {
-        if (activeStickPointer.current.r_id === 'R_STICK') {
-          activeStickPointer.current.r_id = null;
-          handleInjectionCommand(`up ${activeStickPointer.current.r_lastX} ${activeStickPointer.current.r_lastY}`); 
-        }
-      } else {
-        const targetX = Math.round(baseX + (axes.rx * 150));
-        const targetY = Math.round(baseY + (axes.ry * 150));
-        const isSameAsLast = activeStickPointer.current.r_lastX === targetX && activeStickPointer.current.r_lastY === targetY;
-        
-        if (activeStickPointer.current.r_id !== 'R_STICK') {
-           activeStickPointer.current.r_id = 'R_STICK';
-           activeStickPointer.current.r_lastX = baseX;
-           activeStickPointer.current.r_lastY = baseY;
-           handleInjectionCommand(`down ${baseX} ${baseY}`);
-        }
-
-        if (!isSameAsLast) {
-          handleInjectionCommand(`move ${targetX} ${targetY}`);
-          activeStickPointer.current.r_lastX = targetX;
-          activeStickPointer.current.r_lastY = targetY;
-        }
-      }
-    }
-  }, [activeProfile, shizukuState.status, injectInput]);
-
-  const { connectedGamepad } = useGamepad(handleGamepadPress, handleGamepadAxis);
+  useGamepadLoop(activeProfile, shizukuState.status === 'RUNNING' || shizukuState.status === 'CONNECTED_SHIZUKU');
 
   const handleLogMessage = React.useCallback((msg: string) => {
     setShizukuState(prev => {

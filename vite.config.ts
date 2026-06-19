@@ -13,6 +13,7 @@ export default defineConfig(() => {
       },
     },
     build: {
+      outDir: 'dist/client',
       chunkSizeWarningLimit: 1000,
       rollupOptions: {
         output: {

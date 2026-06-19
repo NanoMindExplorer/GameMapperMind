@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import OverlayWysiwyg from './components/OverlayWysiwyg';
 import { GamepadProfile } from './types';
 import { INITIAL_PROFILES } from './defaults';
-import { useGamepad } from './hooks/useGamepad';
 
 // Declare native interface
 declare global {
@@ -24,20 +23,6 @@ export default function OverlayApp() {
   const [profile, setProfile] = useState<GamepadProfile | null>(null);
   const [activeKeys, setActiveKeys] = useState<string[]>([]);
   const [activeAxes, setActiveAxes] = useState({lx:0, ly:0, rx:0, ry:0});
-
-  const handleGamepadPress = React.useCallback((button: string, isPressed: boolean) => {
-    setActiveKeys(prev => {
-      if (isPressed && !prev.includes(button)) return [...prev, button];
-      if (!isPressed && prev.includes(button)) return prev.filter(k => k !== button);
-      return prev;
-    });
-  }, []);
-
-  const handleGamepadAxis = React.useCallback((axes: { lx: number, ly: number, rx: number, ry: number }) => {
-    setActiveAxes(axes);
-  }, []);
-
-  useGamepad(handleGamepadPress, handleGamepadAxis);
 
   useEffect(() => {
     // Prevent scrolling from keydown globally in overlay

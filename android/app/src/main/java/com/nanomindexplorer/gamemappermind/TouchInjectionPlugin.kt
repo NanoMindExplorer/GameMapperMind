@@ -124,6 +124,24 @@ class TouchInjectionPlugin : Plugin() {
     }
 
     @PluginMethod
+    fun requestPermission(call: PluginCall) {
+        val granted = Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+        if (granted) {
+            val data = JSObject()
+            data.put("granted", true)
+            call.resolve(data)
+        } else if (Shizuku.shouldShowRequestPermissionRationale()) {
+            call.reject("Permission denied previously.")
+        } else {
+            Shizuku.requestPermission(1234)
+            val data = JSObject()
+            data.put("granted", false)
+            data.put("requested", true)
+            call.resolve(data)
+        }
+    }
+
+    @PluginMethod
     fun checkPermission(call: PluginCall) {
         val granted = Shizuku.pingBinder() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
         val data = JSObject()
@@ -137,8 +155,12 @@ class TouchInjectionPlugin : Plugin() {
         val x = call.getFloat("x") ?: 0f
         val y = call.getFloat("y") ?: 0f
         try {
-            touchService?.touchDown(id, x, y)
-            call.resolve()
+            val success = touchService?.touchDown(id, x, y) ?: false
+            if (success) {
+                call.resolve()
+            } else {
+                call.reject("Injection call returned false (perhaps injectInputEvent is null or failed)")
+            }
         } catch (e: Exception) {
             call.reject("Injection failed: ${e.message}")
         }
@@ -150,8 +172,12 @@ class TouchInjectionPlugin : Plugin() {
         val x = call.getFloat("x") ?: 0f
         val y = call.getFloat("y") ?: 0f
         try {
-            touchService?.touchMove(id, x, y)
-            call.resolve()
+            val success = touchService?.touchMove(id, x, y) ?: false
+            if (success) {
+                call.resolve()
+            } else {
+                call.reject("Injection call returned false")
+            }
         } catch (e: Exception) {
             call.reject("Injection failed: ${e.message}")
         }
@@ -161,8 +187,12 @@ class TouchInjectionPlugin : Plugin() {
     fun touchUp(call: PluginCall) {
         val id = call.getInt("pointerId") ?: 0
         try {
-            touchService?.touchUp(id)
-            call.resolve()
+            val success = touchService?.touchUp(id) ?: false
+            if (success) {
+                call.resolve()
+            } else {
+                call.reject("Injection call returned false")
+            }
         } catch (e: Exception) {
             call.reject("Injection failed: ${e.message}")
         }
@@ -173,8 +203,12 @@ class TouchInjectionPlugin : Plugin() {
         val x = call.getFloat("x") ?: 0f
         val y = call.getFloat("y") ?: 0f
         try {
-            touchService?.injectTap(x, y)
-            call.resolve()
+            val success = touchService?.injectTap(x, y) ?: false
+            if (success) {
+                call.resolve()
+            } else {
+                call.reject("Injection call returned false")
+            }
         } catch (e: Exception) {
             call.reject("Injection failed: ${e.message}")
         }

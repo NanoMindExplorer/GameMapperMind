@@ -14,20 +14,20 @@ import rikka.shizuku.Shizuku
 class TouchDaemonService : Service() {
 
     private val touchStub = object : ITouchService.Stub() {
-        override fun touchDown(pointerId: Int, x: Float, y: Float) {
-            this@TouchDaemonService.touchDown(pointerId, x, y)
+        override fun touchDown(pointerId: Int, x: Float, y: Float): Boolean {
+            return this@TouchDaemonService.touchDown(pointerId, x, y)
         }
 
-        override fun touchMove(pointerId: Int, x: Float, y: Float) {
-            this@TouchDaemonService.touchMove(pointerId, x, y)
+        override fun touchMove(pointerId: Int, x: Float, y: Float): Boolean {
+            return this@TouchDaemonService.touchMove(pointerId, x, y)
         }
 
-        override fun touchUp(pointerId: Int) {
-            this@TouchDaemonService.touchUp(pointerId)
+        override fun touchUp(pointerId: Int): Boolean {
+            return this@TouchDaemonService.touchUp(pointerId)
         }
 
-        override fun injectTap(x: Float, y: Float) {
-            this@TouchDaemonService.injectTap(x, y)
+        override fun injectTap(x: Float, y: Float): Boolean {
+            return this@TouchDaemonService.injectTap(x, y)
         }
 
         override fun isAlive(): Boolean {
@@ -35,7 +35,7 @@ class TouchDaemonService : Service() {
         }
     }
 
-    override fun onBind(intent: Intent): IBinder? {
+    override fun onBind(intent: Intent?): IBinder? {
         return touchStub
     }
 
@@ -78,7 +78,7 @@ class TouchDaemonService : Service() {
         return 0 // fallback
     }
 
-    private fun injectMotionEvent(action: Int, actionIndex: Int) {
+    private fun injectMotionEvent(action: Int, actionIndex: Int): Boolean {
         val downTime = baseDownTime
         val eventTime = SystemClock.uptimeMillis()
 
@@ -93,7 +93,7 @@ class TouchDaemonService : Service() {
             pointerCount = 1 
         }
 
-        if (pointerCount == 0) return
+        if (pointerCount == 0) return false
 
         val pointerProperties = Array(pointerCount) { MotionEvent.PointerProperties() }
         val pointerCoords = Array(pointerCount) { MotionEvent.PointerCoords() }
@@ -137,15 +137,19 @@ class TouchDaemonService : Service() {
             0
         )
 
-        try {
-            injectInputEventMethod?.invoke(inputManager, event, 0)
+        return try {
+            val result = injectInputEventMethod?.invoke(inputManager, event, 0) as? Boolean ?: false
+            if (!result) Log.w("GameMapper", "injectInputEvent returned false")
+            result
         } catch (e: Exception) {
             Log.e("GameMapper", "Injection failed", e)
+            false
+        } finally {
+            event.recycle()
         }
-        event.recycle()
     }
 
-    fun touchDown(pointerId: Int, x: Float, y: Float) {
+    fun touchDown(pointerId: Int, x: Float, y: Float): Boolean {
         var state = pointers.get(pointerId)
         if (state == null) {
             state = PointerState()
@@ -160,7 +164,7 @@ class TouchDaemonService : Service() {
             if (pointers.valueAt(i).isDown) activeCount++
         }
 
-        if (activeCount == 1) {
+        return if (activeCount == 1) {
             baseDownTime = SystemClock.uptimeMillis()
             injectMotionEvent(MotionEvent.ACTION_DOWN, 0)
         } else {
@@ -170,17 +174,18 @@ class TouchDaemonService : Service() {
         }
     }
 
-    fun touchMove(pointerId: Int, x: Float, y: Float) {
-        val state = pointers.get(pointerId) ?: return
+    fun touchMove(pointerId: Int, x: Float, y: Float): Boolean {
+        val state = pointers.get(pointerId) ?: return false
         state.x = x
         state.y = y
         if (state.isDown) {
-            injectMotionEvent(MotionEvent.ACTION_MOVE, 0)
+            return injectMotionEvent(MotionEvent.ACTION_MOVE, 0)
         }
+        return false
     }
 
-    fun touchUp(pointerId: Int) {
-        val state = pointers.get(pointerId) ?: return
+    fun touchUp(pointerId: Int): Boolean {
+        val state = pointers.get(pointerId) ?: return false
         val compactedIdx = getCompactedIndex(pointerId)
         state.isDown = false
 
@@ -189,22 +194,25 @@ class TouchDaemonService : Service() {
             if (pointers.valueAt(i).isDown) activeCount++
         }
 
-        if (activeCount == 0) {
-            injectMotionEvent(MotionEvent.ACTION_UP, 0)
+        return if (activeCount == 0) {
+            val result = injectMotionEvent(MotionEvent.ACTION_UP, 0)
             pointers.clear()
+            result
         } else {
             val action = MotionEvent.ACTION_POINTER_UP or (compactedIdx shl MotionEvent.ACTION_POINTER_INDEX_SHIFT)
-            injectMotionEvent(action, compactedIdx)
+            val result = injectMotionEvent(action, compactedIdx)
             pointers.remove(pointerId)
+            result
         }
     }
 
-    fun injectTap(x: Float, y: Float) {
+    fun injectTap(x: Float, y: Float): Boolean {
         val id = 99 // Reserved ID for simple taps
-        touchDown(id, x, y)
+        val downRes = touchDown(id, x, y)
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
             touchUp(id)
         }, 20L)
+        return downRes
     }
 
     fun isAlive(): Boolean {

@@ -70,8 +70,16 @@ class GamepadListenerService : Service() {
             try {
                 // Menjalankan getevent untuk membaca input mentah dari dev/input tanpa MENCURI FOKUS!
                 // Uses Shizuku to get process with root/shell privileges!
-                evdevProcess = rikka.shizuku.Shizuku.newProcess(arrayOf("sh", "-c", "getevent -l"), null as Array<String>?, null as String?)
-                val reader = BufferedReader(InputStreamReader(evdevProcess!!.inputStream))
+                val newProcessMethod = rikka.shizuku.Shizuku::class.java.getDeclaredMethod("newProcess", Array<String>::class.java, Array<String>::class.java, String::class.java)
+                newProcessMethod.isAccessible = true
+                evdevProcess = newProcessMethod.invoke(null, arrayOf("sh", "-c", "getevent -l"), null as Array<String>?, null as String?) as Process
+                val processStream = evdevProcess?.inputStream
+                if (processStream == null) {
+                    Log.e("GameMapper", "getevent stream is null. newProcess silently failed.")
+                    TouchInjectionPlugin.emitGamepadButton("ERROR_SHIZUKU_SILENT_FAILURE", 0, 0f)
+                    return@Thread
+                }
+                val reader = BufferedReader(InputStreamReader(processStream))
                 var line: String? = null
                 
                 var lStickX = 0f
@@ -144,6 +152,7 @@ class GamepadListenerService : Service() {
                 }
             } catch (e: Exception) {
                 Log.e("GameMapper", "getevent loop failed", e)
+                TouchInjectionPlugin.emitGamepadButton("ERROR_SHIZUKU_EXCEPTION", 0, 0f)
             }
         }.also { it.isDaemon = true }.start()
     }
@@ -154,10 +163,10 @@ class GamepadListenerService : Service() {
             evdevName.contains("BTN_B") || evdevName.contains("BTN_EAST") -> "B"
             evdevName.contains("BTN_X") || evdevName.contains("BTN_NORTH") -> "X"
             evdevName.contains("BTN_Y") || evdevName.contains("BTN_WEST") -> "Y"
-            evdevName.contains("BTN_TL") || evdevName.contains("BTN_L1") -> "LB"
-            evdevName.contains("BTN_TR") || evdevName.contains("BTN_R1") -> "RB"
             evdevName.contains("BTN_TL2") || evdevName.contains("BTN_L2") -> "LT"
             evdevName.contains("BTN_TR2") || evdevName.contains("BTN_R2") -> "RT"
+            evdevName.contains("BTN_TL") || evdevName.contains("BTN_L1") -> "LB"
+            evdevName.contains("BTN_TR") || evdevName.contains("BTN_R1") -> "RB"
             evdevName.contains("BTN_THUMBL") -> "L3"
             evdevName.contains("BTN_THUMBR") -> "R3"
             evdevName.contains("BTN_START") -> "START"

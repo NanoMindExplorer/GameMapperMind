@@ -39,8 +39,9 @@ export const useShizuku = () => {
 
   const requestShizukuPermission = async (): Promise<{ success: boolean; error?: string }> => {
     try {
-        const { granted } = await TouchInjection.checkPermission();
+        const { granted, requested } = await TouchInjection.requestPermission();
         if (granted) return { success: true };
+        if (requested) return { success: false, error: "Permission requested, waiting for user response." };
         return { success: false, error: "Permission denied" };
     } catch (e: any) {
         return { success: false, error: e.message };

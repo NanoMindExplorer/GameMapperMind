@@ -9,7 +9,7 @@ import { GamepadProfile, VirtualButton } from '../types';
 import { 
   Play, Settings, RotateCcw, Save, Trash2, Eye, EyeOff, Plus, Check, ChevronDown, Move, Maximize2, Layers, X
 } from 'lucide-react';
-import AppIcon from '../../icon.svg';
+// import removed to use public path
 
 interface OverlayWysiwygProps {
   activeProfile: GamepadProfile;
@@ -477,7 +477,7 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
               }}
             >
                <div className={`w-12 h-12 ${showPalette ? 'bg-indigo-600' : 'bg-slate-900/80'} rounded-full border-2 ${showPalette ? 'border-indigo-300' : 'border-indigo-500'} flex items-center justify-center backdrop-blur shadow-xl overflow-hidden hover:bg-indigo-500 transition-colors`}>
-                 <img src={AppIcon} alt="Nexion" className={`w-7 h-7 ${showPalette ? 'opacity-100' : 'opacity-80'}`} />
+                 <img src="/icon.svg" alt="Nexion" className={`w-7 h-7 ${showPalette ? 'opacity-100' : 'opacity-80'}`} />
                </div>
                {!showPalette && <div className="text-[9px] font-bold tracking-widest text-indigo-300 mt-2 drop-shadow-md text-center bg-slate-900/80 px-2.5 py-0.5 rounded-full border border-indigo-500/40">NEXION</div>}
             </div>

@@ -20,7 +20,7 @@ import {
   Terminal, Shield, Settings, Activity, Compass, Cpu, HelpCircle, 
   ChevronRight, Sparkles, BookOpen, Layers, Bot, ShieldAlert, Heart
 } from 'lucide-react';
-import AppIcon from '../icon.svg';
+// Use public path directly for AppIcon instead of importing it
 
 import { useShizuku } from './hooks/useShizuku';
 import { useGamepadLoop } from './hooks/useGamepadLoop';
@@ -313,7 +313,7 @@ export default function App() {
               <div className="absolute inset-0 opacity-[0.06] bg-[radial-gradient(#ffffff_1px,transparent_1px)] [background-size:16px_16px] pointer-events-none" />
               
               {/* Real Game Controller + Crosshair Laser sight Vector */}
-              <img src={AppIcon} alt="Gamepad Mind Logo" className="w-8 h-8 group-hover:scale-110 group-hover:rotate-[15deg] transition-all duration-500 relative z-10" />
+              <img src="/icon.svg" alt="Gamepad Mind Logo" className="w-8 h-8 group-hover:scale-110 group-hover:rotate-[15deg] transition-all duration-500 relative z-10" />
 
               
               {/* Outer corner cyber brackets detailing */}

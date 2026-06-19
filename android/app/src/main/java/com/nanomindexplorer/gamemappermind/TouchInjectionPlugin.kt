@@ -97,7 +97,10 @@ class TouchInjectionPlugin : Plugin() {
 
     @PluginMethod
     fun startOverlay(call: PluginCall) {
+        val profileObj = call.getObject("profile")
+        val profileJson = profileObj?.toString() ?: "{}"
         val intent = Intent(context, FloatingOverlayService::class.java)
+        intent.putExtra("config", profileJson)
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
             context.startForegroundService(intent)
         } else {

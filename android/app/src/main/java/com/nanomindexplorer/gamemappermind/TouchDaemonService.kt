@@ -66,6 +66,17 @@ class TouchDaemonService : Shizuku.UserService() {
     private val pointers = SparseArray<PointerState>()
     private var baseDownTime: Long = 0L
 
+    private fun getCompactedIndex(targetPointerId: Int): Int {
+        var compactedIdx = 0
+        for (i in 0 until pointers.size()) {
+            if (pointers.valueAt(i).isDown) {
+                if (pointers.keyAt(i) == targetPointerId) return compactedIdx
+                compactedIdx++
+            }
+        }
+        return 0 // fallback
+    }
+
     private fun injectMotionEvent(action: Int, actionIndex: Int) {
         val downTime = baseDownTime
         val eventTime = SystemClock.uptimeMillis()
@@ -77,9 +88,8 @@ class TouchDaemonService : Shizuku.UserService() {
             }
         }
         
-        // If an up action caused counter to drop to 0 but we are dispatching the UP event
-        if (pointerCount == 0 && (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL)) {
-            pointerCount = 1 // Need at least 1 pointer to construct event
+        if (pointerCount == 0 && ((action and MotionEvent.ACTION_MASK) == MotionEvent.ACTION_UP || (action and MotionEvent.ACTION_MASK) == MotionEvent.ACTION_CANCEL)) {
+            pointerCount = 1 
         }
 
         if (pointerCount == 0) return
@@ -92,9 +102,9 @@ class TouchDaemonService : Shizuku.UserService() {
             val pointerId = pointers.keyAt(i)
             val state = pointers.valueAt(i)
             
-            // Include pointer if it's down, or if it's the one going up/down
+            // For UP, we need to include the pointer going up. actionIndex here is passed as compactedIdx
             val isActive = state.isDown || 
-                ((action and MotionEvent.ACTION_MASK) == MotionEvent.ACTION_POINTER_UP && pointerId == actionIndex) ||
+                ((action and MotionEvent.ACTION_MASK) == MotionEvent.ACTION_POINTER_UP && activeIndex == actionIndex) ||
                 ((action and MotionEvent.ACTION_MASK) == MotionEvent.ACTION_UP)
 
             if (isActive) {
@@ -105,41 +115,14 @@ class TouchDaemonService : Shizuku.UserService() {
                 pointerCoords[activeIndex].y = state.y
                 pointerCoords[activeIndex].pressure = 1.0f
                 pointerCoords[activeIndex].size = 1.0f
-
-                // Remap actionIndex to the compacted array index if needed
-                if ((action and MotionEvent.ACTION_MASK) == MotionEvent.ACTION_POINTER_DOWN || 
-                    (action and MotionEvent.ACTION_MASK) == MotionEvent.ACTION_POINTER_UP) {
-                    if (pointerId == actionIndex) {
-                        // The actionIndex in the action integer needs to be the shifted index
-                    }
-                }
                 activeIndex++
             }
-        }
-        
-        // Find the index of the pointer triggering the action in the compacted array
-        var compactedActionIndex = 0
-        if ((action and MotionEvent.ACTION_MASK) == MotionEvent.ACTION_POINTER_DOWN || 
-            (action and MotionEvent.ACTION_MASK) == MotionEvent.ACTION_POINTER_UP) {
-            for (i in 0 until activeIndex) {
-                if (pointerProperties[i].id == actionIndex) {
-                    compactedActionIndex = i
-                    break
-                }
-            }
-        }
-
-        val finalAction = if ((action and MotionEvent.ACTION_MASK) == MotionEvent.ACTION_POINTER_DOWN || 
-                              (action and MotionEvent.ACTION_MASK) == MotionEvent.ACTION_POINTER_UP) {
-            (action and MotionEvent.ACTION_MASK) or (compactedActionIndex shl MotionEvent.ACTION_POINTER_INDEX_SHIFT)
-        } else {
-            action
         }
 
         val event = MotionEvent.obtain(
             downTime,
             eventTime,
-            finalAction,
+            action,
             activeIndex,
             pointerProperties,
             pointerCoords,
@@ -171,16 +154,18 @@ class TouchDaemonService : Shizuku.UserService() {
         state.y = y
         state.isDown = true
 
-        var activePointersCount = 0
+        var activeCount = 0
         for (i in 0 until pointers.size()) {
-            if (pointers.valueAt(i).isDown) activePointersCount++
+            if (pointers.valueAt(i).isDown) activeCount++
         }
 
-        if (activePointersCount == 1) {
+        if (activeCount == 1) {
             baseDownTime = SystemClock.uptimeMillis()
-            injectMotionEvent(MotionEvent.ACTION_DOWN, pointerId)
+            injectMotionEvent(MotionEvent.ACTION_DOWN, 0)
         } else {
-            injectMotionEvent(MotionEvent.ACTION_POINTER_DOWN, pointerId)
+            val compactedIdx = getCompactedIndex(pointerId)
+            val action = MotionEvent.ACTION_POINTER_DOWN or (compactedIdx shl MotionEvent.ACTION_POINTER_INDEX_SHIFT)
+            injectMotionEvent(action, compactedIdx)
         }
     }
 
@@ -195,18 +180,20 @@ class TouchDaemonService : Shizuku.UserService() {
 
     fun touchUp(pointerId: Int) {
         val state = pointers.get(pointerId) ?: return
+        val compactedIdx = getCompactedIndex(pointerId)
         state.isDown = false
 
-        var activePointersCount = 0
+        var activeCount = 0
         for (i in 0 until pointers.size()) {
-            if (pointers.valueAt(i).isDown) activePointersCount++
+            if (pointers.valueAt(i).isDown) activeCount++
         }
 
-        if (activePointersCount == 0) {
-            injectMotionEvent(MotionEvent.ACTION_UP, pointerId)
+        if (activeCount == 0) {
+            injectMotionEvent(MotionEvent.ACTION_UP, 0)
             pointers.clear()
         } else {
-            injectMotionEvent(MotionEvent.ACTION_POINTER_UP, pointerId)
+            val action = MotionEvent.ACTION_POINTER_UP or (compactedIdx shl MotionEvent.ACTION_POINTER_INDEX_SHIFT)
+            injectMotionEvent(action, compactedIdx)
             pointers.remove(pointerId)
         }
     }
@@ -214,8 +201,9 @@ class TouchDaemonService : Shizuku.UserService() {
     fun injectTap(x: Float, y: Float) {
         val id = 99 // Reserved ID for simple taps
         touchDown(id, x, y)
-        Thread.sleep(20)
-        touchUp(id)
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            touchUp(id)
+        }, 20L)
     }
 
     fun isAlive(): Boolean {

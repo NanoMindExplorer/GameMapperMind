@@ -21,7 +21,7 @@ export default defineConfig(() => {
             'vendor-recharts': ['recharts'],
             'vendor-icons': ['lucide-react'],
             'vendor-capacitor': ['@capacitor/core'],
-            'vendor-motion': ['framer-motion']
+            'vendor-motion': ['motion']
           }
         }
       }

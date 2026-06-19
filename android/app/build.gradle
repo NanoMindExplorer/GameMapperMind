@@ -19,11 +19,10 @@ android {
     }
     signingConfigs {
         release {
-            // Placeholder untuk release nyata (aman tidak di-commit passwordnya)
-            storeFile file("keystore.jks")
-            storePassword "password_placeholder"
-            keyAlias "alias_placeholder"
-            keyPassword "password_placeholder"
+            storeFile file(System.getenv("KEYSTORE_FILE") ?: "keystore.jks")
+            storePassword System.getenv("KEYSTORE_PASSWORD") ?: ""
+            keyAlias System.getenv("KEY_ALIAS") ?: ""
+            keyPassword System.getenv("KEY_PASSWORD") ?: ""
         }
     }
     buildTypes {

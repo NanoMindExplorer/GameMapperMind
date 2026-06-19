@@ -39,17 +39,26 @@ export function useGamepad() {
 
   const pollGamepad = useCallback(() => {
     const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
-    const gp = gamepads[0];
-    
-    if (gp) {
-      setState({
-        connected: true,
-        id: gp.id,
-        axes: [...gp.axes],
-        buttons: gp.buttons.map(b => b.pressed)
-      });
+    let gp: Gamepad | null = null;
+
+    // Prioritaskan gamepad dengan 'standard' mapping (lebih kompatibel)
+    for (const g of gamepads) {
+        if (!g) continue;
+        if (g.mapping === 'standard') { gp = g; break; }
+        if (!gp) gp = g;
     }
-    
+
+    if (gp) {
+        setState({
+            connected: true,
+            id: gp.id,
+            axes: [...gp.axes],
+            buttons: gp.buttons.map(b => b.pressed)
+        });
+    } else {
+        setState(prev => prev.connected ? { connected: false, axes: [], buttons: [], id: "" } : prev);
+    }
+
     frameRef.current = requestAnimationFrame(pollGamepad);
   }, []);
 
@@ -75,7 +84,11 @@ export function useGamepad() {
 
     // Initial check
     const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
-    if (gamepads[0]) {
+    let hasGamepad = false;
+    for (const g of gamepads) {
+      if (g) { hasGamepad = true; break; }
+    }
+    if (hasGamepad && frameRef.current === 0) {
       frameRef.current = requestAnimationFrame(pollGamepad);
     }
 

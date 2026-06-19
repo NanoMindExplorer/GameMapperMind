@@ -55,6 +55,16 @@ class GamepadListenerService : Service() {
     }
 
     private fun startGetEventCapture() {
+        if (!rikka.shizuku.Shizuku.pingBinder()) {
+            Log.w("GameMapper", "Shizuku binder tidak aktif")
+            TouchInjectionPlugin.emitGamepadButton("ERROR_SHIZUKU_NOT_RUNNING", 0, 0f)
+            return
+        }
+        if (rikka.shizuku.Shizuku.checkSelfPermission() != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            Log.w("GameMapper", "Permission Shizuku belum diberikan")
+            TouchInjectionPlugin.emitGamepadButton("ERROR_SHIZUKU_NO_PERMISSION", 0, 0f)
+            return
+        }
         isListening = true
         Thread {
             try {
@@ -68,11 +78,13 @@ class GamepadListenerService : Service() {
                 var lStickY = 0f
                 var rStickX = 0f
                 var rStickY = 0f
+                var l2Trigger = 0f
+                var r2Trigger = 0f
                 
                 while (isListening && reader.readLine().also { line = it } != null) {
                     line?.let {
                         if (it.contains("EV_KEY")) {
-                            val parts = it.split(Regex("\\s+"))
+                            val parts = it.trim().split(Regex("\\s+"))
                             if (parts.size >= 4) {
                                 val btnRaw = parts[2]
                                 val stateStr = parts[3]
@@ -84,25 +96,48 @@ class GamepadListenerService : Service() {
                                 }
                             }
                         } else if (it.contains("EV_ABS")) {
-                            val parts = it.split(Regex("\\s+"))
+                            val parts = it.trim().split(Regex("\\s+"))
                             if (parts.size >= 4) {
                                 val axisType = parts[2]
                                 val valueHex = parts[3]
                                 try {
-                                    val valueInt = java.lang.Long.parseLong(valueHex, 16).toInt()
-                                    // Normalize value (-1 to 1 depends on controller type)
-                                    // Approx scale for standard controllers max 32767
-                                    val finalVal = (valueInt.toFloat() - 128f) / 128f // Placeholder scale
-                                    
+                                    val rawVal = valueHex.toLong(16).toInt()
                                     when (axisType) {
-                                        "ABS_X" -> lStickX = finalVal
-                                        "ABS_Y" -> lStickY = finalVal
-                                        "ABS_Z" -> rStickX = finalVal // Right stick X is often Z
-                                        "ABS_RZ" -> rStickY = finalVal // Right stick Y is often RZ
+                                        "ABS_HAT0Y" -> {
+                                            when (rawVal) {
+                                                -1 -> { TouchInjectionPlugin.emitGamepadButton("DPAD_UP", 1, 1f)
+                                                        TouchInjectionPlugin.emitGamepadButton("DPAD_DOWN", 0, 0f) }
+                                                1  -> { TouchInjectionPlugin.emitGamepadButton("DPAD_DOWN", 1, 1f)
+                                                        TouchInjectionPlugin.emitGamepadButton("DPAD_UP", 0, 0f) }
+                                                0  -> { TouchInjectionPlugin.emitGamepadButton("DPAD_UP", 0, 0f)
+                                                        TouchInjectionPlugin.emitGamepadButton("DPAD_DOWN", 0, 0f) }
+                                            }
+                                        }
+                                        "ABS_HAT0X" -> {
+                                            when (rawVal) {
+                                                -1 -> { TouchInjectionPlugin.emitGamepadButton("DPAD_LEFT", 1, 1f)
+                                                        TouchInjectionPlugin.emitGamepadButton("DPAD_RIGHT", 0, 0f) }
+                                                1  -> { TouchInjectionPlugin.emitGamepadButton("DPAD_RIGHT", 1, 1f)
+                                                        TouchInjectionPlugin.emitGamepadButton("DPAD_LEFT", 0, 0f) }
+                                                0  -> { TouchInjectionPlugin.emitGamepadButton("DPAD_LEFT", 0, 0f)
+                                                        TouchInjectionPlugin.emitGamepadButton("DPAD_RIGHT", 0, 0f) }
+                                            }
+                                        }
+                                        else -> {
+                                            val normalizedVal = rawVal.toFloat() / 32767f
+                                            val finalVal = normalizedVal.coerceIn(-1f, 1f)
+                                            when (axisType) {
+                                                "ABS_X"  -> lStickX = finalVal
+                                                "ABS_Y"  -> lStickY = finalVal
+                                                "ABS_RX" -> rStickX = finalVal
+                                                "ABS_RY" -> rStickY = finalVal
+                                                "ABS_Z"  -> l2Trigger = finalVal
+                                                "ABS_RZ" -> r2Trigger = finalVal
+                                            }
+                                            TouchInjectionPlugin.emitGamepadAxis(floatArrayOf(lStickX, lStickY, rStickX, rStickY, l2Trigger, r2Trigger))
+                                        }
                                     }
-                                    
-                                    TouchInjectionPlugin.emitGamepadAxis(floatArrayOf(lStickX, lStickY, rStickX, rStickY))
-                                } catch (e: Exception) {}
+                                } catch (e: NumberFormatException) { }
                             }
                         }
                     }
@@ -110,7 +145,7 @@ class GamepadListenerService : Service() {
             } catch (e: Exception) {
                 Log.e("GameMapper", "getevent loop failed", e)
             }
-        }.start()
+        }.also { it.isDaemon = true }.start()
     }
 
     private fun mapEvdevToButton(evdevName: String): String {

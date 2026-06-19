@@ -84,7 +84,10 @@ public class FloatingOverlayService extends Service {
             if (webView != null) {
                 new Handler(Looper.getMainLooper()).post(() -> {
                     // Update running webview
-                    webView.evaluateJavascript("if(window.injectConfig) window.injectConfig('" + currentConfigJson.replace("'", "\\'") + "');", null);
+                    webView.evaluateJavascript(
+                        "window.dispatchEvent(new MessageEvent('message', { data: " + currentConfigJson + " }))",
+                        null
+                    );
                 });
             }
         }
@@ -126,6 +129,17 @@ public class FloatingOverlayService extends Service {
                     public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                         return assetLoader.shouldInterceptRequest(request.getUrl());
                     }
+
+                    @Override
+                    public void onPageFinished(WebView view, String url) {
+                        super.onPageFinished(view, url);
+                        if (currentConfigJson != null && !currentConfigJson.isEmpty()) {
+                            view.evaluateJavascript(
+                                "window.dispatchEvent(new MessageEvent('message', { data: " + currentConfigJson + " }))",
+                                null
+                            );
+                        }
+                    }
                 });
                 
                 // Add JavaScript Interface
@@ -155,13 +169,39 @@ public class FloatingOverlayService extends Service {
         }
     }
 
+    private void setOverlayInteractive(boolean interactive) {
+        if (windowManager == null || webViewParams == null || webView == null) return;
+        if (interactive) {
+            webViewParams.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                    | WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
+                    | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN;
+        } else {
+            webViewParams.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                    | WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
+                    | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                    | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                    | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+        }
+        windowManager.updateViewLayout(webView, webViewParams);
+    }
+
     private class WebAppInterface {
+        @JavascriptInterface
+        public void setInteractive(boolean interactive) {
+            new Handler(Looper.getMainLooper()).post(() -> {
+                setOverlayInteractive(interactive);
+            });
+        }
+
         @JavascriptInterface
         public void onReactReady() {
             Log.d("GameMapper", "React is ready in Overlay");
             new Handler(Looper.getMainLooper()).post(() -> {
                 if (currentConfigJson != null && !currentConfigJson.isEmpty()) {
-                    webView.evaluateJavascript("if (window.injectConfig) { window.injectConfig('" + currentConfigJson.replace("'", "\\'") + "'); }", null);
+                    webView.evaluateJavascript(
+                        "window.dispatchEvent(new MessageEvent('message', { data: " + currentConfigJson + " }))",
+                        null
+                    );
                 }
             });
         }

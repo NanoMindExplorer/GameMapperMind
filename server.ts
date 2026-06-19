@@ -7,7 +7,6 @@ import { z } from "zod";
 
 const app = express();
 const PORT: number = parseInt(process.env.PORT ?? "3000", 10);
-const API_TOKEN = process.env.AI_TUNNEL_TOKEN ?? crypto.randomUUID();
 
 app.use(cors({
   origin: [/localhost/, /capacitor/],
@@ -101,7 +100,7 @@ async function startServer() {
   });
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on port ${PORT}. API Token: ${API_TOKEN}`);
+    console.log(`Server running on port ${PORT}`);
   });
 }
 

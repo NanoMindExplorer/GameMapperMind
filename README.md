@@ -4,7 +4,7 @@ Aplikasi pemetaan gamepad (Keymapper) untuk menghubungkan kontroler fisik dengan
 
 ## Perbaikan & Arsitektur Baru (v1.0.0-FINAL)
 - **Capacitor Integration**: Menggunakan arsitektur hybrid modern dengan sinkronisasi natif Android komprehensif.
-- **Express Backend Stabil**: Logging dan persistensi *state* (`state.json`) dengan Zod validation dan batasan muatan payload 1mb. Keamanan dengan `AI_TUNNEL_TOKEN`.
+- **Express Backend Stabil**: Logging dan persistensi *state* (`state.json`) dengan Zod validation dan batasan muatan payload 1mb.
 - **Gamepad API Otomatis**: Integrasi native hardware input melalui `MainActivity.kt` & React Hook loop berkinerja tinggi (`useGamepad.ts`) via requestAnimationFrame.
 - **Visual Editor (WYSIWYG)**: Atur tata letak tombol, analog stick, dan area swipe secara langsung.
 - **Injeksi Sentuhan Tanpa Root**: Menggunakan Shizuku untuk mensimulasikan sentuhan layar yang responsif dan aman tanpa perlu root.

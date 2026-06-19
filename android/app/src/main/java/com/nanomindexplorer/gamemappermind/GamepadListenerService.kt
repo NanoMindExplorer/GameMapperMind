@@ -70,9 +70,9 @@ class GamepadListenerService : Service() {
             try {
                 // Menjalankan getevent untuk membaca input mentah dari dev/input tanpa MENCURI FOKUS!
                 // Uses Shizuku to get process with root/shell privileges!
-                evdevProcess = rikka.shizuku.Shizuku.newProcess(arrayOf("sh", "-c", "getevent -l"), null, null)
+                evdevProcess = rikka.shizuku.Shizuku.newProcess(arrayOf("sh", "-c", "getevent -l"), null as Array<String>?, null as String?)
                 val reader = BufferedReader(InputStreamReader(evdevProcess!!.inputStream))
-                var line: String?
+                var line: String? = null
                 
                 var lStickX = 0f
                 var lStickY = 0f

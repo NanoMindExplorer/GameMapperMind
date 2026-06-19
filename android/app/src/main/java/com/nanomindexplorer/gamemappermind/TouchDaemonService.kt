@@ -1,5 +1,6 @@
 package com.nanomindexplorer.gamemappermind
 
+import android.app.Service
 import android.content.Intent
 import android.hardware.input.InputManager
 import android.os.IBinder
@@ -10,7 +11,7 @@ import android.view.InputDevice
 import android.view.MotionEvent
 import rikka.shizuku.Shizuku
 
-class TouchDaemonService : Shizuku.UserService() {
+class TouchDaemonService : Service() {
 
     private val touchStub = object : ITouchService.Stub() {
         override fun touchDown(pointerId: Int, x: Float, y: Float) {

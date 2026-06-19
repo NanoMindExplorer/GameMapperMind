@@ -10,9 +10,4 @@ Aplikasi pemetaan gamepad (Keymapper) untuk menghubungkan kontroler fisik dengan
 - **Injeksi Sentuhan Tanpa Root**: Menggunakan Shizuku untuk mensimulasikan sentuhan layar yang responsif dan aman tanpa perlu root.
 - **Multi Profil**: Simpan berbagai konfigurasi kontrol.
 
-## Build Instruksi
-Untuk kompilasi penuh dan pembuatan APK:
-```bash
-npm run cap:build
-cd android && ./gradlew assembleDebug
 ```

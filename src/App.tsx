@@ -5,8 +5,8 @@
  */
 
 import React from 'react';
-import {
-  GamepadProfile, GamepadMacro, ShizukuState, OnboardingState, GameDetectionEvent
+import { 
+  GamepadProfile, GamepadMacro, ShizukuState 
 } from './types';
 import { INITIAL_PROFILES, INITIAL_MACROS } from './defaults';
 import ShizukuPanel from './components/ShizukuPanel';
@@ -15,105 +15,20 @@ import MacroEngine from './components/MacroEngine';
 import GamepadTester from './components/GamepadTester';
 import GameSelector from './components/GameSelector';
 import CreditsPanel from './components/CreditsPanel';
-import Onboarding from './components/Onboarding';
 
-import {
-  Terminal, Shield, Settings, Activity, Compass, Cpu, HelpCircle,
+import { 
+  Terminal, Shield, Settings, Activity, Compass, Cpu, HelpCircle, 
   ChevronRight, Sparkles, BookOpen, Layers, Bot, ShieldAlert, Heart
 } from 'lucide-react';
 import AppIcon from '../icon.svg';
 
-import { useShizuku, normalizeHardwareKey } from './hooks/useShizuku';
+import { useShizuku } from './hooks/useShizuku';
 import { useGamepad } from './hooks/useGamepad';
-import { useGamepadLoop } from './hooks/useGamepadLoop';
 import { useInputInjector } from './hooks/useInputInjector';
-import { useGameDetection } from './hooks/useGameDetection';
-import { Capacitor } from '@capacitor/core';
-
-/**
- * Detect effective screen size accounting for:
- * - System UI (status bar, nav bar) via availWidth/availHeight
- * - Orientation via window.screen.orientation.type
- * - Safe area insets (notch, cutout) via CSS env() computation
- *
- * Returns landscape-normalized dimensions so coordinate math stays
- * correct regardless of device rotation. Safe-area insets are subtracted
- * from the available dimensions to ensure touch injection never targets
- * pixels hidden under notches or system bars.
- *
- * Best logical algorithm:
- *   1. Read availWidth/availHeight (excludes system UI; falls back to
- *      width/height on browsers that don't support avail*).
- *   2. Detect orientation via the standard Orientation API, with a
- *      dimension-comparison fallback for older browsers.
- *   3. Probe CSS env(safe-area-inset-*) by inserting a hidden element
- *      and reading its computed style. The browser resolves env() only
- *      in a layout context, so we MUST mount the probe to the DOM.
- *   4. Normalize to landscape dimensions (width = larger axis) so game
- *      profiles always use a consistent coordinate system.
- *   5. Subtract safe-area insets from the normalized dimensions to get
- *      the effective drawable area.
- */
-function getEffectiveScreenSize() {
-  // Step 1: Available dimensions (excludes system UI).
-  const availW = window.screen.availWidth || window.screen.width;
-  const availH = window.screen.availHeight || window.screen.height;
-
-  // Step 2: Orientation detection with fallback.
-  const orientationType =
-    (typeof window.screen.orientation !== 'undefined' && window.screen.orientation && window.screen.orientation.type) || '';
-  const isLandscape = orientationType.indexOf('landscape') !== -1 || availW > availH;
-
-  // Step 3: Probe CSS env(safe-area-inset-*) values.
-  let safeLeft = 0;
-  let safeTop = 0;
-  let safeRight = 0;
-  let safeBottom = 0;
-  try {
-    const probe = document.createElement('div');
-    probe.style.position = 'fixed';
-    probe.style.left = 'env(safe-area-inset-left)';
-    probe.style.top = 'env(safe-area-inset-top)';
-    probe.style.right = 'env(safe-area-inset-right)';
-    probe.style.bottom = 'env(safe-area-inset-bottom)';
-    probe.style.visibility = 'hidden';
-    probe.style.pointerEvents = 'none';
-    probe.style.width = '0';
-    probe.style.height = '0';
-    document.body.appendChild(probe);
-    const cs = window.getComputedStyle(probe);
-    safeLeft = parseFloat(cs.left) || 0;
-    safeTop = parseFloat(cs.top) || 0;
-    safeRight = parseFloat(cs.right) || 0;
-    safeBottom = parseFloat(cs.bottom) || 0;
-    document.body.removeChild(probe);
-  } catch (e) {
-    // env() not supported (older browsers, headless test env) — fall back to zero insets.
-    safeLeft = 0;
-    safeTop = 0;
-    safeRight = 0;
-    safeBottom = 0;
-  }
-
-  // Step 4: Normalize to landscape dimensions.
-  const rawW = Math.max(availW, availH);
-  const rawH = Math.min(availW, availH);
-
-  // Step 5: Subtract safe-area insets to get the effective drawable area.
-  const effectiveW = Math.max(0, rawW - safeLeft - safeRight);
-  const effectiveH = Math.max(0, rawH - safeTop - safeBottom);
-
-  return {
-    screenW: effectiveW,
-    screenH: effectiveH,
-    isLandscape,
-    safeArea: { left: safeLeft, top: safeTop, right: safeRight, bottom: safeBottom },
-  };
-}
 
 export default function App() {
+  const { checkShizukuStatus, executeShizukuCommand, injectInput, stopDaemon } = useShizuku();
   const { startOverlay, stopOverlay } = useInputInjector();
-  const { stopDaemon, checkShizukuStatus, injectInput } = useShizuku();
   const [shizukuState, setShizukuState] = React.useState<ShizukuState>({
     status: 'DISCONNECTED',
     daemonRunning: false,
@@ -135,63 +50,10 @@ export default function App() {
 
   const [macros, setMacros] = React.useState<GamepadMacro[]>(INITIAL_MACROS);
 
-  // ============================================================
-  // Onboarding state — shown on first launch (or until completed)
-  // ============================================================
-  const [onboardingState, setOnboardingState] = React.useState<OnboardingState | null>(null);
-  const [showOnboarding, setShowOnboarding] = React.useState(false);
-
-  // Load onboarding state from Preferences on mount
-  React.useEffect(() => {
-    import('@capacitor/preferences').then(({ Preferences }) => {
-      Preferences.get({ key: 'gamemapper_onboarding' }).then((res) => {
-        if (res.value) {
-          try {
-            const parsed = JSON.parse(res.value) as OnboardingState;
-            setOnboardingState(parsed);
-            if (!parsed.completed) setShowOnboarding(true);
-          } catch (e) { setShowOnboarding(true); }
-        } else {
-          // First launch — show onboarding
-          setShowOnboarding(true);
-        }
-      }).catch(() => setShowOnboarding(true));
-    }).catch(() => {});
-  }, []);
-
-  const handleOnboardingComplete = async (state: OnboardingState) => {
-    setOnboardingState(state);
-    setShowOnboarding(false);
-    try {
-      const { Preferences } = await import('@capacitor/preferences');
-      await Preferences.set({ key: 'gamemapper_onboarding', value: JSON.stringify(state) });
-    } catch (e) { console.warn('Failed to persist onboarding state', e); }
-    handleLogMessage('SYSTEM: Onboarding completed. Welcome to GameMapperMind!');
-  };
-
-  const handleOnboardingSkip = async () => {
-    const skipped: OnboardingState = {
-      completed: false,
-      currentStep: 0,
-      steps: {
-        welcome: false, installShizuku: false, grantPermissions: false,
-        connectGamepad: false, calibrateProfile: false,
-      },
-      shizukuSkipped: true,
-    };
-    setOnboardingState(skipped);
-    setShowOnboarding(false);
-    try {
-      const { Preferences } = await import('@capacitor/preferences');
-      await Preferences.set({ key: 'gamemapper_onboarding', value: JSON.stringify(skipped) });
-    } catch (e) {}
-    handleLogMessage('SYSTEM: Onboarding skipped. You can re-run it from settings.');
-  };
-
   // Persistence
   React.useEffect(() => {
     import('@capacitor/preferences').then(({ Preferences }) => {
-      Preferences.get({ key: 'gamemapper_profiles' }).then((res) => {
+      Preferences.get({ key: 'nexion_profiles' }).then((res) => {
         if (res.value) {
           try {
             const parsed = JSON.parse(res.value);
@@ -202,13 +64,13 @@ export default function App() {
         }
       }).catch(e => console.warn('capacitor get profiles error', e));
 
-      Preferences.get({ key: 'gamemapper_active_profile' }).then((res) => {
+      Preferences.get({ key: 'nexion_active_profile' }).then((res) => {
         if (res.value) {
           setActiveProfileId(res.value);
         }
       }).catch(e => console.warn('capacitor get active profile error', e));
 
-      Preferences.get({ key: 'gamemapper_macros' }).then((res) => {
+      Preferences.get({ key: 'nexion_macros' }).then((res) => {
         if (res.value) {
           try {
             const parsed = JSON.parse(res.value);
@@ -219,7 +81,7 @@ export default function App() {
         }
       }).catch(e => console.warn('capacitor get macros error', e));
 
-      Preferences.get({ key: 'gamemapper_settings' }).then((res) => {
+      Preferences.get({ key: 'nexion_settings' }).then((res) => {
         if (res.value) {
            try {
              const parsed = JSON.parse(res.value);
@@ -234,14 +96,14 @@ export default function App() {
   const saveProfilesToStorage = async (newProfiles: GamepadProfile[]) => {
     try {
       const { Preferences } = await import('@capacitor/preferences');
-      await Preferences.set({ key: 'gamemapper_profiles', value: JSON.stringify(newProfiles) });
+      await Preferences.set({ key: 'nexion_profiles', value: JSON.stringify(newProfiles) });
     } catch(e) { console.warn('Failed to save profiles', e); }
   };
 
   const saveMacrosToStorage = async (newMacros: GamepadMacro[]) => {
     try {
       const { Preferences } = await import('@capacitor/preferences');
-      await Preferences.set({ key: 'gamemapper_macros', value: JSON.stringify(newMacros) });
+      await Preferences.set({ key: 'nexion_macros', value: JSON.stringify(newMacros) });
     } catch(e) { console.warn('Failed to save macros', e); }
   };
 
@@ -251,7 +113,7 @@ export default function App() {
   const saveSettingsToStorage = async (socket: string, polling: number) => {
     try {
       const { Preferences } = await import('@capacitor/preferences');
-      await Preferences.set({ key: 'gamemapper_settings', value: JSON.stringify({ socketIpcName: socket, inputPolling: polling }) });
+      await Preferences.set({ key: 'nexion_settings', value: JSON.stringify({ socketIpcName: socket, inputPolling: polling }) });
     } catch(e) { console.warn('Failed to save settings', e); }
   };
 
@@ -296,7 +158,7 @@ export default function App() {
     setActiveProfileId(id);
     try {
       const { Preferences } = await import('@capacitor/preferences');
-      await Preferences.set({ key: 'gamemapper_active_profile', value: id });
+      await Preferences.set({ key: 'nexion_active_profile', value: id });
     } catch(e) { console.warn('Failed to save active profile', e); }
     syncActiveProfileIdOnServer(id);
   };
@@ -331,10 +193,8 @@ export default function App() {
   const handleGlobalKillSwitch = async () => {
     setIsKilling(true);
     try {
-      // Cancel any in-flight swipe timeouts (Issue #13 fix).
-      cancelPendingSwipes();
-      // Release any allocated button pointers (Issue #12 fix).
-      // Notify macro engine + other listeners.
+      // Simulate hardware interrupt sequence
+      await new Promise(r => setTimeout(r, 600));
       window.dispatchEvent(new CustomEvent('emergency-kill'));
       if (overlayActive) {
         await stopOverlay();
@@ -362,11 +222,7 @@ export default function App() {
   // Query real simulation logs and stats from server, override with Native plugin state if on device
   const fetchStatus = async () => {
     try {
-      // Don't downgrade from CONNECTED to DISCONNECTED during polling
-      // Only upgrade from DISCONNECTED to CONNECTED
-      if (shizukuStateRef.current.status === 'CONNECTED_SHIZUKU') {
-        return; // Already connected, don't re-check (prevents flapping)
-      }
+      // Just re-check native dependencies directly
       const nextState = await checkShizukuStatus(shizukuStateRef.current);
       setShizukuState(nextState);
     } catch (err) {
@@ -388,44 +244,10 @@ export default function App() {
 
   const activeProfile = profiles.find(p => p.id === activeProfileId) || profiles[0];
 
-  // Issue #11 fix: activate useGamepadLoop when Shizuku is connected so the
-  // native GamepadListenerService (evdev) path takes effect. The browser
-  // Gamepad API (useGamepad below) still handles visual feedback + fallback
-  // for dev mode in the browser.
-  const isShizukuConnected = shizukuState.status === 'CONNECTED_SHIZUKU';
-  // Activate gamepad loop when Shizuku is connected OR always (Web Gamepad API fallback)
-  useGamepadLoop(activeProfile, true); // Always active — Shizuku path + Web Gamepad API both work
-
-  // ============================================================
-  // Auto-start game detection — listens to foreground app changes
-  // and auto-switches profile + optionally auto-starts overlay.
-  // ============================================================
-  useGameDetection({
-    profiles,
-    enabled: !showOnboarding,
-    onGameDetected: (event: GameDetectionEvent) => {
-      if (event.matchedProfileId && event.matchedProfileId !== activeProfileId) {
-        handleLogMessage(`[AUTO-DETECT] Foreground: ${event.packageName} → profile ${event.matchedProfileId}`);
-        handleProfileSelect(event.matchedProfileId);
-      } else if (!event.matchedProfileId) {
-        handleLogMessage(`[AUTO-DETECT] Foreground: ${event.packageName} (no matching profile)`);
-      }
-    },
-    onAutoStart: (profile: GamepadProfile) => {
-      handleLogMessage(`[AUTO-START] Activating overlay for ${profile.name}`);
-      if (!overlayActive) {
-        handleToggleOverlay();
-      }
-    },
-  });
-
   const handleInjectionCommand = React.useCallback((cmd: string) => {
-    if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
+    if (typeof window !== 'undefined' && 'Capacitor' in window) {
       if (shizukuState.status === 'CONNECTED_SHIZUKU') {
         injectInput(cmd);
-      } else {
-        // Shizuku not bound — log for user visibility but don't crash.
-        console.warn('[inject] Shizuku not connected; skipping:', cmd);
       }
     } else if (typeof window !== 'undefined' && (window as any).AndroidOverlay) {
       (window as any).AndroidOverlay.onCommand(cmd);
@@ -434,33 +256,17 @@ export default function App() {
     }
   }, [shizukuState.status, injectInput]);
 
-  // Track pending swipe timeouts so the kill-switch can cancel them.
-  // (Issue #13 fix: previously bare setTimeouts could fire after kill.)
-  const swipeTimeoutsRef = React.useRef<ReturnType<typeof setTimeout>[]>([]);
-  const cancelPendingSwipes = React.useCallback(() => {
-    swipeTimeoutsRef.current.forEach(t => clearTimeout(t));
-    swipeTimeoutsRef.current = [];
-  }, []);
-
-  // Issue #14 fix: removed unnecessary `async` keyword — no awaits inside.
-  const handleGamepadPress = React.useCallback((button: string, isPressed: boolean) => {
-    // Normalize the Web Gamepad API name (e.g. "A") to the profile dialect
-    // ("BUTTON_A") so OverlayWysiwyg's active-keys check matches. (Issue #29 fix.)
-    const normalizedKey = normalizeHardwareKey(button);
+  const handleGamepadPress = React.useCallback(async (button: string, isPressed: boolean) => {
     setActiveKeys(prev => {
-      if (isPressed && !prev.includes(normalizedKey)) return [...prev, normalizedKey];
-      if (!isPressed && prev.includes(normalizedKey)) return prev.filter(k => k !== normalizedKey);
+      if (isPressed && !prev.includes(button)) return [...prev, button];
+      if (!isPressed && prev.includes(button)) return prev.filter(k => k !== button);
       return prev;
     });
 
-    // When Shizuku is connected, useGamepadLoop already handles injection via
-    // the native evdev path — we only update visual state here to avoid
-    // double-injecting the same event.
-    if (isShizukuConnected) return;
-
-    const mapping = activeProfile.buttons.find(b => b.mappedKey === normalizedKey);
+    const mapping = activeProfile.buttons.find(b => b.mappedKey === button);
     if (mapping) {
-      const { screenW, screenH } = getEffectiveScreenSize();
+      const screenW = Math.max(window.screen.width, window.screen.height);
+      const screenH = Math.min(window.screen.width, window.screen.height);
       const x = Math.round((mapping.x / 100) * screenW);
       const y = Math.round((mapping.y / 100) * screenH);
 
@@ -476,52 +282,37 @@ export default function App() {
         else if (mapping.swipeDirection === 'LEFT') targetX = Math.max(0, x - distance);
         else if (mapping.swipeDirection === 'RIGHT') targetX = Math.min(screenW, x + distance);
 
-        // Issue #13 fix: track swipe timeouts so kill-switch can cancel them.
-        handleInjectionCommand(`down ${x} ${y} ${normalizedKey}`);
-        swipeTimeoutsRef.current.push(
-          setTimeout(() => handleInjectionCommand(`move ${Math.round((x + targetX) / 2)} ${Math.round((y + targetY) / 2)} ${normalizedKey}`), 30)
-        );
-        swipeTimeoutsRef.current.push(
-          setTimeout(() => handleInjectionCommand(`move ${targetX} ${targetY} ${normalizedKey}`), 60)
-        );
-        swipeTimeoutsRef.current.push(
-          setTimeout(() => {
-            handleInjectionCommand(`up ${targetX} ${targetY} ${normalizedKey}`);
-            swipeTimeoutsRef.current = swipeTimeoutsRef.current.filter(t => t);
-          }, 90)
-        );
+        // Execute fast swipe sequence
+        handleInjectionCommand(`down ${x} ${y}`);
+        setTimeout(() => handleInjectionCommand(`move ${Math.round((x + targetX) / 2)} ${Math.round((y + targetY) / 2)}`), 30);
+        setTimeout(() => handleInjectionCommand(`move ${targetX} ${targetY}`), 60);
+        setTimeout(() => handleInjectionCommand(`up ${targetX} ${targetY}`), 90);
         return;
       }
 
-      // Issue #12 fix: pass virtualKey so useShizuku can allocate a unique
-      // pointer ID per button press (multi-touch support).
       if (isPressed) {
-        handleInjectionCommand(`down ${x} ${y} ${normalizedKey}`);
+        handleInjectionCommand(`down ${x} ${y}`);
       } else {
-        handleInjectionCommand(`up ${x} ${y} ${normalizedKey}`);
+        handleInjectionCommand(`up ${x} ${y}`);
       }
     }
-  }, [activeProfile, handleInjectionCommand, isShizukuConnected]);
+  }, [activeProfile, handleInjectionCommand]);
 
   const activeStickPointer = React.useRef<{
     l_id: string | null; l_lastX: number; l_lastY: number;
     r_id: string | null; r_lastX: number; r_lastY: number;
   }>({ l_id: null, l_lastX: 0, l_lastY: 0, r_id: null, r_lastX: 0, r_lastY: 0 });
 
-  const handleGamepadAxis = React.useCallback((axes: { lx: number, ly: number, rx: number, ry: number }) => {
+  const handleGamepadAxis = React.useCallback(async (axes: { lx: number, ly: number, rx: number, ry: number }) => {
     setActiveAxes(axes);
-
-    // Same as button press: when Shizuku is connected, useGamepadLoop already
-    // drives stick injection via the native evdev path. Skip to avoid duplicate.
-    if (isShizukuConnected) return;
-
     const lStickMapping = activeProfile.buttons.find(b => b.mappedKey === 'L_STICK');
     const rStickMapping = activeProfile.buttons.find(b => b.mappedKey === 'R_STICK');
-    const { screenW, screenH } = getEffectiveScreenSize();
     
     // Process Left Stick
     if (lStickMapping) {
       const isNeutral = Math.abs(axes.lx) < 0.1 && Math.abs(axes.ly) < 0.1;
+      const screenW = Math.max(window.screen.width, window.screen.height);
+      const screenH = Math.min(window.screen.width, window.screen.height);
       const baseX = Math.round((lStickMapping.x / 100) * screenW);
       const baseY = Math.round((lStickMapping.y / 100) * screenH);
 
@@ -582,18 +373,9 @@ export default function App() {
         }
       }
     }
-  }, [activeProfile, shizukuState.status, injectInput, isShizukuConnected]);
+  }, [activeProfile, shizukuState.status, injectInput]);
 
-  const handleGamepadAxisWrapper = React.useCallback((axes: number[]) => {
-    // useGamepad hook calls axisCallback with a 4-element array.
-    handleGamepadAxis({ lx: axes[0] ?? 0, ly: axes[1] ?? 0, rx: axes[2] ?? 0, ry: axes[3] ?? 0 });
-  }, [handleGamepadAxis]);
-
-  const handleGamepadPressWrapper = React.useCallback((button: string, isPressed: boolean, _value: number) => {
-    handleGamepadPress(button, isPressed);
-  }, [handleGamepadPress]);
-
-  const { connectedGamepad } = useGamepad(handleGamepadPressWrapper, handleGamepadAxisWrapper);
+  const { connectedGamepad } = useGamepad(handleGamepadPress, handleGamepadAxis);
 
   const handleLogMessage = React.useCallback((msg: string) => {
     setShizukuState(prev => {
@@ -605,8 +387,6 @@ export default function App() {
   }, []);
 
   const handleKillSwitch = async () => {
-    cancelPendingSwipes();
-    window.dispatchEvent(new CustomEvent('emergency-kill'));
     if (overlayActive) {
       await stopOverlay();
       setOverlayActive(false);
@@ -646,19 +426,6 @@ export default function App() {
           isNativeOverlay={true}
         />
       </div>
-    );
-  }
-
-  // ============================================================
-  // Onboarding overlay — shown on first launch (or until completed)
-  // ============================================================
-  if (showOnboarding) {
-    return (
-      <Onboarding
-        shizukuState={shizukuState}
-        onComplete={handleOnboardingComplete}
-        onSkip={handleOnboardingSkip}
-      />
     );
   }
 
@@ -951,7 +718,7 @@ export default function App() {
       <footer className="border-t border-slate-900 py-6 bg-slate-950 mt-auto text-center text-[10px] font-mono text-slate-500">
         <div className="max-w-7xl mx-auto px-4 flex flex-col items-center gap-3">
           <div className="flex flex-col sm:flex-row justify-between items-center w-full gap-3">
-             <span>🎮 Gamepad Mapper Mind – GameMapper Orchestrator Platform</span>
+             <span>🎮 Gamepad Mapper Mind – Nexion Orchestrator Platform</span>
              <span className="text-indigo-400/80">Author Signature: @author NanoMind Explorer</span>
              <span>© 2026 NanoMind Systems Inc.</span>
           </div>

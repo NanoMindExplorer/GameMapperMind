@@ -160,20 +160,12 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
     };
 
     const handleConnect = (e: GamepadEvent) => {
-      const id = (e.gamepad.id || '').toLowerCase();
       let msg = `[HARDWARE] Physical gamepad connected: ${e.gamepad.id} (index: ${e.gamepad.index})`;
-      // Issue #17 fix: detect any known high-performance controller brand,
-      // not just Vortex XP107. Xbox, DualSense, Razer Kishi, 8BitDo, etc.
-      const knownBoost =
-        id.includes('vortex') || id.includes('xp107') ||
-        id.includes('xbox')  || id.includes('dualsense') || id.includes('sony') ||
-        id.includes('razer') || id.includes('kishi') ||
-        id.includes('8bitdo') || id.includes('gamesir') || id.includes('guli');
-      if (knownBoost) {
-        msg = `[HARDWARE] ⚡ HIGH-PERFORMANCE CONTROLLER DETECTED: ${e.gamepad.id}. Mengaktifkan akselerasi native dan polling rate maksimal 1000Hz secara otomatis!`;
-        setLowLatencyEnabled(true);
-        setSelectedPollingRate(1000);
-        setDirectInputBypass(true);
+      if ((e.gamepad.id || '').toLowerCase().includes('vortex') || (e.gamepad.id || '').toLowerCase().includes('xp107')) {
+         msg = `[HARDWARE] ⚡ VORTEX XP107 DUALMODE TERDETEKSI: ${e.gamepad.id}. Mengaktifkan akselerasi native dan polling rate maksimal 1000Hz secara otomatis!`;
+         setLowLatencyEnabled(true);
+         setSelectedPollingRate(1000);
+         setDirectInputBypass(true);
       }
       onLogMessage(msg);
     };
@@ -210,48 +202,12 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
   });
 
   // Low-Latency Engine State Configurations (Optimasi Latensi dari Gamepad)
-  // Issue #16 fix: load persisted state from Capacitor Preferences on mount.
   const [lowLatencyEnabled, setLowLatencyEnabled] = React.useState(true);
   const [selectedPollingRate, setSelectedPollingRate] = React.useState<125 | 250 | 500 | 1000>(1000);
   const [directInputBypass, setDirectInputBypass] = React.useState(true);
   const [threadPriorityBoost, setThreadPriorityBoost] = React.useState(true);
   const [bleConnectionTuning, setBleConnectionTuning] = React.useState(true);
   const [optimizeJitter, setOptimizeJitter] = React.useState(true);
-
-  // Issue #20 fix: surface "no gyro detected" banner.
-  const [hasRealSensor, setHasRealSensor] = React.useState(false);
-
-  React.useEffect(() => {
-    let cancelled = false;
-    import('@capacitor/preferences').then(({ Preferences }) => {
-      Preferences.get({ key: 'gamemapper_tester_settings' }).then((res) => {
-        if (cancelled || !res.value) return;
-        try {
-          const parsed = JSON.parse(res.value);
-          if (typeof parsed.lowLatencyEnabled === 'boolean') setLowLatencyEnabled(parsed.lowLatencyEnabled);
-          if (typeof parsed.selectedPollingRate === 'number') setSelectedPollingRate(parsed.selectedPollingRate);
-          if (typeof parsed.directInputBypass === 'boolean') setDirectInputBypass(parsed.directInputBypass);
-          if (typeof parsed.threadPriorityBoost === 'boolean') setThreadPriorityBoost(parsed.threadPriorityBoost);
-          if (typeof parsed.bleConnectionTuning === 'boolean') setBleConnectionTuning(parsed.bleConnectionTuning);
-          if (typeof parsed.optimizeJitter === 'boolean') setOptimizeJitter(parsed.optimizeJitter);
-        } catch (e) { /* ignore */ }
-      }).catch(() => {});
-    }).catch(() => {});
-    return () => { cancelled = true; };
-  }, []);
-
-  // Persist whenever any of these change.
-  React.useEffect(() => {
-    import('@capacitor/preferences').then(({ Preferences }) => {
-      Preferences.set({
-        key: 'gamemapper_tester_settings',
-        value: JSON.stringify({
-          lowLatencyEnabled, selectedPollingRate, directInputBypass,
-          threadPriorityBoost, bleConnectionTuning, optimizeJitter
-        })
-      }).catch(() => {});
-    }).catch(() => {});
-  }, [lowLatencyEnabled, selectedPollingRate, directInputBypass, threadPriorityBoost, bleConnectionTuning, optimizeJitter]);
 
   const calculatedLatency = React.useMemo(() => {
     if (!lowLatencyEnabled) return 12.5; // standard lag
@@ -314,13 +270,12 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
     const handleDeviceMotion = (e: DeviceMotionEvent) => {
       if (e.rotationRate && (e.rotationRate.alpha !== null || e.rotationRate.beta !== null || e.rotationRate.gamma !== null)) {
         useRealSensor = true;
-        setHasRealSensor(true);
         baseMotionZ = e.rotationRate.alpha || 0;
         baseMotionX = e.rotationRate.beta || 0;
         baseMotionY = e.rotationRate.gamma || 0;
       } else if (e.accelerationIncludingGravity && (e.accelerationIncludingGravity.x !== null)) {
+        // Fallback to accelerometer if gyro missing
         useRealSensor = true;
-        setHasRealSensor(true);
         baseMotionX = e.accelerationIncludingGravity.x || 0;
         baseMotionY = e.accelerationIncludingGravity.y || 0;
         baseMotionZ = e.accelerationIncludingGravity.z || 0;
@@ -486,7 +441,7 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
         return next;
       });
 
-    }, 16); // Issue #19 fix: 60Hz update rate (was 40ms / 25Hz — too laggy for SNR visual).
+    }, 40); // 25Hz visualization updates
     return () => {
       clearInterval(interval);
       window.removeEventListener('devicemotion', handleDeviceMotion);
@@ -594,8 +549,8 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
 
           {/* Physical Gamepad Detection Status Banner */}
           <div className={`p-3 rounded-lg border transition-all duration-300 ${
-            connectedGamepad
-              ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-300 shadow-md shadow-emerald-500/5'
+            connectedGamepad 
+              ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-300 shadow-md shadow-emerald-500/5' 
               : 'bg-slate-950/80 border-slate-850 text-slate-400'
           }`}>
             <div className="flex items-center justify-between">
@@ -605,16 +560,11 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
                   <span className={`relative inline-flex rounded-full h-2 w-2 ${connectedGamepad ? 'bg-emerald-500' : 'bg-slate-500'}`}></span>
                 </span>
                 <span className="text-[11px] font-medium font-sans">
-                  {connectedGamepad
+                  {connectedGamepad 
                     ? (() => {
                         const id = (connectedGamepad.id || '').toLowerCase();
-                        const knownBoost =
-                          id.includes('vortex') || id.includes('xp107') ||
-                          id.includes('xbox')  || id.includes('dualsense') || id.includes('sony') ||
-                          id.includes('razer') || id.includes('kishi') ||
-                          id.includes('8bitdo') || id.includes('gamesir') || id.includes('guli');
-                        if (knownBoost) {
-                          return <span className="text-emerald-400 font-bold">⚡ HIGH-PERFORMANCE CONTROLLER DETECTED (NATIVE ACCELERATION ENABLED)</span>;
+                        if (id.includes('vortex') || id.includes('xp107')) {
+                          return <span className="text-emerald-400 font-bold">⚡ VORTEX XP107 DUALMODE TERDETEKSI (NATIVE ACCELERATION ENABLED)</span>;
                         }
                         return `Gamepad Terdeteksi: ${connectedGamepad.id}`;
                       })()
@@ -629,18 +579,6 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
               )}
             </div>
           </div>
-
-          {/* Issue #20 fix: show banner when no real IMU sensor is detected. */}
-          {isListening && !hasRealSensor && (
-            <div className="p-3 rounded-lg border bg-amber-950/30 border-amber-900/40 text-amber-300 flex items-start gap-2.5">
-              <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
-              <div className="text-[11px] leading-relaxed">
-                <strong className="font-bold">No Gyro/IMU Detected.</strong> Sensor fusion charts will flatline.
-                On Android, ensure the app has motion-sensor permission and the device has a real gyroscope.
-                On desktop browsers, gyro is unavailable by design.
-              </div>
-            </div>
-          )}
 
           {/* Interactive Gamepad Simulator graphic layout representation */}
           <div className="relative w-full overflow-hidden bg-slate-950 rounded-xl border border-slate-850/80 p-4 shadow-inner">
@@ -771,7 +709,7 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
 
               {/* Middle Logo details */}
               <div className="w-1/3 flex flex-col items-center justify-center space-y-4 sm:space-y-6 z-10 pt-2 sm:pt-4">
-                <div className="font-semibold text-[13px] sm:text-[15px] text-indigo-400 uppercase tracking-widest leading-none drop-shadow-md">GAMEMAPPER</div>
+                <div className="font-semibold text-[13px] sm:text-[15px] text-indigo-400 uppercase tracking-widest leading-none drop-shadow-md">NEXION</div>
                 <div className="flex gap-4 sm:gap-6">
                    {/* Select */}
                    <div className="flex flex-col items-center gap-1.5">
@@ -1011,11 +949,8 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
         <div className="mt-5 p-4 bg-slate-950 rounded-lg border border-slate-850 flex flex-col gap-2 shadow-inner">
           <span className="text-[10px] font-mono font-bold text-slate-500 uppercase">AVAILABLE HARDWARE NODES (/dev/input)</span>
           <div className="space-y-1 max-h-[140px] overflow-y-auto">
-            {/* Issue #21 fix: surface both the static fallback and the live
-                navigator.getGamepads() list so the user actually sees what
-                hardware the browser/native side has detected. */}
             {DEVICE_RAW_NODES.map((node, i) => (
-              <div key={`static-${i}`} className="flex justify-between items-center bg-slate-900/50 p-2 rounded border border-slate-850/80 hover:bg-slate-900 transition-colors">
+              <div key={i} className="flex justify-between items-center bg-slate-900/50 p-2 rounded border border-slate-850/80 hover:bg-slate-900 transition-colors">
                 <span className="text-[10px] font-bold text-slate-300 truncate max-w-[170px]">{node.name}</span>
                 <div className="flex items-center gap-2">
                   <span className="text-[9px] font-mono text-indigo-400 bg-indigo-950/40 px-1.5 py-0.5 rounded border border-indigo-900">{node.type}</span>
@@ -1023,24 +958,6 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
                 </div>
               </div>
             ))}
-            {(() => {
-              const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-              const live: { name: string; index: number; id: string }[] = [];
-              for (let i = 0; i < pads.length; i++) {
-                const gp = pads[i];
-                if (gp) live.push({ name: gp.id || `Gamepad ${i}`, index: gp.index, id: `gp_${i}` });
-              }
-              if (live.length === 0) return null;
-              return live.map((gp) => (
-                <div key={gp.id} className="flex justify-between items-center bg-emerald-950/30 p-2 rounded border border-emerald-900/40">
-                  <span className="text-[10px] font-bold text-emerald-300 truncate max-w-[170px]">{gp.name}</span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[9px] font-mono text-emerald-400 bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-900">LIVE</span>
-                    <span className="text-[9px] font-mono text-slate-500 bg-slate-950 px-1.5 py-0.5 rounded border border-slate-850">idx={gp.index}</span>
-                  </div>
-                </div>
-              ));
-            })()}
           </div>
         </div>
       </div>

@@ -9,7 +9,7 @@ export default defineConfig(() => {
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, '.'),
+        '@': path.resolve(__dirname, './src'),
       },
     },
     build: {
@@ -21,7 +21,7 @@ export default defineConfig(() => {
             'vendor-recharts': ['recharts'],
             'vendor-icons': ['lucide-react'],
             'vendor-capacitor': ['@capacitor/core'],
-            'vendor-motion': ['motion']
+            'vendor-motion': ['framer-motion']
           }
         }
       }
@@ -31,7 +31,7 @@ export default defineConfig(() => {
       // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
-      watch: process.env.DISABLE_HMR === 'true' ? null : {},
+      watch: process.env.DISABLE_HMR === 'true' ? false : {},
     },
   };
 });

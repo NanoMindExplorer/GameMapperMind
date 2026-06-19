@@ -28,6 +28,7 @@
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
 
+        <!-- Shizuku v3 Support -->
         <meta-data android:name="moe.shizuku.client.V3_SUPPORT" android:value="true" />
 
         <service
@@ -41,13 +42,12 @@
         </service>
 
         <service
-            android:name=".daemon.MapperDaemonService"
+            android:name=".GamepadListenerService"
             android:exported="false"
-            android:foregroundServiceType="specialUse"
-            android:stopWithTask="false">
+            android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Gamepad Mapping Daemon"
+                android:value="Gamepad Input Listener"
             />
         </service>
 
@@ -62,29 +62,11 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_config" />
         </service>
-
-        <receiver
-            android:name=".shizuku.BootCompletedReceiver"
-            android:enabled="true"
+        
+        <service
+            android:name=".TouchDaemonService"
             android:exported="true"
-            android:permission="android.permission.RECEIVE_BOOT_COMPLETED">
-            <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED" />
-                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
-                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
-                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
-                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
-            </intent-filter>
-        </receiver>
-
-        <receiver
-            android:name=".shizuku.FixShizukuReceiver"
-            android:enabled="true"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="com.nanomindexplorer.gamemappermind.FIX_SHIZUKU_NOW" />
-            </intent-filter>
-        </receiver>
+            android:permission="moe.shizuku.manager.permission.API_V23" />
 
         <provider
             android:name="rikka.shizuku.ShizukuProvider"
@@ -95,17 +77,17 @@
             android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
     </application>
 
+    <!-- Permissions -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <uses-permission android:name="android.permission.REQUEST_FOREGROUND_SERVICE_SPECIAL_USE" />
-    <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
 
+    <!-- Shizuku Permission -->
+    <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
+    
+    <!-- Allows the app to see Shizuku on Android 11+ -->
     <queries>
         <provider android:authorities="moe.shizuku.manager.shizuku.provider" />
         <package android:name="moe.shizuku.privileged.api" />

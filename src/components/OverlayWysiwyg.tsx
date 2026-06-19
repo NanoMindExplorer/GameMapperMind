@@ -10,14 +10,6 @@ import {
   Play, Settings, RotateCcw, Save, Trash2, Eye, EyeOff, Plus, Check, ChevronDown, Move, Maximize2, Layers, X
 } from 'lucide-react';
 import AppIcon from '../../icon.svg';
-// FASE 5.1: Coordinate utilities extracted to src/utils/coordinateConversion.ts
-// for unit testing. Import instead of defining inline.
-import {
-  getEffectiveScreenRect,
-  percentToAbsolutePixels,
-  pixelsToPercent,
-  type ScreenRect,
-} from '../utils/coordinateConversion';
 
 interface OverlayWysiwygProps {
   activeProfile: GamepadProfile;
@@ -28,19 +20,6 @@ interface OverlayWysiwygProps {
   isNativeOverlay?: boolean;
 }
 
-// ============================================================
-// Coordinate Utility Functions — Precision Screen Mapping
-// ============================================================
-// These functions are now imported from src/utils/coordinateConversion.ts
-// to enable unit testing. The original implementations remain in this
-// file as re-exports for backward compatibility with any code that
-// imports from this module directly.
-// ============================================================
-
-// Re-export for backward compatibility (callers that imported these
-// from OverlayWysiwyg before FASE 5.1).
-export { getEffectiveScreenRect, percentToAbsolutePixels, pixelsToPercent, type ScreenRect };
-
 export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMessage, activeKeys = [], activeAxes = {lx:0, ly:0, rx:0, ry:0}, isNativeOverlay = false }: OverlayWysiwygProps) {
   const [showConfig, setShowConfig] = React.useState(true);
   const [selectedButtonId, setSelectedButtonId] = React.useState<string | null>(null);
@@ -48,9 +27,9 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
   const [customScreenshotUrl, setCustomScreenshotUrl] = React.useState<string | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = React.useState(false);
-  const [gamemapperPos, setGamemapperPos] = React.useState({ x: 50, y: 10 });
-  const [isDraggingGamemapper, setIsDraggingGamemapper] = React.useState(false);
-  const gamemapperDragHasMoved = React.useRef(false);
+  const [nexionPos, setNexionPos] = React.useState({ x: 50, y: 10 });
+  const [isDraggingNexion, setIsDraggingNexion] = React.useState(false);
+  const nexionDragHasMoved = React.useRef(false);
   const [showPalette, setShowPalette] = React.useState(false);
 
     // Sync opacity local state with profile if provided on load
@@ -92,16 +71,16 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
 
   const handleDragEnd = () => {
     setIsDragging(false);
-    setIsDraggingGamemapper(false);
+    setIsDraggingNexion(false);
   };
 
   const handleDragMove = (e: React.MouseEvent) => {
-    if (isDraggingGamemapper) {
-      gamemapperDragHasMoved.current = true;
+    if (isDraggingNexion) {
+      nexionDragHasMoved.current = true;
       const container = e.currentTarget.getBoundingClientRect();
       const x = Math.max(0, Math.min(100, ((e.clientX - container.left) / container.width) * 100));
       const y = Math.max(0, Math.min(100, ((e.clientY - container.top) / container.height) * 100));
-      setGamemapperPos({ x, y });
+      setNexionPos({ x, y });
       return;
     }
 
@@ -260,7 +239,7 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
     };
   }, []);
 
-  const forcePointerEvents = showPalette || isDragging || isDraggingGamemapper;
+  const forcePointerEvents = showPalette || isDragging || isDraggingNexion;
 
   const containerClass = isNativeOverlay 
     ? `relative w-screen h-screen overflow-hidden group select-none touch-none ${forcePointerEvents ? 'pointer-events-auto bg-slate-900/60 backdrop-blur-sm' : 'pointer-events-none'}`
@@ -326,22 +305,16 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
                   // Preview immediately
                   setCustomScreenshotUrl(url);
                   setScreenshotMode('custom');
-
-                  // Issue #30 fix: previously we embedded the entire JPEG as a
-                  // data URL inside the profile, which could push Capacitor
-                  // Preferences past its practical 1MB limit and lag the UI.
-                  // Now we downscale aggressively for in-memory display, and
-                  // store only a lightweight "custom" flag in the profile.
-                  // The blob URL survives for the session; if the user closes
-                  // the app they can re-upload.
+                  
+                  // Downscale for storage to prevent quota errors
                   const img = new Image();
                   img.onload = () => {
                     const canvas = document.createElement('canvas');
-                    const MAX_WIDTH = 960;   // smaller cap to keep memory low
-                    const MAX_HEIGHT = 540;
+                    const MAX_WIDTH = 1280;
+                    const MAX_HEIGHT = 720;
                     let width = img.width;
                     let height = img.height;
-
+                    
                     if (width > height) {
                       if (width > MAX_WIDTH) {
                         height *= MAX_WIDTH / width;
@@ -353,38 +326,33 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
                         height = MAX_HEIGHT;
                       }
                     }
-
+                    
                     canvas.width = Math.round(width);
                     canvas.height = Math.round(height);
                     const ctx = canvas.getContext('2d');
                     ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-                    // Revoke the previous blob URL, then create a fresh one from
-                    // the downscaled canvas — keeps the in-memory image small.
+                    
+                    // low quality JPEG is fine for background mapping reference
+                    const base64Url = canvas.toDataURL('image/jpeg', 0.6);
+                    onUpdateProfile({ 
+                      ...activeProfile, 
+                      screenshotMode: 'custom', 
+                      customScreenshotUrl: base64Url 
+                    });
+                    
+                    // replace local url with compressed base64 so it persists properly
+                    setCustomScreenshotUrl(base64Url);
                     URL.revokeObjectURL(url);
-                    canvas.toBlob((blob) => {
-                      if (!blob) return;
-                      const smallUrl = URL.createObjectURL(blob);
-                      setCustomScreenshotUrl(smallUrl);
-                      // Persist only the mode flag (tiny string). We don't
-                      // store the image itself in Preferences anymore.
-                      onUpdateProfile({
-                        ...activeProfile,
-                        screenshotMode: 'custom',
-                        customScreenshotUrl: undefined,
-                      });
-                      onLogMessage(`SCREEN CONFIG: Custom screenshot loaded (in-memory only; not persisted across app restarts).`);
-                    }, 'image/jpeg', 0.55);
                   };
                   img.src = url;
-
+                  
                   onLogMessage(`SCREEN CONFIG: Added custom screenshot background.`);
                 } else if (screenshotMode === 'custom' && !customScreenshotUrl) {
                   setScreenshotMode('genshin');
-                  onUpdateProfile({
-                    ...activeProfile,
-                    screenshotMode: 'genshin',
-                    customScreenshotUrl: undefined
+                  onUpdateProfile({ 
+                    ...activeProfile, 
+                    screenshotMode: 'genshin', 
+                    customScreenshotUrl: undefined 
                   });
                 }
               }}
@@ -455,13 +423,13 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
           onMouseLeave={handleDragEnd}
           // Added touch events for mobile compatibility
           onTouchMove={(e) => {
-            if (isDraggingGamemapper) {
-              gamemapperDragHasMoved.current = true;
+            if (isDraggingNexion) {
+              nexionDragHasMoved.current = true;
               const touch = e.touches[0];
               const container = e.currentTarget.getBoundingClientRect();
               const x = Math.max(0, Math.min(100, ((touch.clientX - container.left) / container.width) * 100));
               const y = Math.max(0, Math.min(100, ((touch.clientY - container.top) / container.height) * 100));
-              setGamemapperPos({ x, y });
+              setNexionPos({ x, y });
               return;
             }
             if (!isDragging || !selectedButtonId) return;
@@ -481,25 +449,25 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
             <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(255,255,255,0.015)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.015)_1px,transparent_1px)] bg-[size:24px_24px] opacity-100" />
           )}
 
-          {/* Floating Action Button to toggle Palette (GameMapper Hub) */}
+          {/* Floating Action Button to toggle Palette (Nexion Hub) */}
           {!isNativeOverlay && (
             <div 
               className={`absolute z-50 shadow-[0_0_15px_rgba(99,102,241,0.6)] cursor-pointer pointer-events-auto flex flex-col items-center select-none touch-none ${showPalette ? 'scale-110' : 'opacity-70 flex hover:opacity-100'}`}
-              style={{ left: `${gamemapperPos.x}%`, top: `${gamemapperPos.y}%`, transform: 'translate(-50%, -50%)', transition: isDraggingGamemapper ? 'none' : 'opacity 0.3s' }}
+              style={{ left: `${nexionPos.x}%`, top: `${nexionPos.y}%`, transform: 'translate(-50%, -50%)', transition: isDraggingNexion ? 'none' : 'opacity 0.3s' }}
               onMouseDown={(e) => {
                 e.stopPropagation();
-                gamemapperDragHasMoved.current = false;
-                setIsDraggingGamemapper(true);
+                nexionDragHasMoved.current = false;
+                setIsDraggingNexion(true);
               }}
               onTouchStart={(e) => {
                 e.stopPropagation();
-                gamemapperDragHasMoved.current = false;
-                setIsDraggingGamemapper(true);
+                nexionDragHasMoved.current = false;
+                setIsDraggingNexion(true);
               }}
               onClick={(e) => {
                 e.stopPropagation();
-                if (gamemapperDragHasMoved.current) {
-                  gamemapperDragHasMoved.current = false;
+                if (nexionDragHasMoved.current) {
+                  nexionDragHasMoved.current = false;
                   return;
                 }
                 if (showPalette) {
@@ -509,9 +477,9 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
               }}
             >
                <div className={`w-12 h-12 ${showPalette ? 'bg-indigo-600' : 'bg-slate-900/80'} rounded-full border-2 ${showPalette ? 'border-indigo-300' : 'border-indigo-500'} flex items-center justify-center backdrop-blur shadow-xl overflow-hidden hover:bg-indigo-500 transition-colors`}>
-                 <img src={AppIcon} alt="GameMapper" className={`w-7 h-7 ${showPalette ? 'opacity-100' : 'opacity-80'}`} />
+                 <img src={AppIcon} alt="Nexion" className={`w-7 h-7 ${showPalette ? 'opacity-100' : 'opacity-80'}`} />
                </div>
-               {!showPalette && <div className="text-[9px] font-bold tracking-widest text-indigo-300 mt-2 drop-shadow-md text-center bg-slate-900/80 px-2.5 py-0.5 rounded-full border border-indigo-500/40">GAMEMAPPER</div>}
+               {!showPalette && <div className="text-[9px] font-bold tracking-widest text-indigo-300 mt-2 drop-shadow-md text-center bg-slate-900/80 px-2.5 py-0.5 rounded-full border border-indigo-500/40">NEXION</div>}
             </div>
           )}
 
@@ -771,14 +739,22 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
                   if (!isNativeOverlay || showPalette) {
                     handleDragStart(e, btn.id);
                   } else {
-                    const { x: injectX, y: injectY } = percentToAbsolutePixels(btn.x, btn.y);
-                    if (window.AndroidOverlay) window.AndroidOverlay.onCommand(`down ${injectX} ${injectY} ${btn.mappedKey}`);
+                    const ratio = window.devicePixelRatio || 1;
+                    const screenW = Math.max(window.screen.width, window.screen.height);
+                    const screenH = Math.min(window.screen.width, window.screen.height);
+                    const injectX = Math.round((btn.x / 100) * screenW * ratio);
+                    const injectY = Math.round((btn.y / 100) * screenH * ratio);
+                    if (window.AndroidOverlay) window.AndroidOverlay.onCommand(`down ${injectX} ${injectY}`);
                   }
                 }}
                 onMouseUp={(e) => {
                   if (isNativeOverlay && !showPalette) {
-                    const { x: injectX, y: injectY } = percentToAbsolutePixels(btn.x, btn.y);
-                    if (window.AndroidOverlay) window.AndroidOverlay.onCommand(`up ${injectX} ${injectY} ${btn.mappedKey}`);
+                    const ratio = window.devicePixelRatio || 1;
+                    const screenW = Math.max(window.screen.width, window.screen.height);
+                    const screenH = Math.min(window.screen.width, window.screen.height);
+                    const injectX = Math.round((btn.x / 100) * screenW * ratio);
+                    const injectY = Math.round((btn.y / 100) * screenH * ratio);
+                    if (window.AndroidOverlay) window.AndroidOverlay.onCommand(`up ${injectX} ${injectY}`);
                   }
                 }}
                 onTouchStart={(e) => {
@@ -787,24 +763,32 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
                     setSelectedButtonId(btn.id);
                     setIsDragging(true);
                   } else {
-                    const { x: injectX, y: injectY } = percentToAbsolutePixels(btn.x, btn.y);
-                    if (window.AndroidOverlay) window.AndroidOverlay.onCommand(`down ${injectX} ${injectY} ${btn.mappedKey}`);
+                    const ratio = window.devicePixelRatio || 1;
+                    const screenW = Math.max(window.screen.width, window.screen.height);
+                    const screenH = Math.min(window.screen.width, window.screen.height);
+                    const injectX = Math.round((btn.x / 100) * screenW * ratio);
+                    const injectY = Math.round((btn.y / 100) * screenH * ratio);
+                    if (window.AndroidOverlay) window.AndroidOverlay.onCommand(`down ${injectX} ${injectY}`);
                   }
                 }}
                 onTouchMove={(e) => {
-                  // Issue #31 fix: stop propagation so the container's touch
-                  // handler doesn't try to drag the gamemapper FAB at the same time.
-                  e.stopPropagation();
                   if (isNativeOverlay && !showPalette) {
-                    const { x: injectX, y: injectY } = percentToAbsolutePixels(btn.x, btn.y);
-                    if (window.AndroidOverlay) window.AndroidOverlay.onCommand(`move ${injectX} ${injectY} ${btn.mappedKey}`);
+                    const ratio = window.devicePixelRatio || 1;
+                    const screenW = Math.max(window.screen.width, window.screen.height);
+                    const screenH = Math.min(window.screen.width, window.screen.height);
+                    const injectX = Math.round((btn.x / 100) * screenW * ratio);
+                    const injectY = Math.round((btn.y / 100) * screenH * ratio);
+                    if (window.AndroidOverlay) window.AndroidOverlay.onCommand(`move ${injectX} ${injectY}`);
                   }
                 }}
                 onTouchEnd={(e) => {
-                  e.stopPropagation();
                   if (isNativeOverlay && !showPalette) {
-                    const { x: injectX, y: injectY } = percentToAbsolutePixels(btn.x, btn.y);
-                    if (window.AndroidOverlay) window.AndroidOverlay.onCommand(`up ${injectX} ${injectY} ${btn.mappedKey}`);
+                    const ratio = window.devicePixelRatio || 1;
+                    const screenW = Math.max(window.screen.width, window.screen.height);
+                    const screenH = Math.min(window.screen.width, window.screen.height);
+                    const injectX = Math.round((btn.x / 100) * screenW * ratio);
+                    const injectY = Math.round((btn.y / 100) * screenH * ratio);
+                    if (window.AndroidOverlay) window.AndroidOverlay.onCommand(`up ${injectX} ${injectY}`);
                   }
                 }}
                 onClick={(e) => { 

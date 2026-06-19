@@ -1,70 +1,93 @@
-import { useEffect, useRef, useState } from "react";
+export interface GamepadState {
+  connected: boolean;
+  axes: readonly number[];
+  buttons: readonly boolean[];
+  id: string;
+}
 
-const BUTTON_MAPPING = [
-  "A", "B", "X", "Y",
-  "LB", "RB", "LT", "RT",
-  "SELECT", "START",
-  "L3", "R3",
-  "UP", "DOWN", "LEFT", "RIGHT"
+export const BUTTON_NAMES = [
+  "A / Cross",
+  "B / Circle",
+  "X / Square",
+  "Y / Triangle",
+  "L1 / LB",
+  "R1 / RB",
+  "L2 / LT",
+  "R2 / RT",
+  "Select / Back",
+  "Start / Forward",
+  "L3 / Left Stick",
+  "R3 / Right Stick",
+  "D-Pad Up",
+  "D-Pad Down",
+  "D-Pad Left",
+  "D-Pad Right",
+  "Home / Guide"
 ];
 
-export function useGamepad(
-  buttonCallback: (buttonName: string, isPressed: boolean, value: number) => void,
-  axisCallback: (axes: number[]) => void
-) {
-  const [connectedGamepad, setConnectedGamepad] = useState<Gamepad | null>(null);
-  const requestRef = useRef<number | undefined>(undefined);
-  const buttonCallbackRef = useRef(buttonCallback);
-  const axisCallbackRef = useRef(axisCallback);
+import { useState, useEffect, useCallback, useRef } from "react";
 
-  useEffect(() => {
-    buttonCallbackRef.current = buttonCallback;
-    axisCallbackRef.current = axisCallback;
-  }, [buttonCallback, axisCallback]);
+export function useGamepad() {
+  const [state, setState] = useState<GamepadState>({
+    connected: false,
+    axes: [],
+    buttons: [],
+    id: ""
+  });
+  
+  const frameRef = useRef<number>(0);
 
-  useEffect(() => {
-    const update = () => {
-      const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
-      let activeGamepad: Gamepad | null = null;
-      
-      for (const gp of gamepads) {
-        if (gp) {
-          activeGamepad = gp;
-          break;
-        }
-      }
-
-      setConnectedGamepad(activeGamepad);
-
-      if (activeGamepad) {
-        activeGamepad.buttons.forEach((button, index) => {
-          const buttonName = BUTTON_MAPPING[index] || `UNKNOWN_${index}`;
-          if (buttonCallbackRef.current) {
-            buttonCallbackRef.current(buttonName, button.pressed, button.value);
-          }
-        });
-
-        if (axisCallbackRef.current && activeGamepad.axes.length >= 4) {
-          axisCallbackRef.current([
-            activeGamepad.axes[0],
-            activeGamepad.axes[1],
-            activeGamepad.axes[2],
-            activeGamepad.axes[3]
-          ]);
-        }
-      }
-
-      requestRef.current = requestAnimationFrame(update);
-    };
-
-    requestRef.current = requestAnimationFrame(update);
-
-    return () => {
-      if (requestRef.current) {
-        cancelAnimationFrame(requestRef.current);
-      }
-    };
+  const pollGamepad = useCallback(() => {
+    const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
+    const gp = gamepads[0];
+    
+    if (gp) {
+      setState({
+        connected: true,
+        id: gp.id,
+        axes: [...gp.axes],
+        buttons: gp.buttons.map(b => b.pressed)
+      });
+    }
+    
+    frameRef.current = requestAnimationFrame(pollGamepad);
   }, []);
 
-  return { connectedGamepad };
+  useEffect(() => {
+    const handleConnect = (e: GamepadEvent) => {
+      console.log("Gamepad connected:", e.gamepad.id);
+      if (frameRef.current === 0) {
+        frameRef.current = requestAnimationFrame(pollGamepad);
+      }
+    };
+    
+    const handleDisconnect = (e: GamepadEvent) => {
+      console.log("Gamepad disconnected:", e.gamepad.id);
+      setState({ connected: false, axes: [], buttons: [], id: "" });
+      if (frameRef.current) {
+        cancelAnimationFrame(frameRef.current);
+        frameRef.current = 0;
+      }
+    };
+
+    window.addEventListener("gamepadconnected", handleConnect);
+    window.addEventListener("gamepaddisconnected", handleDisconnect);
+
+    // Initial check
+    const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
+    if (gamepads[0]) {
+      frameRef.current = requestAnimationFrame(pollGamepad);
+    }
+
+    return () => {
+      window.removeEventListener("gamepadconnected", handleConnect);
+      window.removeEventListener("gamepaddisconnected", handleDisconnect);
+      if (frameRef.current) {
+        cancelAnimationFrame(frameRef.current);
+        frameRef.current = 0;
+      }
+    };
+  }, [pollGamepad]);
+
+  return state;
 }

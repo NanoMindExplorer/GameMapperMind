@@ -6,25 +6,15 @@ import android.graphics.Path
 import android.os.Build
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
-import com.nanomindexplorer.gamemappermind.plugin.GameMapperPlugin
 import java.util.concurrent.ConcurrentHashMap
 
 class TouchAccessibilityService : AccessibilityService() {
 
     companion object {
         var instance: TouchAccessibilityService? = null
-
-        @Volatile private var macroCaptureEnabled: Boolean = false
-        @Volatile private var macroCaptureStart: Long = 0L
-
-        fun setMacroCaptureEnabled(enabled: Boolean, startTimeMs: Long) {
-            macroCaptureEnabled = enabled
-            macroCaptureStart = startTimeMs
-            Log.d("GameMapper", "Macro capture: enabled=$enabled start=$startTimeMs")
-        }
     }
 
-    private val STROKE_DURATION = 100L
+    private val STROKE_DURATION = 100L // required duration for strokes
     private val activeStrokes = ConcurrentHashMap<Int, StrokePointers>()
 
     class StrokePointers {
@@ -40,15 +30,7 @@ class TouchAccessibilityService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (event == null) return
-        // Auto-start game detection — listen for window state changes
-        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            val pkg = event.packageName?.toString() ?: return
-            if (pkg.isNotEmpty() && pkg != "com.nanomindexplorer.gamemappermind") {
-                Log.d("GameMapper", "Foreground app changed: $pkg")
-                GameMapperPlugin.emitForegroundAppChanged(pkg)
-            }
-        }
+        // Not used
     }
 
     override fun onInterrupt() {
@@ -61,22 +43,16 @@ class TouchAccessibilityService : AccessibilityService() {
         return super.onUnbind(intent)
     }
 
-    // NOTE: AccessibilityService does NOT override onTouchEvent.
-    // Real macro capture via MotionEvents requires either:
-    //   1. A custom WindowManager overlay that captures touch events
-    //   2. Using dispatchGesture with GestureResultCallback for synthetic capture
-    //   3. Root access + InputManager event observation
-    // For now, macro capture is UI-driven (manual coordinate input).
-    // Real MotionEvent capture will be implemented in a future version via
-    // an overlay-based interceptor.
-
     fun dispatchTouchDown(pointerId: Int, x: Float, y: Float) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val path = Path().apply { moveTo(x, y); lineTo(x, y) }
+            val path = Path().apply {
+                moveTo(x, y)
+                lineTo(x, y)
+            }
             val stroke = GestureDescription.StrokeDescription(path, 0, STROKE_DURATION, true)
             val gestureBuilder = GestureDescription.Builder()
             gestureBuilder.addStroke(stroke)
-
+            
             val success = dispatchGesture(gestureBuilder.build(), object : GestureResultCallback() {
                 override fun onCompleted(gestureDescription: GestureDescription?) {
                     super.onCompleted(gestureDescription)
@@ -85,7 +61,9 @@ class TouchAccessibilityService : AccessibilityService() {
 
             if (success) {
                 val state = StrokePointers()
-                state.x = x; state.y = y; state.isDown = true
+                state.x = x
+                state.y = y
+                state.isDown = true
                 activeStrokes[pointerId] = state
             }
         }
@@ -94,22 +72,36 @@ class TouchAccessibilityService : AccessibilityService() {
     fun dispatchTouchMove(pointerId: Int, x: Float, y: Float) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val state = activeStrokes[pointerId] ?: return
-            val path = Path().apply { moveTo(state.x, state.y); lineTo(x, y) }
+            
+            val path = Path().apply {
+                moveTo(state.x, state.y)
+                lineTo(x, y)
+            }
+            // continueStroke is actually tricky and in older APIs doesn't work well due to bug 350653948.
+            // But we try to simulate a continuous stroke. 
+            // In a better fallback, we would construct a sequence. For AccessibilityService, 
+            // real-time low-latency moving is fundamentally flawed. Which is why Shizuku is primary.
             val stroke = GestureDescription.StrokeDescription(path, 0, STROKE_DURATION, true)
             val gestureBuilder = GestureDescription.Builder()
             gestureBuilder.addStroke(stroke)
+            
             dispatchGesture(gestureBuilder.build(), null, null)
-            state.x = x; state.y = y
+            state.x = x
+            state.y = y
         }
     }
 
     fun dispatchTouchUp(pointerId: Int) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val state = activeStrokes[pointerId] ?: return
-            val path = Path().apply { moveTo(state.x, state.y) }
+            
+            val path = Path().apply {
+                moveTo(state.x, state.y)
+            }
             val stroke = GestureDescription.StrokeDescription(path, 0, 10, false)
             val gestureBuilder = GestureDescription.Builder()
             gestureBuilder.addStroke(stroke)
+            
             dispatchGesture(gestureBuilder.build(), null, null)
             activeStrokes.remove(pointerId)
         }

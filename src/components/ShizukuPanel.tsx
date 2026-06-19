@@ -12,7 +12,6 @@ import {
 } from 'lucide-react';
 import { ShizukuState } from '../types';
 import { useShizuku } from '../hooks/useShizuku';
-import ShizukuStatusIndicator from './ShizukuStatusIndicator';
 
 interface ShizukuPanelProps {
   shizukuState: ShizukuState;
@@ -58,8 +57,8 @@ const SHIZUKU_STEPS = [
     badge: "Koneksi Shizuku"
   },
   {
-    title: "4. Izinkan Otorisasi Layanan GameMapper",
-    short: "Berikan izin binder IPC aman ke aplikasi GameMapper ini.",
+    title: "4. Izinkan Otorisasi Layanan Nexion",
+    short: "Berikan izin binder IPC aman ke aplikasi Nexion ini.",
     details: [
       "Ketuk tombol 'Authorize Shizuku AIDL Bindings' di panel atas.",
       "Jendela pop-up bawaan Shizuku akan langsung muncul di HP Anda.",
@@ -71,7 +70,7 @@ const SHIZUKU_STEPS = [
     title: "5. Izinkan Tampilan Di Atas Aplikasi Lain & Optimasi Baterai",
     short: "Izinkan rendering overlay di atas game.",
     details: [
-      "Buka Pengaturan HP -> Aplikasi -> Kelola Aplikasi -> Cari 'GameMapper' -> Aktifkan 'Tampilkan di atas aplikasi lain' (Display over other apps / Draw over other apps) agar tombol overlay HUD bisa muncul mengambang saat Anda bermain game.",
+      "Buka Pengaturan HP -> Aplikasi -> Kelola Aplikasi -> Cari 'Nexion' -> Aktifkan 'Tampilkan di atas aplikasi lain' (Display over other apps / Draw over other apps) agar tombol overlay HUD bisa muncul mengambang saat Anda bermain game.",
       "🔋 MATIKAN PENGHEMAT BATERAI: Anda dapat menggunakan tombol 'Ignore Battery Optimizations' di panel atas, atau rubah secara manual di pengaturan perangkat.",
       "Langkah ini sangat krusial agar overlay Anda tidak dihentikan (force close) atau freeze oleh sistem saat bermain game berat."
     ],
@@ -83,7 +82,7 @@ const SHIZUKU_STEPS = [
     title: "6. Boot Daemon Shuttle & Mulai Bermain!",
     short: "Aktifkan engine pemeta virtual dengan respons instan.",
     details: [
-      "Klik tombol 'BOOT GAMEMAPPER SHUTTLE DAEMON' di atas.",
+      "Klik tombol 'BOOT NEXION SHUTTLE DAEMON' di atas.",
       "Secara instan, Anda akan melihat terminal STDOUT di sebelah kanan mencetak kode verifikasi.",
       "Status akan berubah menjadi 'CORE DAEMON ACTIVE'. Berhasil! Pasang Gamepad Anda, buka tab 'Gamepad Tester' atau 'Overlay Editor' untuk merancang layout tombol favorit!"
     ],
@@ -118,7 +117,7 @@ const DESKTOP_STEPS = [
     title: "3. Jalankan Berkas Companion PC",
     short: "Jalankan skrip pembantu untuk menginjeksi core driver daemon.",
     details: [
-      "Unduh zip GameMapper Desktop Companion di PC Anda dan ekstrak arsip tersebut.",
+      "Unduh zip Nexion Desktop Companion di PC Anda dan ekstrak arsip tersebut.",
       "Buka folder hasil ekstrak, jalankan file pembantu instalasi:",
       "• Mac/Linux: Jalankan terminal lalu ketik perintah './start.sh'",
       "• Windows: Klik ganda file 'start.bat' untuk membukanya langsung.",
@@ -130,7 +129,7 @@ const DESKTOP_STEPS = [
     title: "4. Izinkan Tampilan Di Atas Aplikasi Lain",
     short: "Izinkan aplikasi overlay controller & mendeteksi hardware.",
     details: [
-      "Pergi ke Setelan HP -> Aplikasi -> Kelola Aplikasi -> Pilih 'GameMapper' -> Nyalakan izin 'Tampilkan di Atas Aplikasi Lain' (Draw Over Other Apps / Display over details).",
+      "Pergi ke Setelan HP -> Aplikasi -> Kelola Aplikasi -> Pilih 'Nexion' -> Nyalakan izin 'Tampilkan di Atas Aplikasi Lain' (Draw Over Other Apps / Display over details).",
       "Izin overlay ini diperlukan agar panel tombol konfigurasi map bisa melayang di atas layar game Anda untuk penempatan langsung.",
       "🔋 MATIKAN PENGHEMAT BATERAI: Anda dapat menggunakan tombol 'Ignore Battery Optimizations' di panel atas, atau rubah secara manual di pengaturan perangkat. Ini mencegah overlay keluar sendiri atau ngelag di tengah permainan."
     ],
@@ -184,12 +183,13 @@ export default function ShizukuPanel({ shizukuState, setShizukuState, onLogMessa
       } else if (action === 'stop') {
         const res = await stopDaemon();
         if (res) {
-           onLogMessage(`[sh] GameMapper Shuttle Daemon Terminated.`);
+           onLogMessage(`[sh] Nexion Shuttle Daemon Terminated.`);
         }
       }
 
       setTimeout(() => {
         if (action === 'toggle_mode') {
+          setShizukuState(prev => ({ ...prev, mode: mode || prev.mode }));
           onLogMessage(`Daemon mode switched: ${mode || 'current mode'} (Visual Check only)`);
         }
         setIsLoading(false);
@@ -206,41 +206,12 @@ export default function ShizukuPanel({ shizukuState, setShizukuState, onLogMessa
     onLogMessage("Invoking Shizuku.requestPermission() via android.os.Binder IPC");
     const result = await nativeRequestPerm();
     if (result && !result.success) {
-      onLogMessage(`[sh] ${result.error || 'Menunggu approval dialog Shizuku...'}`);
+      onLogMessage(`[sh ERROR] Gagal meminta izin: ${result.error}`);
     } else {
-      onLogMessage(`[sh] ✅ Izin diberikan! Menghubungkan daemon otomatis...`);
-      // Auto-start daemon after permission granted
-      try {
-        await startDaemon();
-        onLogMessage(`[sh] ✅ Daemon berhasil di-boot! Touch injection aktif.`);
-        setShizukuState(prev => ({ ...prev, status: 'CONNECTED_SHIZUKU', daemonRunning: true }));
-      } catch (e: any) {
-        onLogMessage(`[sh ERROR] Gagal start daemon: ${e.message}`);
-      }
+      onLogMessage(`[sh] Permintaan Izin berhasil dikirim ke Shizuku.`);
     }
     setIsLoading(false);
   };
-
-  // Listen for async permission result (when user approves Shizuku dialog)
-  React.useEffect(() => {
-    let listener: any;
-    import('../plugins/GameMapper').then(({ default: GameMapper }) => {
-      GameMapper.addListener('onShizukuPermissionGranted', (data: any) => {
-        if (data.granted) {
-          onLogMessage('[sh] ✅ Shizuku permission granted via dialog! Auto-starting daemon...');
-          startDaemon().then(() => {
-            onLogMessage('[sh] ✅ Daemon auto-started after permission grant!');
-            setShizukuState(prev => ({ ...prev, status: 'CONNECTED_SHIZUKU', daemonRunning: true }));
-          }).catch((e: any) => {
-            onLogMessage(`[sh ERROR] Auto-start failed: ${e.message}`);
-          });
-        } else {
-          onLogMessage('[sh] ❌ Shizuku permission denied by user.');
-        }
-      }).then((l: any) => { listener = l; });
-    });
-    return () => { listener?.remove(); };
-  }, []);
 
   // Sync component permission status with global state
   React.useEffect(() => {
@@ -291,7 +262,7 @@ export default function ShizukuPanel({ shizukuState, setShizukuState, onLogMessa
           </div>
           <div>
             <h2 className="text-base font-bold font-sans tracking-tight text-slate-100 flex items-center gap-2">
-              GameMapper Orchestration Control
+              Nexion Orchestration Control
               <span className="text-[10px] bg-indigo-950 text-indigo-400 px-2 py-0.5 rounded-full border border-indigo-900 font-mono">
                 {shizukuState.daemonVersion}
               </span>
@@ -425,7 +396,7 @@ export default function ShizukuPanel({ shizukuState, setShizukuState, onLogMessa
                     className="flex-1 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-30 disabled:from-slate-800 disabled:to-slate-800 disabled:text-slate-500 text-white font-semibold text-xs rounded-lg shadow-lg active:scale-[0.98] transition-all flex items-center justify-center gap-2"
                   >
                     <Play className="w-4 h-4 fill-white" />
-                    BOOT GAMEMAPPER SHUTTLE DAEMON
+                    BOOT NEXION SHUTTLE DAEMON
                   </button>
                   {shizukuState.daemonRunning && (
                     <button

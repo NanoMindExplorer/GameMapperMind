@@ -1,14 +1,16 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.nanomindexplorer.gamemappermind',
+  appId: 'com.nanomind.gamemappermind',
   appName: 'GameMapperMind',
   webDir: 'dist',
   server: {
-    // FloatingOverlayService loads overlay via https://appassets.androidplatform.net/public/index.html
-    androidScheme: 'https',
-    allowNavigation: ['appassets.androidplatform.net'],
+    androidScheme: 'https'
   },
+  android: {
+    captureInput: true,
+    webContentsDebuggingEnabled: false
+  }
 };
 
 export default config;

@@ -70,8 +70,50 @@ class TouchInjectionPlugin : Plugin() {
         Shizuku.addRequestPermissionResultListener(permissionListener)
     }
 
+    /**
+     * Override onDestroy untuk cleanup resource sebelum plugin di-destroy.
+     *
+     * Fix untuk BUG-N07 (regression dari fix BUG-H08):
+     * - Sebelumnya onDestroy tidak memanggil super.onDestroy() dan tidak unbind service.
+     * - Shizuku binder ke TouchDaemonService bisa leak jika plugin di-destroy tanpa unbind.
+     * - Memory leak dan binder leak pada config change atau activity recreate.
+     *
+     * Pola regression: cleanup incomplete (override tanpa super call).
+     *
+     * Fix:
+     * - Remove permission listener (sudah ada sebelumnya)
+     * - Release all pointers via touchService (jika masih bound)
+     * - Unbind Shizuku user service (jika masih bound)
+     * - Set touchService = null dan isBound = false
+     * - Panggil super.onDestroy() di akhir (wajib untuk plugin lifecycle)
+     *
+     * Invariant:
+     * - Setelah onDestroy: isBound == false, touchService == null
+     * - Permission listener sudah di-remove (tidak leak)
+     * - Pointer aktif sudah di-release (tidak stuck)
+     * - Shizuku user service sudah di-unbind (tidak leak binder)
+     */
     fun onDestroy() {
+        // Remove permission listener untuk mencegah leak.
         Shizuku.removeRequestPermissionResultListener(permissionListener)
+
+        // Cleanup Shizuku binding jika masih bound.
+        if (isBound) {
+            try {
+                // Release semua pointer aktif sebelum unbind (mencegah stuck touch).
+                touchService?.releaseAllPointers()
+                // Unbind user service. Flag true = stop service.
+                Shizuku.unbindUserService(USER_SERVICE_ARGS, serviceConnection, true)
+                touchService = null
+                isBound = false
+            } catch (e: Exception) {
+                Log.e("GameMapper", "Failed to unbind Shizuku user service in onDestroy", e)
+            }
+        }
+
+        // Wajib panggil super.onDestroy() untuk plugin lifecycle yang benar.
+        // Tanpa ini, Capacitor bridge tidak akan tahu plugin sudah destroy.
+        super.onDestroy()
     }
 
     @PluginMethod

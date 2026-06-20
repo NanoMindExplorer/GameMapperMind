@@ -2,365 +2,799 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  * @author NanoMind Explorer
+ * 
+ * GameSelector - Profile Manager untuk Gamepad Mapping
+ * 
+ * FIX BUG-M01: Replace confirm() dengan custom modal dialog
+ * FIX BUG-M02: Gunakan Capacitor Filesystem untuk export, fallback ke Blob download
+ * FIX BUG-M09: Tambah strict schema validation untuk profile import
  */
-
-import React, { useRef } from 'react';
+import React from 'react';
 import { GamepadProfile } from '../types';
-import { Target, Settings, Sliders, Box, HardDrive, Cpu, AlertTriangle, Play, Flame, Plus, Trash2, Edit2, Check, X, ShieldAlert, Download, Upload } from 'lucide-react';
+import {
+  Plus, Trash2, Download, Upload, Copy, Save,
+  AlertTriangle, CheckCircle, FileJson, Gamepad2,
+  Edit3, Search, X, ChevronDown, ChevronUp,
+  Shield, Zap, Clock, Layers
+} from 'lucide-react';
 
 interface GameSelectorProps {
   profiles: GamepadProfile[];
   activeProfileId: string;
   onProfileSelect: (id: string) => void;
-  onUpdateProfile: (updated: GamepadProfile) => void;
+  onUpdateProfile: (profile: GamepadProfile) => void;
   onCreateProfile: (profile: GamepadProfile) => void;
   onDeleteProfile: (id: string) => void;
   onLogMessage: (msg: string) => void;
 }
 
-export default function GameSelector({ profiles, activeProfileId, onProfileSelect, onUpdateProfile, onCreateProfile, onDeleteProfile, onLogMessage }: GameSelectorProps) {
-  const activeProfile = profiles.find(p => p.id === activeProfileId) || profiles[0];
-  const [activeSubTab, setActiveSubTab] = React.useState<'parameters' | 'hardware'>('parameters');
-  const [isEditingMeta, setIsEditingMeta] = React.useState(false);
-  const [editMetaValues, setEditMetaValues] = React.useState({ name: '', packageName: '', description: '' });
-  const fileInputRef = useRef<HTMLInputElement>(null);
+// ============================================
+// FIX BUG-M09: Schema validation
+// ============================================
+interface ProfileValidationResult {
+  valid: boolean;
+  errors: string[];
+}
 
-  const updateProfileValue = (key: keyof GamepadProfile, value: any) => {
-    const updated = { ...activeProfile, [key]: value };
-    onUpdateProfile(updated);
-    if (!isEditingMeta) {
-      onLogMessage(`Profile Engine: Modifying [${activeProfile.name}] attribute -> ${key} = ${value}`);
+function validateProfileSchema(data: any): ProfileValidationResult {
+  const errors: string[] = [];
+
+  if (!data || typeof data !== 'object') {
+    return { valid: false, errors: ['Data must be an object'] };
+  }
+
+  if (!data.id || typeof data.id !== 'string') {
+    errors.push('Missing or invalid "id" (must be string)');
+  }
+
+  if (!data.name || typeof data.name !== 'string') {
+    errors.push('Missing or invalid "name" (must be string)');
+  }
+
+  if (data.packageName !== undefined && typeof data.packageName !== 'string') {
+    errors.push('Invalid "packageName" (must be string if present)');
+  }
+
+  if (data.deadzone !== undefined && (typeof data.deadzone !== 'number' || data.deadzone < 0 || data.deadzone > 1)) {
+    errors.push('Invalid "deadzone" (must be number between 0 and 1)');
+  }
+
+  if (data.smoothing !== undefined && (typeof data.smoothing !== 'number' || data.smoothing < 0 || data.smoothing > 1)) {
+    errors.push('Invalid "smoothing" (must be number between 0 and 1)');
+  }
+
+  if (data.globalOpacity !== undefined && (typeof data.globalOpacity !== 'number' || data.globalOpacity < 0 || data.globalOpacity > 100)) {
+    errors.push('Invalid "globalOpacity" (must be number between 0 and 100)');
+  }
+
+  if (data.bgDimLevel !== undefined && (typeof data.bgDimLevel !== 'number' || data.bgDimLevel < 0 || data.bgDimLevel > 100)) {
+    errors.push('Invalid "bgDimLevel" (must be number between 0 and 100)');
+  }
+
+  if (data.antiBanEnabled !== undefined && typeof data.antiBanEnabled !== 'boolean') {
+    errors.push('Invalid "antiBanEnabled" (must be boolean)');
+  }
+
+  if (data.buttons !== undefined) {
+    if (!Array.isArray(data.buttons)) {
+      errors.push('Invalid "buttons" (must be array)');
+    } else {
+      data.buttons.forEach((btn: any, index: number) => {
+        if (!btn.mappedKey || typeof btn.mappedKey !== 'string') {
+          errors.push(`Button[${index}]: missing or invalid "mappedKey"`);
+        }
+        if (btn.x !== undefined && typeof btn.x !== 'number') {
+          errors.push(`Button[${index}]: invalid "x" (must be number)`);
+        }
+        if (btn.y !== undefined && typeof btn.y !== 'number') {
+          errors.push(`Button[${index}]: invalid "y" (must be number)`);
+        }
+        if (btn.type !== undefined && !['button', 'analog', 'dpad', 'swipe', 'hold'].includes(btn.type)) {
+          errors.push(`Button[${index}]: invalid "type" (must be button/analog/dpad/swipe/hold)`);
+        }
+      });
     }
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+// ============================================
+// SUB-COMPONENT: ConfirmDialog (FIX BUG-M01)
+// ============================================
+interface ConfirmDialogProps {
+  isOpen: boolean;
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  variant?: 'danger' | 'warning' | 'info';
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+
+const ConfirmDialog = ({
+  isOpen, title, message,
+  confirmLabel = 'Confirm',
+  cancelLabel = 'Cancel',
+  variant = 'danger',
+  onConfirm, onCancel
+}: ConfirmDialogProps) => {
+  if (!isOpen) return null;
+
+  const variantStyles = {
+    danger: {
+      bg: 'bg-red-600 hover:bg-red-500',
+      icon: <AlertTriangle className="w-6 h-6 text-red-400" />,
+      border: 'border-red-500/30',
+    },
+    warning: {
+      bg: 'bg-amber-600 hover:bg-amber-500',
+      icon: <AlertTriangle className="w-6 h-6 text-amber-400" />,
+      border: 'border-amber-500/30',
+    },
+    info: {
+      bg: 'bg-indigo-600 hover:bg-indigo-500',
+      icon: <CheckCircle className="w-6 h-6 text-indigo-400" />,
+      border: 'border-indigo-500/30',
+    },
   };
 
-  const handleCreateNew = () => {
-    const newId = `custom_${Date.now()}`;
+  const style = variantStyles[variant];
+
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 backdrop-blur-sm">
+      <div className={`bg-slate-900 border ${style.border} rounded-xl p-6 max-w-md w-full mx-4 shadow-2xl`}>
+        <div className="flex items-center gap-3 mb-4">
+          {style.icon}
+          <h3 className="text-lg font-bold text-slate-100">{title}</h3>
+        </div>
+        <p className="text-sm text-slate-300 mb-6 leading-relaxed">{message}</p>
+        <div className="flex items-center justify-end gap-3">
+          <button
+            onClick={onCancel}
+            className="px-4 py-2 text-xs font-bold font-mono uppercase bg-slate-800/60 hover:bg-slate-800 border border-slate-700 text-slate-300 rounded-lg transition-colors"
+          >
+            {cancelLabel}
+          </button>
+          <button
+            onClick={onConfirm}
+            className={`px-4 py-2 text-xs font-bold font-mono uppercase ${style.bg} text-white rounded-lg transition-colors`}
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ============================================
+// SUB-COMPONENT: ProfileCard
+// ============================================
+interface ProfileCardProps {
+  profile: GamepadProfile;
+  isActive: boolean;
+  isEditing: boolean;
+  editName: string;
+  onSelect: () => void;
+  onStartRename: () => void;
+  onSaveRename: () => void;
+  onCancelRename: () => void;
+  onEditNameChange: (name: string) => void;
+  onDuplicate: () => void;
+  onExport: () => void;
+  onDelete: () => void;
+}
+
+const ProfileCard = React.memo(({
+  profile, isActive, isEditing, editName,
+  onSelect, onStartRename, onSaveRename, onCancelRename, onEditNameChange,
+  onDuplicate, onExport, onDelete
+}: ProfileCardProps) => {
+  return (
+    <div
+      className={`bg-slate-950/40 border rounded-lg p-4 transition-all cursor-pointer ${
+        isActive
+          ? 'border-indigo-500/50 bg-indigo-950/20 shadow-lg shadow-indigo-500/5'
+          : 'border-slate-800/60 hover:border-slate-700/60'
+      }`}
+      onClick={onSelect}
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className={`w-3 h-3 rounded-full ${isActive ? 'bg-indigo-500 animate-pulse' : 'bg-slate-700'}`} />
+          {isEditing ? (
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={editName}
+                onChange={(e) => onEditNameChange(e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+                className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-slate-200 outline-none focus:border-indigo-500"
+                autoFocus
+              />
+              <button
+                onClick={(e) => { e.stopPropagation(); onSaveRename(); }}
+                className="p-1 text-emerald-400 hover:text-emerald-300"
+              >
+                <Save className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); onCancelRename(); }}
+                className="p-1 text-slate-500 hover:text-slate-300"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ) : (
+            <div>
+              <h3 className="text-sm font-bold text-slate-100">{profile.name}</h3>
+              {profile.packageName && (
+                <p className="text-[9px] font-mono text-slate-500 mt-0.5">{profile.packageName}</p>
+              )}
+            </div>
+          )}
+        </div>
+        <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+          <button
+            onClick={onStartRename}
+            className="p-1.5 text-slate-500 hover:text-indigo-400 rounded transition-colors"
+            title="Rename"
+          >
+            <Edit3 className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={onDuplicate}
+            className="p-1.5 text-slate-500 hover:text-purple-400 rounded transition-colors"
+            title="Duplicate"
+          >
+            <Copy className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={onExport}
+            className="p-1.5 text-slate-500 hover:text-emerald-400 rounded transition-colors"
+            title="Export"
+          >
+            <Download className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={onDelete}
+            className="p-1.5 text-slate-500 hover:text-red-400 rounded transition-colors"
+            title="Delete"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </div>
+      <div className="flex items-center gap-4 mt-3 text-[9px] font-mono text-slate-500">
+        <span className="flex items-center gap-1">
+          <Layers className="w-2.5 h-2.5" />
+          {profile.buttons?.length || 0} buttons
+        </span>
+        <span>DZ: {((profile.deadzone || 0.15) * 100).toFixed(0)}%</span>
+        <span>SM: {((profile.smoothing || 0.5) * 100).toFixed(0)}%</span>
+        <span className={profile.antiBanEnabled ? 'text-emerald-500' : 'text-red-500'}>
+          <Shield className="w-2.5 h-2.5 inline mr-0.5" />
+          {profile.antiBanEnabled ? 'ON' : 'OFF'}
+        </span>
+      </div>
+    </div>
+  );
+});
+
+ProfileCard.displayName = 'ProfileCard';
+
+// ============================================
+// MAIN COMPONENT: GameSelector
+// ============================================
+export default function GameSelector({
+  profiles,
+  activeProfileId,
+  onProfileSelect,
+  onUpdateProfile,
+  onCreateProfile,
+  onDeleteProfile,
+  onLogMessage
+}: GameSelectorProps) {
+  const [isCreating, setIsCreating] = React.useState(false);
+  const [newProfileName, setNewProfileName] = React.useState('');
+  const [newProfilePackage, setNewProfilePackage] = React.useState('');
+  const [newProfileGame, setNewProfileGame] = React.useState('');
+  const [editingProfileId, setEditingProfileId] = React.useState<string | null>(null);
+  const [editingName, setEditingName] = React.useState('');
+  const [importError, setImportError] = React.useState<string | null>(null);
+  const [importSuccess, setImportSuccess] = React.useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = React.useState('');
+  const [sortBy, setSortBy] = React.useState<'name' | 'recent' | 'buttons'>('recent');
+  const [showSortMenu, setShowSortMenu] = React.useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  // FIX BUG-M01: Custom confirmation dialog state
+  const [confirmDialog, setConfirmDialog] = React.useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    variant: 'danger' | 'warning' | 'info';
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    variant: 'danger',
+    onConfirm: () => {},
+  });
+
+  // Filter and sort profiles
+  const filteredProfiles = React.useMemo(() => {
+    let result = [...profiles];
+
+    // Filter by search
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      result = result.filter(p =>
+        p.name.toLowerCase().includes(query) ||
+        (p.packageName && p.packageName.toLowerCase().includes(query)) ||
+        (p.game && p.game.toLowerCase().includes(query))
+      );
+    }
+
+    // Sort
+    switch (sortBy) {
+      case 'name':
+        result.sort((a, b) => a.name.localeCompare(b.name));
+        break;
+      case 'recent':
+        result.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+        break;
+      case 'buttons':
+        result.sort((a, b) => (b.buttons?.length || 0) - (a.buttons?.length || 0));
+        break;
+    }
+
+    return result;
+  }, [profiles, searchQuery, sortBy]);
+
+  // Create new profile
+  const handleCreate = () => {
+    if (!newProfileName.trim()) return;
+
     const newProfile: GamepadProfile = {
-      id: newId,
-      name: 'New Custom Profile',
-      packageName: 'com.example.app',
-      description: 'A new user-defined layout profile.',
-      gyroSensitivity: 1.0,
-      deadzone: 0.1,
-      smoothing: 0.2,
-      isCustom: true,
-      buttons: [],
-      antiBanEnabled: false
+      id: `profile_${Date.now()}`,
+      name: newProfileName.trim(),
+      game: newProfileGame.trim() || newProfileName.trim(),
+      packageName: newProfilePackage.trim() || undefined,
+      description: '',
+      deadzone: 0.15,
+      smoothing: 0.5,
+      antiBanEnabled: true,
+      globalOpacity: 80,
+      bgDimLevel: 50,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      buttons: [
+        { id: 'l_stick', mappedKey: 'L_STICK', x: 20, y: 70, width: 120, height: 120, type: 'analog', label: 'Move', androidEventCode: 0 },
+        { id: 'r_stick', mappedKey: 'R_STICK', x: 80, y: 50, width: 120, height: 120, type: 'analog', label: 'Camera', androidEventCode: 0 },
+        { id: 'btn_a', mappedKey: 'A', x: 75, y: 80, width: 60, height: 60, type: 'button', label: 'Button A', androidEventCode: 96 },
+        { id: 'btn_b', mappedKey: 'B', x: 82, y: 72, width: 60, height: 60, type: 'button', label: 'Button B', androidEventCode: 97 },
+        { id: 'btn_x', mappedKey: 'X', x: 68, y: 72, width: 60, height: 60, type: 'button', label: 'Button X', androidEventCode: 99 },
+        { id: 'btn_y', mappedKey: 'Y', x: 75, y: 64, width: 60, height: 60, type: 'button', label: 'Button Y', androidEventCode: 100 },
+        { id: 'btn_lt', mappedKey: 'LT', x: 15, y: 15, width: 80, height: 60, type: 'button', label: 'L Trigger', androidEventCode: 102 },
+        { id: 'btn_rt', mappedKey: 'RT', x: 85, y: 15, width: 80, height: 60, type: 'button', label: 'R Trigger', androidEventCode: 103 },
+        { id: 'btn_lb', mappedKey: 'LB', x: 15, y: 8, width: 80, height: 50, type: 'button', label: 'L Bumper', androidEventCode: 102 },
+        { id: 'btn_rb', mappedKey: 'RB', x: 85, y: 8, width: 80, height: 50, type: 'button', label: 'R Bumper', androidEventCode: 103 },
+        { id: 'btn_start', mappedKey: 'START', x: 60, y: 5, width: 50, height: 40, type: 'button', label: 'Start', androidEventCode: 108 },
+        { id: 'btn_select', mappedKey: 'SELECT', x: 40, y: 5, width: 50, height: 40, type: 'button', label: 'Select', androidEventCode: 109 },
+      ]
     };
+
     onCreateProfile(newProfile);
-    onLogMessage(`Profile Engine: Created new blank profile [${newId}]`);
+    setNewProfileName('');
+    setNewProfilePackage('');
+    setNewProfileGame('');
+    setIsCreating(false);
+    onLogMessage(`[PROFILE] Created new profile "${newProfile.name}"`);
   };
 
-  const handleDelete = () => {
-    if (confirm("Are you sure you want to delete this profile?")) {
-      onDeleteProfile(activeProfile.id);
-      onLogMessage(`Profile Engine: Deleted profile [${activeProfile.name}]`);
+  // FIX BUG-M01: Delete dengan custom modal
+  const handleDelete = (profileId: string) => {
+    const profile = profiles.find(p => p.id === profileId);
+    if (!profile) return;
+
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Delete Profile',
+      message: `Are you sure you want to delete profile "${profile.name}"? This action cannot be undone. All button mappings will be lost.`,
+      variant: 'danger',
+      onConfirm: () => {
+        onDeleteProfile(profileId);
+        onLogMessage(`[PROFILE] Deleted profile "${profile.name}"`);
+        setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+      }
+    });
+  };
+
+  // Duplicate profile
+  const handleDuplicate = (profile: GamepadProfile) => {
+    const duplicate: GamepadProfile = {
+      ...JSON.parse(JSON.stringify(profile)),
+      id: `profile_${Date.now()}`,
+      name: `${profile.name} (Copy)`,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    onCreateProfile(duplicate);
+    onProfileSelect(duplicate.id);
+    onLogMessage(`[PROFILE] Duplicated "${profile.name}" → "${duplicate.name}"`);
+  };
+
+  // FIX BUG-M02: Export dengan Capacitor Filesystem + fallback
+  const handleExport = async (profile: GamepadProfile) => {
+    try {
+      const exportData = JSON.stringify(profile, null, 2);
+      const fileName = `${profile.name.replace(/[^a-zA-Z0-9]/g, '_')}_profile.json`;
+
+      // Try Capacitor Filesystem first
+      try {
+        const { Filesystem, Directory } = await import('@capacitor/filesystem');
+        await Filesystem.writeFile({
+          path: fileName,
+          data: exportData,
+          directory: Directory.Documents,
+          recursive: true
+        });
+
+        // Try to share
+        try {
+          const { Share } = await import('@capacitor/share');
+          const uriResult = await Filesystem.getUri({
+            path: fileName,
+            directory: Directory.Documents
+          });
+
+          await Share.share({
+            title: `Export Profile: ${profile.name}`,
+            text: `GameMapperMind Profile: ${profile.name}`,
+            url: uriResult.uri,
+            dialogTitle: 'Share Profile'
+          });
+        } catch {
+          // Share not available, fallback to download
+          fallbackDownload(exportData, fileName);
+        }
+
+        onLogMessage(`[PROFILE] Exported "${profile.name}" to Documents`);
+        setImportSuccess(`Profile "${profile.name}" exported successfully!`);
+      } catch {
+        // Fallback to browser download
+        fallbackDownload(exportData, fileName);
+        onLogMessage(`[PROFILE] Exported "${profile.name}" as download`);
+        setImportSuccess(`Profile "${profile.name}" exported successfully!`);
+      }
+
+      setTimeout(() => setImportSuccess(null), 3000);
+    } catch (err) {
+      console.error('Export failed:', err);
+      onLogMessage(`[PROFILE] Export failed - ${err}`);
+      setImportError(`Export failed: ${err}`);
+      setTimeout(() => setImportError(null), 5000);
     }
   };
 
-  const handleExportProfile = () => {
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(activeProfile, null, 2));
-    const downloadAnchorNode = document.createElement('a');
-    downloadAnchorNode.setAttribute("href",     dataStr);
-    downloadAnchorNode.setAttribute("download", `${activeProfile.name.replace(/\s+/g, '_')}_profile.json`);
-    document.body.appendChild(downloadAnchorNode);
-    downloadAnchorNode.click();
-    downloadAnchorNode.remove();
-    onLogMessage(`Profile Engine: Exported profile [${activeProfile.name}] to JSON`);
+  // FIX BUG-M02: Fallback download untuk browser
+  const fallbackDownload = (data: string, fileName: string) => {
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
-  const handleImportProfile = (event: React.ChangeEvent<HTMLInputElement>) => {
+  // FIX BUG-M09: Import dengan validasi schema ketat
+  const handleImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const importedData = JSON.parse(e.target?.result as string);
-        if (importedData && typeof importedData === 'object' && importedData.id && typeof importedData.name === 'string') {
-          // generate a new id to prevent conflicts
-          const importedProfile: GamepadProfile = {
-            ...importedData,
-            id: `custom_imported_${Date.now()}`,
-            name: `${importedData.name} (Imported)`,
-            isCustom: true
-          };
-          onCreateProfile(importedProfile);
-          onLogMessage(`Profile Engine: Successfully imported profile [${importedProfile.name}]`);
-        } else {
-          onLogMessage("Profile Engine: Failed. Invalid profile JSON format.");
-        }
-      } catch (err) {
-         onLogMessage("Profile Engine: Failed to parse JSON file.");
+    setImportError(null);
+    setImportSuccess(null);
+
+    try {
+      const text = await file.text();
+      const importedData = JSON.parse(text);
+
+      // FIX BUG-M09: Validasi schema
+      const validation = validateProfileSchema(importedData);
+      if (!validation.valid) {
+        setImportError(`Invalid profile schema:\n${validation.errors.join('\n')}`);
+        onLogMessage(`[PROFILE] Import failed - invalid schema: ${validation.errors[0]}`);
+        setTimeout(() => setImportError(null), 8000);
+        return;
       }
-    };
-    reader.readAsText(file);
-    if (fileInputRef.current) fileInputRef.current.value = '';
+
+      // Cek duplikasi ID
+      if (profiles.find(p => p.id === importedData.id)) {
+        importedData.id = `profile_${Date.now()}`;
+        importedData.name = `${importedData.name} (Imported)`;
+      }
+
+      // Build profile dengan default values
+      const profile: GamepadProfile = {
+        id: importedData.id,
+        name: importedData.name,
+        game: importedData.game || importedData.name,
+        packageName: importedData.packageName,
+        description: importedData.description || '',
+        deadzone: importedData.deadzone ?? 0.15,
+        smoothing: importedData.smoothing ?? 0.5,
+        antiBanEnabled: importedData.antiBanEnabled ?? true,
+        globalOpacity: importedData.globalOpacity ?? 80,
+        bgDimLevel: importedData.bgDimLevel ?? 50,
+        createdAt: importedData.createdAt || Date.now(),
+        updatedAt: Date.now(),
+        buttons: (importedData.buttons || []).map((btn: any, idx: number) => ({
+          id: btn.id || `btn_${Date.now()}_${idx}`,
+          mappedKey: btn.mappedKey,
+          x: btn.x ?? 50,
+          y: btn.y ?? 50,
+          width: btn.width ?? 60,
+          height: btn.height ?? 60,
+          type: btn.type || 'button',
+          label: btn.label || btn.mappedKey,
+          androidEventCode: btn.androidEventCode ?? 0,
+          swipeDirection: btn.swipeDirection,
+          swipeDuration: btn.swipeDuration,
+        }))
+      };
+
+      onCreateProfile(profile);
+      onProfileSelect(profile.id);
+      onLogMessage(`[PROFILE] Imported "${profile.name}" successfully (${profile.buttons.length} buttons)`);
+      setImportSuccess(`Profile "${profile.name}" imported successfully!`);
+      setTimeout(() => setImportSuccess(null), 3000);
+    } catch (err) {
+      console.error('Import failed:', err);
+      setImportError(`Failed to parse profile file: ${err}`);
+      onLogMessage(`[PROFILE] Import failed - ${err}`);
+      setTimeout(() => setImportError(null), 5000);
+    }
+
+    // Reset file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
   };
 
-  const startEditingMetaData = () => {
-    setEditMetaValues({ 
-      name: activeProfile.name, 
-      packageName: activeProfile.packageName, 
-      description: activeProfile.description 
-    });
-    setIsEditingMeta(true);
+  // Rename handlers
+  const handleStartRename = (profile: GamepadProfile) => {
+    setEditingProfileId(profile.id);
+    setEditingName(profile.name);
   };
 
-  const saveMetaData = () => {
-    const updated = { ...activeProfile, ...editMetaValues };
-    onUpdateProfile(updated);
-    setIsEditingMeta(false);
-    onLogMessage(`Profile Engine: Updated metadata for [${updated.name}]`);
+  const handleSaveRename = (profileId: string) => {
+    if (!editingName.trim()) return;
+    const profile = profiles.find(p => p.id === profileId);
+    if (!profile) return;
+
+    onUpdateProfile({ ...profile, name: editingName.trim(), updatedAt: Date.now() });
+    setEditingProfileId(null);
+    setEditingName('');
+    onLogMessage(`[PROFILE] Renamed to "${editingName.trim()}"`);
+  };
+
+  const handleCancelRename = () => {
+    setEditingProfileId(null);
+    setEditingName('');
   };
 
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-2xl">
-      <div className="bg-slate-950 px-6 py-4 border-b border-slate-800 flex flex-wrap justify-between items-center gap-4">
+    <div className="bg-slate-900/40 border border-slate-800/60 rounded-xl overflow-hidden">
+      {/* Header */}
+      <div className="bg-slate-950/60 border-b border-slate-800/60 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="p-2 bg-pink-500/10 text-pink-400 rounded-lg border border-pink-500/20">
-            <Flame className="w-5 h-5 animate-pulse" />
-          </div>
-          <div>
-            <h2 className="text-base font-bold font-sans tracking-tight text-slate-100 flex items-center gap-2">
-              Intelligent Profile Manager
-            </h2>
-            <p className="text-xs text-slate-400">Context-Aware Real-time Applet Profile Dispatcher</p>
-          </div>
+          <Gamepad2 className="w-5 h-5 text-indigo-400" />
+          <h2 className="font-orbitron text-sm font-bold tracking-wider text-slate-100 uppercase">
+            Profile Manager
+          </h2>
+          <span className="text-[9px] font-mono bg-indigo-950/50 text-indigo-400 border border-indigo-900/60 px-2 py-0.5 rounded uppercase tracking-wider">
+            {profiles.length} profiles
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".json"
+            onChange={handleImport}
+            className="hidden"
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="px-3 py-1.5 text-[10px] font-bold font-mono uppercase bg-emerald-950/40 hover:bg-emerald-900/40 border border-emerald-500/50 text-emerald-400 rounded-lg flex items-center gap-1.5 transition-colors"
+          >
+            <Upload className="w-3 h-3" />
+            Import
+          </button>
+          <button
+            onClick={() => setIsCreating(true)}
+            className="px-3 py-1.5 text-[10px] font-bold font-mono uppercase bg-indigo-950/40 hover:bg-indigo-900/40 border border-indigo-500/50 text-indigo-400 rounded-lg flex items-center gap-1.5 transition-colors"
+          >
+            <Plus className="w-3 h-3" />
+            New Profile
+          </button>
         </div>
       </div>
 
-      <div className="p-6 grid grid-cols-1 md:grid-cols-12 gap-6">
-        {/* Profiles Selector Panel */}
-        <div className="md:col-span-5 space-y-4">
-          <div className="flex items-center justify-between">
-             <span className="block text-[10px] font-mono font-bold text-slate-500 uppercase">CHOOSE ACTIVE PROFILE</span>
-             <div className="flex items-center gap-1.5">
-               <button
-                 onClick={() => fileInputRef.current?.click()}
-                 className="p-1 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded"
-                 title="Import JSON Profile"
-               >
-                 <Upload className="w-3.5 h-3.5" />
-               </button>
-               <input
-                 type="file"
-                 ref={fileInputRef}
-                 className="hidden"
-                 accept=".json"
-                 onChange={handleImportProfile}
-               />
-               <button
-                 onClick={handleExportProfile}
-                 className="p-1 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded mr-1"
-                 title="Export Active Profile as JSON"
-               >
-                 <Download className="w-3.5 h-3.5" />
-               </button>
-               <button
-                 onClick={handleCreateNew}
-                 className="flex items-center gap-1.5 px-2.5 py-1 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 rounded text-[10px] font-bold uppercase transition-colors"
-               >
-                 <Plus className="w-3 h-3" />
-                 New Profile
-               </button>
-             </div>
+      {/* Notifications */}
+      {importError && (
+        <div className="mx-6 mt-4 p-3 bg-red-950/40 border border-red-500/50 rounded-lg flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 text-red-400 mt-0.5 flex-shrink-0" />
+          <div className="flex-1">
+            <p className="text-xs font-bold text-red-400">Import Error</p>
+            <p className="text-[10px] font-mono text-red-300 mt-1 whitespace-pre-line">{importError}</p>
           </div>
-          <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1">
-            {profiles.map((p) => {
-              const Selected = p.id === activeProfileId;
-              return (
-                <div
-                  key={p.id}
-                  onClick={() => !Selected && onProfileSelect(p.id)}
-                  className={`p-3.5 rounded-lg border cursor-pointer transition-all flex flex-col gap-3 ${
-                    Selected 
-                      ? 'bg-gradient-to-r from-slate-900 to-indigo-950/20 border-indigo-500 text-slate-100 shadow-lg cursor-default' 
-                      : 'bg-slate-950/45 border-slate-850 text-slate-400 hover:text-slate-200 hover:bg-slate-950/60'
+          <button onClick={() => setImportError(null)} className="p-1 text-red-400 hover:text-red-300">
+            <X className="w-3 h-3" />
+          </button>
+        </div>
+      )}
+      {importSuccess && (
+        <div className="mx-6 mt-4 p-3 bg-emerald-950/40 border border-emerald-500/50 rounded-lg flex items-center gap-2">
+          <CheckCircle className="w-4 h-4 text-emerald-400" />
+          <p className="text-xs font-mono text-emerald-300">{importSuccess}</p>
+        </div>
+      )}
+
+      {/* Create New Profile Form */}
+      {isCreating && (
+        <div className="mx-6 mt-4 p-4 bg-slate-950/60 border border-indigo-500/30 rounded-lg">
+          <h3 className="text-xs font-bold text-indigo-400 mb-3 flex items-center gap-2">
+            <Plus className="w-3.5 h-3.5" />
+            Create New Profile
+          </h3>
+          <div className="space-y-3">
+            <div>
+              <label className="text-[10px] font-mono text-slate-500 block mb-1">Profile Name *</label>
+              <input
+                type="text"
+                value={newProfileName}
+                onChange={(e) => setNewProfileName(e.target.value)}
+                placeholder="e.g., Honkai Star Rail"
+                className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-mono text-slate-500 block mb-1">Game Name (optional)</label>
+              <input
+                type="text"
+                value={newProfileGame}
+                onChange={(e) => setNewProfileGame(e.target.value)}
+                placeholder="e.g., Honkai: Star Rail"
+                className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-mono text-slate-500 block mb-1">Package Name (optional)</label>
+              <input
+                type="text"
+                value={newProfilePackage}
+                onChange={(e) => setNewProfilePackage(e.target.value)}
+                placeholder="e.g., com.miHoYo.hkrpgoversea"
+                className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleCreate}
+                disabled={!newProfileName.trim()}
+                className="px-4 py-2 text-[10px] font-bold font-mono uppercase bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                Create
+              </button>
+              <button
+                onClick={() => { setIsCreating(false); setNewProfileName(''); setNewProfilePackage(''); setNewProfileGame(''); }}
+                className="px-4 py-2 text-[10px] font-bold font-mono uppercase bg-slate-800/40 hover:bg-slate-800/60 border border-slate-700/50 text-slate-400 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Search & Sort Bar */}
+      <div className="px-6 py-3 border-b border-slate-800/40 flex items-center gap-3">
+        <div className="flex-1 relative">
+          <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search profiles..."
+            className="w-full bg-slate-900/60 border border-slate-800/60 rounded-lg pl-9 pr-3 py-1.5 text-xs text-slate-200 outline-none focus:border-indigo-500/50"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-slate-500 hover:text-slate-300"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          )}
+        </div>
+        <div className="relative">
+          <button
+            onClick={() => setShowSortMenu(!showSortMenu)}
+            className="px-3 py-1.5 text-[10px] font-mono text-slate-400 bg-slate-900/60 border border-slate-800/60 rounded-lg flex items-center gap-1.5 hover:bg-slate-800/60 transition-colors"
+          >
+            Sort: {sortBy === 'name' ? 'Name' : sortBy === 'recent' ? 'Recent' : 'Buttons'}
+            {showSortMenu ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+          </button>
+          {showSortMenu && (
+            <div className="absolute top-full right-0 mt-1 w-36 bg-slate-900 border border-slate-700 rounded-lg shadow-xl z-10 overflow-hidden">
+              {(['recent', 'name', 'buttons'] as const).map(option => (
+                <button
+                  key={option}
+                  onClick={() => { setSortBy(option); setShowSortMenu(false); }}
+                  className={`w-full px-3 py-2 text-[10px] font-mono text-left transition-colors ${
+                    sortBy === option ? 'bg-indigo-950/40 text-indigo-400' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
                   }`}
                 >
-                  <div className="flex items-start gap-3 w-full">
-                    <div className="mt-1 bg-slate-950 p-1.5 rounded-lg border border-slate-800">
-                      <Target className={`w-4 h-4 ${Selected ? 'text-indigo-400 animate-spin-slow' : 'text-slate-500'}`} />
-                    </div>
-                    {Selected && isEditingMeta ? (
-                      <div className="flex-1 space-y-2">
-                        <input 
-                          type="text" 
-                          value={editMetaValues.name} 
-                          onChange={(e) => setEditMetaValues({...editMetaValues, name: e.target.value})} 
-                          className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-xs text-slate-200 outline-none focus:border-indigo-500"
-                          placeholder="Profile Name"
-                        />
-                        <input 
-                          type="text" 
-                          value={editMetaValues.packageName} 
-                          onChange={(e) => setEditMetaValues({...editMetaValues, packageName: e.target.value})} 
-                          className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-[10px] font-mono text-slate-300 outline-none focus:border-indigo-500"
-                          placeholder="com.package.name"
-                        />
-                        <textarea
-                          value={editMetaValues.description}
-                          onChange={(e) => setEditMetaValues({...editMetaValues, description: e.target.value})}
-                          className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-[10px] text-slate-400 outline-none focus:border-indigo-500 min-h-[40px] resize-none"
-                          placeholder="Description"
-                        />
-                        <div className="flex gap-2 justify-end">
-                          <button onClick={() => setIsEditingMeta(false)} className="px-2 py-1 text-[9px] font-bold uppercase rounded bg-slate-800 text-slate-400 hover:text-slate-200">Cancel</button>
-                          <button onClick={(e) => { e.stopPropagation(); saveMetaData(); }} className="px-2 py-1 text-[9px] font-bold uppercase rounded bg-indigo-500 text-white flex gap-1 items-center hover:bg-indigo-400"><Check className="w-3 h-3" /> Save</button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="space-y-0.5 truncate flex-1">
-                        <div className="text-xs font-bold text-slate-200">{p.name}</div>
-                        <div className="text-[10px] font-mono text-slate-500 truncate">{p.packageName}</div>
-                        <p className="text-[9px] text-slate-400 line-clamp-1 mt-1 leading-normal">{p.description}</p>
-                      </div>
-                    )}
-                    {Selected && !isEditingMeta && (
-                      <div className="flex flex-col gap-1 items-end shrink-0">
-                        <button onClick={(e) => { e.stopPropagation(); startEditingMetaData(); }} className="p-1.5 text-slate-400 hover:text-indigo-400 hover:bg-slate-900 rounded"><Edit2 className="w-3.5 h-3.5" /></button>
-                        {p.isCustom && (
-                          <button onClick={(e) => { e.stopPropagation(); handleDelete(); }} className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-950/30 rounded"><Trash2 className="w-3.5 h-3.5" /></button>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Global calibration triggers */}
-        <div className="md:col-span-7 flex flex-col justify-between">
-          <div className="space-y-4">
-            <div className="flex border-b border-slate-800">
-              <button
-                onClick={() => setActiveSubTab('parameters')}
-                className={`py-2 px-4 text-xs font-semibold flex items-center gap-1.5 transition-colors border-b ${
-                  activeSubTab === 'parameters' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <Sliders className="w-3.5 h-3.5" />
-                Damping Parameters
-              </button>
-              <button
-                onClick={() => setActiveSubTab('hardware')}
-                className={`py-2 px-4 text-xs font-semibold flex items-center gap-1.5 transition-colors border-b ${
-                  activeSubTab === 'hardware' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <HardDrive className="w-3.5 h-3.5" />
-                Raw Kernel Handles
-              </button>
+                  {option === 'name' ? 'By Name' : option === 'recent' ? 'By Recent' : 'By Buttons'}
+                </button>
+              ))}
             </div>
-
-            {activeSubTab === 'parameters' ? (
-              <div className="space-y-4 pt-1">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <div className="flex justify-between text-[10px] text-slate-400 mb-1 uppercase font-semibold">
-                      <span>Gyro Integration Gain</span>
-                      <span className={activeProfile.gyroSensitivity === 0 ? "text-rose-400 font-bold" : "text-indigo-400"}>
-                        {activeProfile.gyroSensitivity === 0 ? "OFF (DISABLED)" : `${activeProfile.gyroSensitivity.toFixed(2)}x`}
-                      </span>
-                    </div>
-                    <input
-                      type="range"
-                      min="0.0"
-                      max="4.0"
-                      step="0.05"
-                      className="w-full accent-indigo-500"
-                      value={activeProfile.gyroSensitivity}
-                      onChange={(e) => updateProfileValue('gyroSensitivity', parseFloat(e.target.value))}
-                    />
-                    <span className="block text-[8px] text-slate-500 mt-0.5 leading-normal">Scalar coefficient multiplier mapped onto touch simulation canvas bounds.</span>
-                  </div>
-
-                  <div>
-                    <div className="flex justify-between text-[10px] text-slate-400 mb-1 uppercase font-semibold">
-                      <span>Stick Deadzone Axis</span>
-                      <span>{Math.round(activeProfile.deadzone * 100)}%</span>
-                    </div>
-                    <input
-                      type="range"
-                      min="0.02"
-                      max="0.25"
-                      step="0.01"
-                      className="w-full accent-indigo-500"
-                      value={activeProfile.deadzone}
-                      onChange={(e) => updateProfileValue('deadzone', parseFloat(e.target.value))}
-                    />
-                    <span className="block text-[8px] text-slate-500 mt-0.5 leading-normal">Defines internal joystick dead-angles before virtual coordinate displacement triggers.</span>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <div className="flex justify-between items-start text-[10px] text-slate-400 mb-1 uppercase font-semibold">
-                      <span>Exponential Smoothing Damping</span>
-                      <span>{(activeProfile.smoothing * 100).toFixed(0)}%</span>
-                    </div>
-                    <input
-                      type="range"
-                      min="0.05"
-                      max="0.95"
-                      step="0.05"
-                      className="w-full accent-indigo-500"
-                      value={activeProfile.smoothing}
-                      onChange={(e) => updateProfileValue('smoothing', parseFloat(e.target.value))}
-                    />
-                    <span className="block text-[8px] text-slate-500 mt-0.5 leading-normal">High frequency jitter attenuation performance. Higher keeps signals static.</span>
-                  </div>
-
-                  <div className="flex flex-col">
-                    <div className="flex flex-col gap-1 text-[10px] text-slate-400 mb-1 uppercase font-semibold">
-                      <div className="flex justify-between">
-                        <span className="flex items-center gap-1"><ShieldAlert className="w-3.5 h-3.5 text-emerald-400"/> Anti-Ban Touch Randomizer</span>
-                        <button 
-                          onClick={() => updateProfileValue('antiBanEnabled', !activeProfile.antiBanEnabled)}
-                          className={`w-8 h-4 rounded-full relative transition-colors ${activeProfile.antiBanEnabled ? 'bg-emerald-500' : 'bg-slate-700'}`}
-                        >
-                          <span className={`absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full transition-transform ${activeProfile.antiBanEnabled ? 'translate-x-4' : 'translate-x-0'}`}></span>
-                        </button>
-                      </div>
-                    </div>
-                    <span className="block text-[8px] text-slate-500 mt-1 leading-normal text-start">Humanizes synthetic touch events by slightly randomizing coordinate impacts across a ~4px radial radius. Strongly recommended for competitive shooters.</span>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-3.5 pt-1 text-slate-350">
-                <div className="p-3 bg-slate-950/60 rounded border border-slate-850 space-y-2">
-                  <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-300">
-                    <Cpu className="w-3.5 h-3.5 text-indigo-400" />
-                    udev / Kernel Virtual Event injection parameters
-                  </div>
-                  <p className="text-[10px] text-slate-400 leading-normal text-justify">
-                    Nexion uses raw memory address layouts inside Shizuku's Isolated boundaries. The mapped device listens strictly on the evdev channel to fetch controller triggers before passing offsets into the <code className="font-mono text-indigo-400 bg-slate-900 px-1 rounded">/dev/uinput</code> touch emulation stack.
-                  </p>
-                </div>
-
-                <div className="p-2.5 bg-rose-950/20 border border-rose-900/30 text-[10px] text-rose-300 leading-normal flex items-start gap-2 rounded">
-                  <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
-                  <span>Always ensure double touch profiles are disabled in your OS interface Settings, since double touch injection triggers could trigger hardware level anti-cloning flag systems.</span>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="p-3.5 bg-slate-950 border border-slate-850 flex items-center justify-between text-xs text-slate-400 mt-6 rounded">
-            <div>
-              <span className="block text-[9px] text-slate-500 font-sans uppercase font-mono font-bold">Foreground Target Hooked</span>
-              <span className="text-slate-300 font-bold font-mono">{activeProfile.packageName}</span>
-            </div>
-            <span className="text-[10px] bg-indigo-950/60 text-indigo-400 font-mono px-2 py-0.5 rounded border border-indigo-900">
-              SYSTEM READY
-            </span>
-          </div>
+          )}
         </div>
       </div>
+
+      {/* Profile List */}
+      <div className="p-6 space-y-3 max-h-[500px] overflow-y-auto">
+        {filteredProfiles.length === 0 ? (
+          <div className="text-center py-12">
+            <Gamepad2 className="w-12 h-12 text-slate-700 mx-auto mb-3" />
+            <p className="text-sm text-slate-500">
+              {searchQuery ? 'No profiles match your search' : 'No profiles yet'}
+            </p>
+            <p className="text-[10px] text-slate-600 mt-1">
+              {searchQuery ? 'Try a different search term' : 'Create your first profile to get started'}
+            </p>
+          </div>
+        ) : (
+          filteredProfiles.map(profile => (
+            <ProfileCard
+              key={profile.id}
+              profile={profile}
+              isActive={activeProfileId === profile.id}
+              isEditing={editingProfileId === profile.id}
+              editName={editingName}
+              onSelect={() => onProfileSelect(profile.id)}
+              onStartRename={() => handleStartRename(profile)}
+              onSaveRename={() => handleSaveRename(profile.id)}
+              onCancelRename={handleCancelRename}
+              onEditNameChange={setEditingName}
+              onDuplicate={() => handleDuplicate(profile)}
+              onExport={() => handleExport(profile)}
+              onDelete={() => handleDelete(profile.id)}
+            />
+          ))
+        )}
+      </div>
+
+      {/* FIX BUG-M01: Custom Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={confirmDialog.isOpen}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        variant={confirmDialog.variant}
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        onConfirm={confirmDialog.onConfirm}
+        onCancel={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+      />
     </div>
   );
 }

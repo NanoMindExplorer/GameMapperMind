@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  * @author NanoMind Explorer
  */
-
 import React from 'react';
 import { 
   GamepadProfile, GamepadMacro, ShizukuState 
@@ -15,20 +14,18 @@ import MacroEngine from './components/MacroEngine';
 import GamepadTester from './components/GamepadTester';
 import GameSelector from './components/GameSelector';
 import CreditsPanel from './components/CreditsPanel';
-
 import { 
   Terminal, Shield, Settings, Activity, Compass, Cpu, HelpCircle, 
   ChevronRight, Sparkles, BookOpen, Layers, Bot, ShieldAlert, Heart
 } from 'lucide-react';
-// Use public path directly for AppIcon instead of importing it
-
 import { useShizuku } from './hooks/useShizuku';
-import { useGamepadLoop } from './hooks/useGamepadLoop';
+import { useGamepadLoop, GamepadActiveState } from './hooks/useGamepadLoop';
 import { useInputInjector } from './hooks/useInputInjector';
 
 export default function App() {
   const { checkShizukuStatus, executeShizukuCommand, injectInput, stopDaemon } = useShizuku();
   const { startOverlay, stopOverlay } = useInputInjector();
+
   const [shizukuState, setShizukuState] = React.useState<ShizukuState>({
     status: 'DISCONNECTED',
     daemonRunning: false,
@@ -43,12 +40,14 @@ export default function App() {
   const [selectedMainView, setSelectedMainView] = React.useState<'shizuku' | 'overlay' | 'profile' | 'macro' | 'tester' | 'credits'>('shizuku');
   const [isKilling, setIsKilling] = React.useState(false);
 
-  // Settings state
   const [socketIpcName, setSocketIpcName] = React.useState('@gamepad_mapper_ipc');
   const [inputPolling, setInputPolling] = React.useState(250);
   const [isEditingSettings, setIsEditingSettings] = React.useState(false);
-
   const [macros, setMacros] = React.useState<GamepadMacro[]>(INITIAL_MACROS);
+
+  // FIX BUG-C01: activeKeys dan activeAxes sekarang di-update dari useGamepadLoop
+  const [activeKeys, setActiveKeys] = React.useState<string[]>([]);
+  const [activeAxes, setActiveAxes] = React.useState<{lx: number, ly: number, rx: number, ry: number}>({lx: 0, ly: 0, rx: 0, ry: 0});
 
   // Persistence
   React.useEffect(() => {
@@ -107,9 +106,6 @@ export default function App() {
     } catch(e) { console.warn('Failed to save macros', e); }
   };
 
-  const [activeKeys, setActiveKeys] = React.useState<string[]>([]);
-  const [activeAxes, setActiveAxes] = React.useState<{lx: number, ly: number, rx: number, ry: number}>({lx: 0, ly: 0, rx: 0, ry: 0});
-
   const saveSettingsToStorage = async (socket: string, polling: number) => {
     try {
       const { Preferences } = await import('@capacitor/preferences');
@@ -143,7 +139,6 @@ export default function App() {
     setProfiles(prev => {
       const next = prev.filter(p => p.id !== profileId);
       if (next.length === 0) {
-         // Fallback if deleting the last profile
          next.push(INITIAL_PROFILES[0]);
       }
       saveProfilesToStorage(next);
@@ -160,7 +155,6 @@ export default function App() {
       const { Preferences } = await import('@capacitor/preferences');
       await Preferences.set({ key: 'nexion_active_profile', value: id });
     } catch(e) { console.warn('Failed to save active profile', e); }
-    syncActiveProfileIdOnServer(id);
   };
 
   const [overlayActive, setOverlayActive] = React.useState(false);
@@ -170,7 +164,7 @@ export default function App() {
     setToastMessage({text, type});
     setTimeout(() => setToastMessage(null), 3000);
   };
-  
+
   const handleToggleOverlay = async () => {
     try {
       if (overlayActive) {
@@ -190,22 +184,26 @@ export default function App() {
     }
   };
 
+  // FIX BUG-M11: Hapus delay 600ms di kill switch
   const handleGlobalKillSwitch = async () => {
     setIsKilling(true);
     try {
-      // Simulate hardware interrupt sequence
-      await new Promise(r => setTimeout(r, 600));
+      // Execute kill immediately tanpa delay
       window.dispatchEvent(new CustomEvent('emergency-kill'));
+
       if (overlayActive) {
         await stopOverlay();
         setOverlayActive(false);
       }
+
       await stopDaemon();
+
       setShizukuState(prev => ({
         ...prev,
         status: 'DISCONNECTED',
         daemonRunning: false
       }));
+
       handleLogMessage('CRITICAL: Global emergency kill-switch initiated. All services, Daemon, and Overlay terminated.');
     } catch (err) {
       console.error("Failed to trigger emergency kill-switch", err);
@@ -219,10 +217,8 @@ export default function App() {
     shizukuStateRef.current = shizukuState;
   }, [shizukuState]);
 
-  // Query real simulation logs and stats from server, override with Native plugin state if on device
   const fetchStatus = async () => {
     try {
-      // Just re-check native dependencies directly
       const nextState = await checkShizukuStatus(shizukuStateRef.current);
       setShizukuState(nextState);
     } catch (err) {
@@ -230,21 +226,26 @@ export default function App() {
     }
   };
 
-  const syncActiveProfileIdOnServer = (id: string) => {
-    // Only local in Capacitor
-    console.log("Profile active set to", id);
-  };
-
+  // FIX BUG-M08: Kurangi polling interval dari 5 detik ke 15 detik
   React.useEffect(() => {
     fetchStatus();
-    // Native background checker
-    const interval = setInterval(fetchStatus, 5000);
+    const interval = setInterval(fetchStatus, 15000); // Changed from 5000 to 15000
     return () => clearInterval(interval);
   }, []);
 
   const activeProfile = profiles.find(p => p.id === activeProfileId) || profiles[0];
 
-  useGamepadLoop(activeProfile, shizukuState.status === 'CONNECTED_SHIZUKU' || shizukuState.status === 'CONNECTED_ADB');
+  // FIX BUG-C01: Pass callback untuk update activeKeys dan activeAxes
+  const handleActiveStateChange = React.useCallback((state: GamepadActiveState) => {
+    setActiveKeys(state.keys);
+    setActiveAxes(state.axes);
+  }, []);
+
+  useGamepadLoop(
+    activeProfile, 
+    shizukuState.status === 'CONNECTED_SHIZUKU' || shizukuState.status === 'CONNECTED_ADB',
+    { onActiveStateChange: handleActiveStateChange }
+  );
 
   const handleLogMessage = React.useCallback((msg: string) => {
     setShizukuState(prev => {
@@ -269,41 +270,24 @@ export default function App() {
     handleLogMessage('SYSTEM: Kill-switch engaged. All services and injections terminated.');
   };
 
-  // Fix untuk BUG-M13: hapus dead code isNativeOverlayWindow.
-  // main.tsx sudah route ke OverlayApp jika ?overlay=true, sehingga App.tsx
-  // tidak akan dirender untuk URL tersebut. Branch ini adalah dead code yang
-  // menyebabkan kebingungan. Overlay rendering di-handle oleh OverlayApp.tsx.
-
   return (
     <div className="min-h-screen bg-[#060608] text-slate-100 flex flex-col font-sans selection:bg-indigo-500 selection:text-white">
-      {/* Visual background atmospheric elements */}
       <div className="absolute inset-x-0 top-0 h-[450px] bg-gradient-to-b from-indigo-950/15 via-transparent to-transparent pointer-events-none" />
 
-      {/* Corporate Brand Header Section */}
       <header className="border-b border-slate-900/80 bg-slate-950/40 backdrop-blur-md sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex justify-between items-center">
           <div className="flex items-center gap-3.5 group">
-            {/* High-fidelity gaming controller & crosshair cyber badge */}
             <div className="relative flex items-center justify-center w-12 h-12 rounded-xl bg-slate-950 border-2 border-indigo-500/30 group-hover:border-pink-500/60 shadow-lg shadow-indigo-950/50 transition-all duration-300 overflow-hidden cursor-crosshair">
-              {/* Futuristic honeycomb layout behind */}
               <div className="absolute inset-0 opacity-[0.06] bg-[radial-gradient(#ffffff_1px,transparent_1px)] [background-size:16px_16px] pointer-events-none" />
-              
-              {/* Real Game Controller + Crosshair Laser sight Vector */}
               <img src="/icon.svg" alt="Gamepad Mind Logo" className="w-8 h-8 group-hover:scale-110 group-hover:rotate-[15deg] transition-all duration-500 relative z-10" />
-
-              
-              {/* Outer corner cyber brackets detailing */}
               <div className="absolute top-1 left-1 w-2 h-2 border-t-2 border-l-2 border-indigo-500/60 rounded-tl" />
               <div className="absolute top-1 right-1 w-2 h-2 border-t-2 border-r-2 border-indigo-500/60 rounded-tr" />
               <div className="absolute bottom-1 left-1 w-2 h-2 border-b-2 border-l-2 border-indigo-500/60 rounded-bl" />
               <div className="absolute bottom-1 right-1 w-2 h-2 border-b-2 border-r-2 border-indigo-500/60 rounded-br" />
-
-              {/* Futuristic neon scanline aura overlay */}
               <div className="absolute inset-0 bg-gradient-to-r from-transparent via-indigo-500/10 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000 pointer-events-none" />
               <div className="absolute -inset-1.5 rounded-xl bg-gradient-to-tr from-indigo-500 to-pink-500 opacity-0 group-hover:opacity-15 blur transition-opacity duration-300 pointer-events-none" />
             </div>
 
-            {/* Typography brand styling */}
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-orbitron text-xs sm:text-sm font-black tracking-widest text-slate-100 uppercase group-hover:text-pink-400 group-hover:text-glow-pink transition-all duration-300">
@@ -319,7 +303,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* Quick HUD State indications & Emergency Kill Switch */}
           <div className="flex items-center gap-4">
             <div className="hidden md:flex items-center gap-6 text-[10px] text-slate-400 font-mono pr-2 border-r border-slate-800">
               <div className="flex items-center gap-2" title={shizukuState.status === 'CONNECTED_SHIZUKU' || shizukuState.status === 'CONNECTED_ADB' ? `Shizuku Service Running` : 'No gamepad connected'}>
@@ -329,7 +312,7 @@ export default function App() {
                 </span>
               </div>
             </div>
-            
+
             <div className="hidden md:flex items-center gap-6 text-xs text-slate-400 font-mono pr-2">
               {isEditingSettings ? (
                 <div className="flex items-center gap-4">
@@ -349,10 +332,10 @@ export default function App() {
                       onChange={(e) => setInputPolling(Number(e.target.value))}
                       className="bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-xs text-slate-200 outline-none"
                     >
-                      <option value={125}>125Hz</option>
-                      <option value={250}>250Hz</option>
-                      <option value={500}>500Hz</option>
-                      <option value={1000}>1000Hz</option>
+                      <option value="125">125Hz</option>
+                      <option value="250">250Hz</option>
+                      <option value="500">500Hz</option>
+                      <option value="1000">1000Hz</option>
                     </select>
                   </div>
                   <button 
@@ -402,10 +385,7 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main Container */}
       <main className="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 flex-1 flex flex-col gap-6 relative z-10">
-        
-        {/* Navigation Toolbar */}
         <div className="flex flex-wrap gap-2 border-b border-slate-900 pb-2">
           <button
             onClick={() => setSelectedMainView('shizuku')}
@@ -475,7 +455,6 @@ export default function App() {
           </button>
         </div>
 
-        {/* Dynamic Inner views representing our monorepo features */}
         <div className="flex-1 flex flex-col gap-6">
           {selectedMainView === 'shizuku' && (
             <ShizukuPanel 
@@ -484,7 +463,6 @@ export default function App() {
               onLogMessage={handleLogMessage} 
             />
           )}
-
           {selectedMainView === 'profile' && (
             <GameSelector
               profiles={profiles}
@@ -496,7 +474,6 @@ export default function App() {
               onLogMessage={handleLogMessage}
             />
           )}
-
           {selectedMainView === 'overlay' && (
             <OverlayWysiwyg
               activeProfile={activeProfile}
@@ -506,7 +483,6 @@ export default function App() {
               activeAxes={activeAxes}
             />
           )}
-
           {selectedMainView === 'macro' && (
             <MacroEngine
               macros={macros}
@@ -514,19 +490,16 @@ export default function App() {
               onLogMessage={handleLogMessage}
             />
           )}
-
           {selectedMainView === 'tester' && (
             <GamepadTester
               onLogMessage={handleLogMessage}
             />
           )}
-
           {selectedMainView === 'credits' && (
             <CreditsPanel />
           )}
         </div>
 
-        {/* Informative corporate tech section */}
         <section className="bg-slate-900/30 border border-slate-900/60 rounded-xl p-6 grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="space-y-1">
             <h4 className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
@@ -556,10 +529,8 @@ export default function App() {
             </p>
           </div>
         </section>
-
       </main>
 
-      {/* Corporate Technical Footer */}
       <footer className="border-t border-slate-900 py-6 bg-slate-950 mt-auto text-center text-[10px] font-mono text-slate-500">
         <div className="max-w-7xl mx-auto px-4 flex flex-col items-center gap-3">
           <div className="flex flex-col sm:flex-row justify-between items-center w-full gap-3">
@@ -582,7 +553,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Simulated Web Native Overlay rendering */}
       {overlayActive && (
         <div className="fixed inset-0 z-[9999] pointer-events-none">
           <OverlayWysiwyg

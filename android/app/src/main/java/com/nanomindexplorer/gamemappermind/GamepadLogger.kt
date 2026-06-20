@@ -71,7 +71,8 @@ object GamepadLogger {
                 }
                 val lf = File(logDir, LOG_FILE_NAME)
                 logFile = lf
-                writer = PrintWriter(lf, true) // append mode, auto-flush
+                val pw = PrintWriter(lf, true) // append mode, auto-flush
+                writer = pw
                 Log.d("GameMapper", "REC-23: Logger initialized at ${logFile?.absolutePath}")
             } catch (e: Exception) {
                 Log.e("GameMapper", "REC-23: Failed to init logger", e)
@@ -151,7 +152,8 @@ object GamepadLogger {
             // Create new log file.
             val lf = File(dir, LOG_FILE_NAME)
             logFile = lf
-            writer = PrintWriter(lf, true)
+            val pw = PrintWriter(lf, true)
+            writer = pw
 
             Log.d("GameMapper", "REC-23: Logs rotated")
         } catch (e: Exception) {

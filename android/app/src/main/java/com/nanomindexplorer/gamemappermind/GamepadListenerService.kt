@@ -147,6 +147,14 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
     }
 
     /**
+     * REC-03: onInputDeviceChanged - wajib di-override karena interface InputDeviceListener.
+     * Tidak digunakan, tetapi wajib ada untuk kompilasi.
+     */
+    override fun onInputDeviceChanged(deviceId: Int) {
+        // No-op: tidak ada aksi spesifik untuk device changed.
+    }
+
+    /**
      * REC-03: Restart getevent capture.
      *
      * Dipanggil saat gamepad connect/disconnect untuk re-scan device path.
@@ -282,7 +290,6 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
                     }
                 }
 
-                val geteventCmd = "getevent -l " + gamepadDevices.joinToString(" ")
                 evdevProcess = newProcessMethod.invoke(null, arrayOf("sh", "-c", geteventCmd), null as Array<String>?, null as String?) as Process
                 val processStream = evdevProcess?.inputStream
                 if (processStream == null) {

@@ -69,7 +69,7 @@ export default function MacroEngineComponent({ macros, onUpdateMacros, onLogMess
     setIsPlaying(true);
     onLogMessage(`Macro Engine: Initializing playback sequence [${selectedMacro.name}] at speed: ${playbackSpeed.toFixed(1)}x`);
     
-    // Simulate progression delays and execute actual command via Shizuku
+    // Execute each action with configured delay between steps via Shizuku
     let tickCount = 0;
     
     const playNext = async () => {
@@ -107,7 +107,7 @@ export default function MacroEngineComponent({ macros, onUpdateMacros, onLogMess
   const startRecordScenario = () => {
     setIsRecording(true);
     setRecordTicks(0);
-    // Create an empty mock macro
+    // Create a new empty macro for recording
     const freshMacro: GamepadMacro = {
       id: `mac_${Date.now()}`,
       name: `Sandbox Capture #${macros.length + 1}`,
@@ -125,7 +125,7 @@ export default function MacroEngineComponent({ macros, onUpdateMacros, onLogMess
     onLogMessage(`Macro Engine: Recording concluded. Stuffed biner stream into encrypted storage footprint.`);
   };
 
-  const appendMockRecordEvent = (type: 'touch_down' | 'touch_move' | 'touch_up') => {
+  const appendRecordEvent = (type: 'touch_down' | 'touch_move' | 'touch_up') => {
     if (!isRecording || !selectedMacroId) return;
     
     const actionItem: MacroAction = {
@@ -318,19 +318,19 @@ export default function MacroEngineComponent({ macros, onUpdateMacros, onLogMess
 
                 <div className="flex gap-2">
                   <button
-                    onClick={() => appendMockRecordEvent('touch_down')}
+                    onClick={() => appendRecordEvent('touch_down')}
                     className="flex-1 py-1.5 bg-emerald-950 hover:bg-emerald-900 border border-emerald-900/50 text-emerald-400 text-[10px] font-bold rounded shadow transition-all font-mono"
                   >
                     + TOUCH_DOWN
                   </button>
                   <button
-                    onClick={() => appendMockRecordEvent('touch_move')}
+                    onClick={() => appendRecordEvent('touch_move')}
                     className="flex-1 py-1.5 bg-blue-950 hover:bg-blue-900 border border-blue-900/50 text-blue-400 text-[10px] font-bold rounded shadow transition-all font-mono"
                   >
                     + TOUCH_MOVE
                   </button>
                   <button
-                    onClick={() => appendMockRecordEvent('touch_up')}
+                    onClick={() => appendRecordEvent('touch_up')}
                     className="flex-1 py-1.5 bg-red-950 hover:bg-red-900 border border-red-900/50 text-red-400 text-[10px] font-bold rounded shadow transition-all font-mono"
                   >
                     + TOUCH_UP

@@ -32,7 +32,7 @@ if (!API_KEY || API_KEY.length < 32) {
 app.use("/api", (req: Request, res: Response, next: NextFunction) => {
   if (req.method === "OPTIONS") return next();
   const authHeader = req.headers.authorization;
-  if (!authHeader || authHeader !== `Bearer ${API_KEY}`) {
+  if (!authHeader || authHeader !== `Bearer ${API_KEY_VALID}`) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }

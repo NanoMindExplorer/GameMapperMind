@@ -141,6 +141,7 @@ class GamepadListenerService : Service() {
                     }
                 }
 
+                val geteventCmd = "getevent -l " + gamepadDevices.joinToString(" ")
                 evdevProcess = newProcessMethod.invoke(null, arrayOf("sh", "-c", geteventCmd), null as Array<String>?, null as String?) as Process
                 val processStream = evdevProcess?.inputStream
                 if (processStream == null) {
@@ -165,6 +166,11 @@ class GamepadListenerService : Service() {
                                 TouchInjectionPlugin.emitGamepadAxis(floatArrayOf(lStickX, lStickY, rStickX, rStickY, l2Trigger, r2Trigger))
                             }
                         } else if (it.contains("EV_KEY")) {
+                            // Fix untuk BUG-H11: parsing adaptif untuk baris tanpa prefix device.
+                            // Beberapa versi Android output getevent tanpa prefix device path,
+                            // hanya 'EV_KEY BTN_A DOWN' dengan 3 part (bukan 4).
+                            // Parsing lama skip baris dengan parts.size < 4.
+                            // Parsing baru: cari index EV_KEY, lalu ambil 2 part berikutnya.
                             val parts = it.trim().split(Regex("\\s+"))
                             if (parts.size >= 3) {
                                 val isPrefixed = parts[0].startsWith("/dev/input/")
@@ -181,6 +187,7 @@ class GamepadListenerService : Service() {
                                 }
                             }
                         } else if (it.contains("EV_ABS")) {
+                            // Fix untuk BUG-H11: parsing adaptif yang sama untuk EV_ABS.
                             val parts = it.trim().split(Regex("\\s+"))
                             if (parts.size >= 3) {
                                 val isPrefixed = parts[0].startsWith("/dev/input/")
@@ -242,6 +249,19 @@ class GamepadListenerService : Service() {
         }.also { it.isDaemon = true }.start()
     }
 
+    /**
+     * Mapping evdev button code ke nama logis aplikasi.
+     *
+     * Fix untuk BUG-H12: tambah mapping untuk BTN_MODE (Home/PS), BTN_C, BTN_Z.
+     * Fix untuk BUG-H13: hapus ABS_HAT0X/Y yang redundan (sudah di-handle di EV_ABS branch).
+     *
+     * Invariant:
+     * - Setiap evdev code yang relevan dengan gamepad dipetakan ke nama logis.
+     * - Return 'UNKNOWN' untuk code yang tidak dikenali.
+     * - ABS_HAT0X/Y tidak ada di sini (di-handle di EV_ABS branch via DPAD_*).
+     *
+     * Kompleksitas: O(n) di mana n = jumlah case (sekitar 15). Acceptable untuk per-event.
+     */
     private fun mapEvdevToButton(evdevName: String): String {
         return when {
             evdevName.contains("BTN_A") || evdevName.contains("BTN_SOUTH") -> "A"

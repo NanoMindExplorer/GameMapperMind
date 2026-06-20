@@ -14,6 +14,15 @@ export interface TouchInjectionPluginType {
   executeShizukuCommand(options: { command: string }): Promise<{ output: string, error: string, exitCode: number }>;
   checkBattery(): Promise<{ isIgnoring: boolean }>;
   requestBatteryIgnore(): Promise<void>;
+
+  /**
+   * Fix untuk BUG-C08: native mapping methods.
+   * Start/stop GamepadMappingService (native foreground service).
+   * Update profile di native service via broadcast.
+   */
+  startNativeMapping(): Promise<void>;
+  stopNativeMapping(): Promise<void>;
+  updateNativeProfile(options: { profileJson: string }): Promise<void>;
   
   touchDown(options: { pointerId: number; x: number; y: number }): Promise<void>;
   touchMove(options: { pointerId: number; x: number; y: number }): Promise<void>;

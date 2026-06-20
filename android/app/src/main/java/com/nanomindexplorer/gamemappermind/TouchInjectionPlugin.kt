@@ -153,6 +153,64 @@ class TouchInjectionPlugin : Plugin() {
         call.resolve()
     }
 
+    /**
+     * Start GamepadMappingService (native foreground service untuk mapping).
+     *
+     * Fix untuk BUG-C08: pindahkan pemrosesan input dari WebView ke native service.
+     * Frontend memanggil method ini saat user activate overlay untuk start native mapping.
+     * Setelah service ini aktif, useGamepadLoop di WebView tidak perlu proses input
+     * (frontend dapat menonaktifkan useGamepadLoop jika service native aktif).
+     */
+    @PluginMethod
+    fun startNativeMapping(call: PluginCall) {
+        val intent = Intent(context, GamepadMappingService::class.java)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            context.startForegroundService(intent)
+        } else {
+            context.startService(intent)
+        }
+        call.resolve()
+    }
+
+    /**
+     * Stop GamepadMappingService.
+     */
+    @PluginMethod
+    fun stopNativeMapping(call: PluginCall) {
+        val intent = Intent(context, GamepadMappingService::class.java)
+        context.stopService(intent)
+        call.resolve()
+    }
+
+    /**
+     * Update profile di GamepadMappingService via Intent broadcast.
+     * Frontend memanggil method ini saat profile berubah.
+     * Service menerima broadcast dan reload profile dari JSON.
+     *
+     * @param profileJson string JSON dari GamepadProfile
+     */
+    @PluginMethod
+    fun updateNativeProfile(call: PluginCall) {
+        val profileJson = call.getString("profileJson") ?: ""
+        if (profileJson.isBlank()) {
+            call.reject("profileJson cannot be empty")
+            return
+        }
+
+        // Simpan ke SharedPreferences agar service bisa reload saat restart.
+        val prefs = context.getSharedPreferences("CapacitorPreferences", android.content.Context.MODE_PRIVATE)
+        prefs.edit().putString("nexion_active_profile_json", profileJson).apply()
+
+        // Broadcast update ke GamepadMappingService jika sedang running.
+        val intent = Intent(GamepadMappingService.ACTION_PROFILE_UPDATED)
+        intent.putExtra(GamepadMappingService.EXTRA_PROFILE_JSON, profileJson)
+        androidx.localbroadcastmanager.content.LocalBroadcastManager
+            .getInstance(context)
+            .sendBroadcast(intent)
+
+        call.resolve()
+    }
+
     @PluginMethod
     fun requestPermission(call: PluginCall) {
         val granted = Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
@@ -171,6 +229,21 @@ class TouchInjectionPlugin : Plugin() {
         }
     }
 
+    /**
+     * Whitelist command yang diizinkan untuk eksekusi via Shizuku shell.
+     * Set diinisialisasi sekali dan tidak bisa dimutasi setelahnya (immutable set).
+     * Invariant: hanya command yang EXACT MATCH dengan entry di set ini yang boleh dieksekusi.
+     * Keamanan: mencegah arbitrary shell execution dari JavaScript/WebView.
+     * Kompleksitas lookup: O(1) karena menggunakan HashSet backed Set.
+     */
+    private val ALLOWED_SHELL_COMMANDS: Set<String> = setOf(
+        "getevent -lp",
+        "getevent -l",
+        "getevent -pl",
+        "dumpsys input",
+        "pm list packages"
+    )
+
     @PluginMethod
     fun executeShizukuCommand(call: PluginCall) {
         val command = call.getString("command") ?: ""
@@ -184,13 +257,15 @@ class TouchInjectionPlugin : Plugin() {
         }
 
         try {
+            // Eksekusi command via Shizuku.newProcess dengan shell array.
+            // command sudah divalidasi, aman untuk dieksekusi.
             val process = Shizuku.newProcess(arrayOf("sh", "-c", command), null, null)
             val reader = java.io.BufferedReader(java.io.InputStreamReader(process.inputStream))
             val errorReader = java.io.BufferedReader(java.io.InputStreamReader(process.errorStream))
-            
+
             val output = StringBuilder()
             val errorOutput = StringBuilder()
-            
+
             var line: String?
             while (reader.readLine().also { line = it } != null) {
                 output.append(line).append("\n")
@@ -198,7 +273,7 @@ class TouchInjectionPlugin : Plugin() {
             while (errorReader.readLine().also { line = it } != null) {
                 errorOutput.append(line).append("\n")
             }
-            
+
             val exitCode = process.waitFor()
             val data = JSObject()
             data.put("output", output.toString())

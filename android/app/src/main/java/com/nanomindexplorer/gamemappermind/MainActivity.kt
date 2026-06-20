@@ -15,7 +15,7 @@ class MainActivity : BridgeActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         registerPlugin(TouchInjectionPlugin::class.java)
         super.onCreate(savedInstanceState)
-        
+
         bridge?.webView?.let { webView ->
             webView.settings.javaScriptEnabled = true
             webView.settings.domStorageEnabled = true

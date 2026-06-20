@@ -39,11 +39,17 @@ export interface GamepadProfile {
   customScreenshotUrl?: string;
 }
 
+/**
+ * Fix untuk BUG-M02: dokumentasi MacroAction diperbaiki.
+ * Sebelumnya komentar 'scale 0 - 1000' tetapi implementasi MacroEngine.tsx
+ * menggunakan pixel coordinate (recX/recY default 500 yang diasumsikan pixel).
+ * Sekarang dokumentasi konsisten: x dan y adalah pixel coordinate layar.
+ */
 export interface MacroAction {
   id: string;
   type: 'touch_down' | 'touch_move' | 'touch_up' | 'delay';
-  x?: number; // scale 0 - 1000 for high resolution
-  y?: number;
+  x?: number; // pixel coordinate (0 - screen width)
+  y?: number; // pixel coordinate (0 - screen height)
   delayMs?: number;
   pointerId: number;
 }

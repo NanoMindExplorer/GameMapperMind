@@ -57,6 +57,19 @@
             android:permission="moe.shizuku.manager.permission.API_V23"
         />
 
+        <!-- GamepadMappingService: native foreground service untuk mapping gamepad → touch.
+             Fix untuk BUG-C08: pindahkan pemrosesan input dari WebView ke native service
+             agar tetap running saat app di background. -->
+        <service
+            android:name=".GamepadMappingService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Native Gamepad Mapping Service"
+            />
+        </service>
+
         <provider
             android:name="rikka.shizuku.ShizukuProvider"
             android:authorities="${applicationId}.shizuku"

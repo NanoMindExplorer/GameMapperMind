@@ -5,22 +5,36 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
+import android.hardware.input.InputManager
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
+import android.view.InputDevice
 import androidx.core.app.NotificationCompat
 import java.io.BufferedReader
 import java.io.InputStreamReader
 
-class GamepadListenerService : Service() {
+class GamepadListenerService : Service(), InputManager.InputDeviceListener {
 
     private val CHANNEL_ID = "GamepadListenerChannel"
     private var evdevProcess: Process? = null
     private var isListening = false
 
+    /**
+     * REC-03: InputManager untuk detect gamepad connect/disconnect.
+     * Saat gamepad BT disconnect dan reconnect, device path /dev/input/eventN
+     * bisa berubah. Listener ini trigger re-scan device dan restart getevent capture.
+     */
+    private var inputManager: InputManager? = null
+
     companion object {
         var isRunning = false
         var activeProfileJson: String? = null // Set from React when profile changes
+        /**
+         * REC-03: Track gamepad device IDs yang terdeteksi.
+         * Saat onInputDeviceAdded/Removed, bandingkan dengan set ini untuk detect change.
+         */
+        private val connectedGamepadIds: MutableSet<Int> = mutableSetOf()
     }
 
     override fun onBind(intent: Intent): IBinder? = null
@@ -30,8 +44,135 @@ class GamepadListenerService : Service() {
         Log.d("GameMapper", "GamepadListenerService: onCreate")
         createNotificationChannel()
         startForegroundService()
+
+        // REC-03: Register InputDeviceListener untuk detect gamepad connect/disconnect.
+        setupInputDeviceListener()
+
         startGetEventCapture()
         isRunning = true
+    }
+
+    /**
+     * REC-03: Setup InputDeviceListener untuk handle BT reconnect.
+     *
+     * Saat gamepad BT disconnect dan reconnect:
+     * 1. onInputDeviceRemoved dipanggil dengan deviceId lama
+     * 2. onInputDeviceAdded dipanggil dengan deviceId baru
+     * 3. Kita restart getevent capture untuk dapat device path baru
+     *
+     * Math-Logic (Pasal 5.1):
+     * - isGamepad check: O(1) bitmask operation
+     * - Re-scan: O(n) di mana n = jumlah device (biasanya 5-10)
+     * - Restart getevent: O(1) stop old process + start new
+     *
+     * Invariant:
+     * - Hanya device dengan SOURCE_GAMEPAD atau SOURCE_JOYSTICK yang di-track
+     * - Saat gamepad added/removed, emit event ke frontend untuk UI update
+     * - connectedGamepadIds selalu konsisten dengan device yang terdeteksi
+     */
+    private fun setupInputDeviceListener() {
+        try {
+            inputManager = getSystemService(INPUT_SERVICE) as? InputManager
+            inputManager?.registerInputDeviceListener(this, null)
+
+            // Initial scan: dapatkan semua gamepad yang sudah terhubung.
+            val initialGamepadIds = mutableSetOf<Int>()
+            inputManager?.inputDeviceIds?.forEach { deviceId ->
+                val device = InputDevice.getDevice(deviceId)
+                if (device != null && isGamepadDevice(device)) {
+                    initialGamepadIds.add(deviceId)
+                    Log.d("GameMapper", "REC-03: Initial gamepad detected: ${device.name} (id=$deviceId)")
+                }
+            }
+            connectedGamepadIds.clear()
+            connectedGamepadIds.addAll(initialGamepadIds)
+
+            Log.d("GameMapper", "REC-03: InputDeviceListener registered, ${initialGamepadIds.size} gamepad(s) detected")
+        } catch (e: Exception) {
+            Log.e("GameMapper", "REC-03: Failed to setup InputDeviceListener", e)
+        }
+    }
+
+    /**
+     * REC-03: Helper untuk cek apakah device adalah gamepad.
+     *
+     * Math-Logic (Pasal 5.1):
+     * - Bitmask check: (sources and SOURCE_GAMEPAD) == SOURCE_GAMEPAD
+     * - Kompleksitas: O(1)
+     *
+     * Invariant: return true hanya jika source mengandung bit GAMEPAD atau JOYSTICK.
+     */
+    private fun isGamepadDevice(device: InputDevice): Boolean {
+        val sources = device.sources
+        return (sources and InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD ||
+               (sources and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK
+    }
+
+    /**
+     * REC-03: Dipanggil saat device baru terhubung (misal gamepad BT dinyalakan).
+     *
+     * Jika device adalah gamepad, trigger re-scan dan restart getevent capture
+     * untuk dapat device path baru.
+     */
+    override fun onInputDeviceAdded(deviceId: Int) {
+        val device = InputDevice.getDevice(deviceId)
+        if (device != null && isGamepadDevice(device)) {
+            Log.d("GameMapper", "REC-03: Gamepad added: ${device.name} (id=$deviceId)")
+            connectedGamepadIds.add(deviceId)
+
+            // Emit event ke frontend untuk UI update.
+            TouchInjectionPlugin.emitGamepadButton("GAMEPAD_CONNECTED", 1, 1.0f)
+
+            // Restart getevent capture untuk dapat device path baru.
+            restartGetEventCapture()
+        }
+    }
+
+    /**
+     * REC-03: Dipanggil saat device disconnect (misal gamepad BT dimatikan).
+     *
+     * Jika device adalah gamepad yang di-track, emit event dan trigger re-scan.
+     */
+    override fun onInputDeviceRemoved(deviceId: Int) {
+        if (connectedGamepadIds.contains(deviceId)) {
+            Log.d("GameMapper", "REC-03: Gamepad removed (id=$deviceId)")
+            connectedGamepadIds.remove(deviceId)
+
+            // Emit event ke frontend untuk UI update.
+            TouchInjectionPlugin.emitGamepadButton("GAMEPAD_DISCONNECTED", 0, 0.0f)
+
+            // Restart getevent capture untuk hapus device path lama.
+            restartGetEventCapture()
+        }
+    }
+
+    /**
+     * REC-03: Restart getevent capture.
+     *
+     * Dipanggil saat gamepad connect/disconnect untuk re-scan device path.
+     * - Stop old getevent process
+     * - Clear state
+     * - Start new getevent capture dengan device path baru
+     *
+     * Invariant:
+     * - Old process di-destroy sebelum new process start
+     * - isListening tetap true (tidak interrupt service)
+     * - Race condition: jika restart dipanggil berkali-kali cepat, hanya 1 yang aktif
+     */
+    @Synchronized
+    private fun restartGetEventCapture() {
+        Log.d("GameMapper", "REC-03: Restarting getevent capture due to device change")
+
+        // Stop old process.
+        try {
+            evdevProcess?.destroy()
+            evdevProcess = null
+        } catch (e: Exception) {
+            Log.w("GameMapper", "REC-03: Failed to destroy old getevent process", e)
+        }
+
+        // Start new capture (akan re-scan device path di startGetEventCapture).
+        startGetEventCapture()
     }
 
     private fun startForegroundService() {
@@ -288,6 +429,14 @@ class GamepadListenerService : Service() {
         Log.d("GameMapper", "GamepadListenerService: onDestroy")
         isRunning = false
         isListening = false
+
+        // REC-03: Unregister InputDeviceListener untuk prevent leak.
+        try {
+            inputManager?.unregisterInputDeviceListener(this)
+        } catch (e: Exception) {
+            Log.w("GameMapper", "REC-03: Failed to unregister InputDeviceListener", e)
+        }
+
         try {
             evdevProcess?.destroy()
         } catch (e: Exception) {}

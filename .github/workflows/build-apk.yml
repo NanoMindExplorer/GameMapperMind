@@ -39,9 +39,9 @@ jobs:
 
       - name: Install Gradle
         run: |
-          wget -q https://services.gradle.org/distributions/gradle-8.7-bin.zip
-          unzip -q gradle-8.7-bin.zip -d /opt/
-          echo "/opt/gradle-8.7/bin" >> $GITHUB_PATH
+          wget -q https://services.gradle.org/distributions/gradle-8.14.3-bin.zip
+          unzip -q gradle-8.14.3-bin.zip -d /opt/
+          echo "/opt/gradle-8.14.3/bin" >> $GITHUB_PATH
 
       - name: Build Android APK
         run: |

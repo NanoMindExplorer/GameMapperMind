@@ -75,14 +75,18 @@ object GamepadBatteryManager {
      * 3. BluetoothDevice battery GATT (jika ada)
      */
     private fun getBatteryLevel(context: Context, device: InputDevice): Int {
-        // Method 1: InputDevice.getBatteryLevel() (API 33+)
+        // Method 1: InputDevice.getBattery() (API 33+) via reflection
         try {
             if (android.os.Build.VERSION.SDK_INT >= 33) {
-                val battery = device.battery
+                val batteryMethod = InputDevice::class.java.getMethod("getBattery")
+                val battery = batteryMethod.invoke(device)
                 if (battery != null) {
-                    val status = battery.status
+                    val getStatusMethod = battery.javaClass.getMethod("getStatus")
+                    val status = getStatusMethod.invoke(battery)
                     if (status != null) {
-                        return status.level
+                        val getLevelMethod = status.javaClass.getMethod("getLevel")
+                        val level = getLevelMethod.invoke(status) as Int
+                        return level
                     }
                 }
             }

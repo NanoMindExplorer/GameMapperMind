@@ -107,10 +107,10 @@ object GamepadLogger {
 
                 // Juga log ke logcat untuk debugging real-time.
                 when (level) {
-                    Level.DEBUG -> Log.d(tag, message, exception)
-                    Level.INFO -> Log.i(tag, message, exception)
-                    Level.WARN -> Log.w(tag, message, exception)
-                    Level.ERROR -> Log.e(tag, message, exception)
+                    Level.DEBUG -> if (exception != null) Log.d(tag, message, exception) else Log.d(tag, message)
+                    Level.INFO -> if (exception != null) Log.i(tag, message, exception) else Log.i(tag, message)
+                    Level.WARN -> if (exception != null) Log.w(tag, message, exception) else Log.w(tag, message)
+                    Level.ERROR -> if (exception != null) Log.e(tag, message, exception) else Log.e(tag, message)
                 }
             } catch (e: Exception) {
                 Log.e("GameMapper", "REC-23: Failed to write log", e)

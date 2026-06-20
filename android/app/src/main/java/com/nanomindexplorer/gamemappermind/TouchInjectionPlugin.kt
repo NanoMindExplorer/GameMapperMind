@@ -164,17 +164,70 @@ class TouchInjectionPlugin : Plugin() {
         }
     }
 
+    /**
+     * Whitelist command yang diizinkan untuk eksekusi via Shizuku shell.
+     * Set diinisialisasi sekali dan tidak bisa dimutasi setelahnya (immutable set).
+     * Invariant: hanya command yang EXACT MATCH dengan entry di set ini yang boleh dieksekusi.
+     * Keamanan: mencegah arbitrary shell execution dari JavaScript/WebView.
+     * Kompleksitas lookup: O(1) karena menggunakan HashSet backed Set.
+     */
+    private val ALLOWED_SHELL_COMMANDS: Set<String> = setOf(
+        "getevent -lp",
+        "getevent -l",
+        "getevent -pl",
+        "dumpsys input",
+        "pm list packages"
+    )
+
     @PluginMethod
     fun executeShizukuCommand(call: PluginCall) {
         val command = call.getString("command") ?: ""
+
+        // Validasi 1: command tidak boleh kosong
+        if (command.isBlank()) {
+            call.reject("Command cannot be empty")
+            return
+        }
+
+        // Validasi 2: command wajib EXACT MATCH dengan whitelist
+        // Tidak boleh substring match, tidak boleh prefix match, tidak boleh pattern match.
+        // Invariant: jika command tidak ada di set, eksekusi DITOLAK tanpa eksekusi shell.
+        if (!ALLOWED_SHELL_COMMANDS.contains(command)) {
+            Log.w("GameMapper", "Rejected shell command (not in whitelist): $command")
+            val data = JSObject()
+            data.put("output", "")
+            data.put("error", "Command not allowed. Whitelist: ${ALLOWED_SHELL_COMMANDS.joinToString(", ")}")
+            data.put("exitCode", -1)
+            call.resolve(data)
+            return
+        }
+
+        // Validasi 3: command tidak boleh mengandung karakter berbahaya
+        // meskipun sudah lolos whitelist (defense in depth).
+        // Karakter dilarang: ; | & $ ` > < \n \r
+        // Invariant: command yang lolos whitelist seharusnya tidak mengandung karakter ini,
+        // tetapi check ini sebagai safety net jika whitelist di-edit di masa depan.
+        val forbiddenChars = setOf(';', '|', '&', '$', '`', '>', '<', '\n', '\r')
+        if (command.any { it in forbiddenChars }) {
+            Log.w("GameMapper", "Rejected shell command (contains forbidden characters): $command")
+            val data = JSObject()
+            data.put("output", "")
+            data.put("error", "Command contains forbidden characters")
+            data.put("exitCode", -1)
+            call.resolve(data)
+            return
+        }
+
         try {
+            // Eksekusi command via Shizuku.newProcess dengan shell array.
+            // command sudah divalidasi, aman untuk dieksekusi.
             val process = Shizuku.newProcess(arrayOf("sh", "-c", command), null, null)
             val reader = java.io.BufferedReader(java.io.InputStreamReader(process.inputStream))
             val errorReader = java.io.BufferedReader(java.io.InputStreamReader(process.errorStream))
-            
+
             val output = StringBuilder()
             val errorOutput = StringBuilder()
-            
+
             var line: String?
             while (reader.readLine().also { line = it } != null) {
                 output.append(line).append("\n")
@@ -182,7 +235,7 @@ class TouchInjectionPlugin : Plugin() {
             while (errorReader.readLine().also { line = it } != null) {
                 errorOutput.append(line).append("\n")
             }
-            
+
             val exitCode = process.waitFor()
             val data = JSObject()
             data.put("output", output.toString())

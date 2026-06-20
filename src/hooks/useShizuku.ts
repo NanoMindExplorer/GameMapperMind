@@ -45,14 +45,20 @@ export const useShizuku = () => {
     return { output: 'Legacy command disabled', error: '', exitCode: 0 };
   };
 
-  const requestShizukuPermission = async (): Promise<{ success: boolean; error?: string }> => {
+  /**
+   * Fix untuk BUG-L02: requestShizukuPermission return type konsisten dengan executeShizukuCommand.
+   * Sebelumnya return {success, error?} tanpa exitCode, tetapi executeShizukuCommand
+   * return {output, error, exitCode}. Sekarang tambah exitCode untuk konsistensi
+   * dan debugging (exitCode 0 = success, -1 = error).
+   */
+  const requestShizukuPermission = async (): Promise<{ success: boolean; error?: string; exitCode: number }> => {
     try {
         const { granted, requested } = await TouchInjection.requestPermission();
-        if (granted) return { success: true };
-        if (requested) return { success: false, error: "Permission requested, waiting for user response." };
-        return { success: false, error: "Permission denied" };
+        if (granted) return { success: true, exitCode: 0 };
+        if (requested) return { success: false, error: "Permission requested, waiting for user response.", exitCode: 1 };
+        return { success: false, error: "Permission denied", exitCode: 1 };
     } catch (e: any) {
-        return { success: false, error: e.message };
+        return { success: false, error: e.message, exitCode: -1 };
     }
   };
 

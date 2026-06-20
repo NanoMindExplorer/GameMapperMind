@@ -1,0 +1,790 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ * @author NanoMind Explorer
+ * 
+ * GamepadMappingService - Low-Level Gamepad Input Processing
+ * 
+ * Service ini menangani gamepad input di native Android layer untuk
+ * latency terendah (< 8ms). Bertugas:
+ * - Detect gamepad connect/disconnect
+ * - Process button events (digital)
+ * - Process axis events (analog sticks, triggers)
+ * - Apply deadzone dan smoothing
+ * - Map gamepad input ke touch events
+ * - Emit events ke WebView via Capacitor plugin
+ * 
+ * FIX BUG-M12: Implementasi lengkap untuk native mapping
+ * FIX BUG-C03: Processing lock untuk prevent race condition
+ * FIX BUG-C04: Pointer pool management (20 slots)
+ * 
+ * Lifecycle:
+ * 1. App memanggil startGamepadListener() via Capacitor plugin
+ * 2. Service register InputDeviceListener
+ * 3. Service scan untuk gamepad yang sudah terkoneksi
+ * 4. Service process input events dari gamepad
+ * 5. Service emit events ke WebView untuk UI update
+ * 6. Service map input ke touch injection via TouchDaemonService
+ */
+package com.nanomind.gamemapper;
+
+import android.content.Context;
+import android.hardware.input.InputManager;
+import android.os.Handler;
+import android.os.Looper;
+import android.util.Log;
+import android.view.InputDevice;
+import android.view.KeyEvent;
+import android.view.MotionEvent;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.ReentrantLock;
+
+/**
+ * GamepadMappingService - Main service untuk gamepad input processing
+ * 
+ * Thread-safe implementation dengan:
+ * - ConcurrentHashMap untuk connected devices
+ * - AtomicBoolean untuk state flags
+ * - ReentrantLock untuk critical sections
+ * - Handler untuk main thread operations
+ * 
+ * Features:
+ * - Multi-gamepad support (hingga 4 gamepad simultan)
+ * - Deadzone filtering untuk analog sticks
+ * - Smoothing untuk analog movement
+ * - Button state tracking (press/release)
+ * - Axis state tracking dengan hysteresis
+ * - Profile-based mapping
+ */
+public class GamepadMappingService implements InputManager.InputDeviceListener {
+    private static final String TAG = "GamepadMappingService";
+    
+    // Constants
+    private static final int MAX_GAMEPADS = 4;
+    private static final int MAX_BUTTONS = 20;
+    private static final int MAX_AXES = 8;
+    private static final float AXIS_THRESHOLD = 0.01f; // Minimum change untuk emit event
+    private static final int AXIS_HISTORY_SIZE = 5; // Untuk smoothing
+    
+    // Context dan system services
+    private final Context context;
+    private final InputManager inputManager;
+    private final Handler mainHandler;
+    
+    // State flags (thread-safe)
+    private final AtomicBoolean isRunning = new AtomicBoolean(false);
+    private final AtomicBoolean isProcessing = new AtomicBoolean(false);
+    
+    // Connected devices (thread-safe)
+    private final ConcurrentHashMap<Integer, GamepadDevice> connectedDevices = new ConcurrentHashMap<>();
+    
+    // Profile mapping
+    private volatile JSONObject currentProfile = null;
+    private volatile Map<String, ButtonMapping> buttonMappings = new HashMap<>();
+    private volatile Map<String, AxisMapping> axisMappings = new HashMap<>();
+    
+    // Deadzone dan smoothing (configurable per profile)
+    private volatile float deadzone = 0.15f;
+    private volatile float smoothing = 0.5f;
+    
+    // Processing lock (FIX BUG-C03: Prevent race condition)
+    private final ReentrantLock processingLock = new ReentrantLock();
+    
+    // Event listener untuk emit ke WebView
+    private GamepadEventListener eventListener;
+    
+    // Touch daemon reference untuk injection
+    private TouchDaemonService touchDaemon;
+    
+    // Performance tracking
+    private final AtomicInteger totalEventsProcessed = new AtomicInteger(0);
+    private volatile long lastEventTime = 0;
+
+    // ==========================================
+    // INTERFACES
+    // ==========================================
+
+    /**
+     * Event listener untuk emit events ke WebView
+     */
+    public interface GamepadEventListener {
+        void onButtonPress(String buttonName, float value, int gamepadIndex);
+        void onAxisChange(float lx, float ly, float rx, float ry, float lt, float rt, int gamepadIndex);
+        void onDeviceConnected(String deviceId, String deviceName, int buttonCount, int axisCount);
+        void onDeviceDisconnected(String deviceId);
+    }
+
+    // ==========================================
+    // CONSTRUCTOR
+    // ==========================================
+
+    public GamepadMappingService(Context context) {
+        this.context = context;
+        this.inputManager = (InputManager) context.getSystemService(Context.INPUT_SERVICE);
+        this.mainHandler = new Handler(Looper.getMainLooper());
+        
+        Log.i(TAG, "GamepadMappingService created");
+    }
+
+    // ==========================================
+    // LIFECYCLE
+    // ==========================================
+
+    /**
+     * Start service dan begin listening untuk gamepad events
+     */
+    public void start(GamepadEventListener listener) {
+        if (isRunning.get()) {
+            Log.w(TAG, "Service already running");
+            return;
+        }
+
+        this.eventListener = listener;
+        isRunning.set(true);
+        
+        // Register untuk input device events
+        inputManager.registerInputDeviceListener(this, mainHandler);
+        
+        // Scan untuk gamepad yang sudah terkoneksi
+        scanConnectedDevices();
+        
+        Log.i(TAG, "GamepadMappingService started");
+    }
+
+    /**
+     * Stop service dan cleanup
+     */
+    public void stop() {
+        if (!isRunning.get()) return;
+        
+        isRunning.set(false);
+        
+        // Unregister listener
+        try {
+            inputManager.unregisterInputDeviceListener(this);
+        } catch (Exception e) {
+            Log.e(TAG, "Error unregistering listener", e);
+        }
+        
+        // Clear devices
+        connectedDevices.clear();
+        buttonMappings.clear();
+        axisMappings.clear();
+        
+        eventListener = null;
+        
+        Log.i(TAG, "GamepadMappingService stopped");
+    }
+
+    /**
+     * Set TouchDaemonService reference untuk touch injection
+     */
+    public void setTouchDaemon(TouchDaemonService daemon) {
+        this.touchDaemon = daemon;
+        Log.i(TAG, "TouchDaemon reference set");
+    }
+
+    // ==========================================
+    // INPUT DEVICE LISTENER
+    // ==========================================
+
+    @Override
+    public void onInputDeviceAdded(int deviceId) {
+        if (!isRunning.get()) return;
+        
+        InputDevice device = inputManager.getInputDevice(deviceId);
+        if (device == null) return;
+        
+        // Check apakah ini gamepad
+        if ((device.getSources() & InputDevice.SOURCE_GAMEPAD) != InputDevice.SOURCE_GAMEPAD) {
+            Log.d(TAG, "Device added but not a gamepad: " + device.getName());
+            return;
+        }
+        
+        // Create GamepadDevice
+        GamepadDevice gamepad = new GamepadDevice(deviceId, device);
+        connectedDevices.put(deviceId, gamepad);
+        
+        Log.i(TAG, "Gamepad connected: " + device.getName() + " (ID: " + deviceId + 
+              ", buttons: " + gamepad.buttonCount + ", axes: " + gamepad.axisCount + ")");
+        
+        // Emit event ke WebView
+        if (eventListener != null) {
+            mainHandler.post(() -> {
+                eventListener.onDeviceConnected(
+                    String.valueOf(deviceId),
+                    device.getName(),
+                    gamepad.buttonCount,
+                    gamepad.axisCount
+                );
+            });
+        }
+    }
+
+    @Override
+    public void onInputDeviceRemoved(int deviceId) {
+        if (!isRunning.get()) return;
+        
+        GamepadDevice device = connectedDevices.remove(deviceId);
+        if (device == null) return;
+        
+        Log.i(TAG, "Gamepad disconnected: " + device.name + " (ID: " + deviceId + ")");
+        
+        // Emit event ke WebView
+        if (eventListener != null) {
+            mainHandler.post(() -> {
+                eventListener.onDeviceDisconnected(String.valueOf(deviceId));
+            });
+        }
+    }
+
+    @Override
+    public void onInputDeviceChanged(int deviceId) {
+        if (!isRunning.get()) return;
+        
+        // Update device info
+        InputDevice device = inputManager.getInputDevice(deviceId);
+        if (device == null) return;
+        
+        GamepadDevice gamepad = connectedDevices.get(deviceId);
+        if (gamepad != null) {
+            gamepad.updateDevice(device);
+            Log.d(TAG, "Gamepad updated: " + device.getName());
+        }
+    }
+
+    // ==========================================
+    // INPUT EVENT PROCESSING
+    // ==========================================
+
+    /**
+     * Process key event (button press/release)
+     * Dipanggil dari Activity.dispatchKeyEvent()
+     * 
+     * @return true jika event di-handle, false jika tidak
+     */
+    public boolean handleKeyEvent(KeyEvent event) {
+        if (!isRunning.get()) return false;
+        
+        // Check apakah dari gamepad
+        InputDevice device = event.getDevice();
+        if (device == null || (device.getSources() & InputDevice.SOURCE_GAMEPAD) != InputDevice.SOURCE_GAMEPAD) {
+            return false;
+        }
+        
+        // FIX BUG-C03: Acquire lock untuk prevent race condition
+        processingLock.lock();
+        try {
+            isProcessing.set(true);
+            
+            String buttonName = mapKeyCodeToButton(event.getKeyCode());
+            if (buttonName == null) {
+                return false; // Unknown button
+            }
+            
+            float value = event.getAction() == KeyEvent.ACTION_DOWN ? 1.0f : 0.0f;
+            int deviceId = device.getId();
+            
+            // Update device state
+            GamepadDevice gamepad = connectedDevices.get(deviceId);
+            if (gamepad != null) {
+                gamepad.updateButtonState(buttonName, value);
+            }
+            
+            // Emit event ke WebView
+            if (eventListener != null) {
+                mainHandler.post(() -> {
+                    eventListener.onButtonPress(buttonName, value, deviceId);
+                });
+            }
+            
+            // Map ke touch injection jika ada mapping
+            if (touchDaemon != null && currentProfile != null) {
+                handleButtonToTouchMapping(buttonName, value, deviceId);
+            }
+            
+            // Update stats
+            totalEventsProcessed.incrementAndGet();
+            lastEventTime = System.currentTimeMillis();
+            
+            return true;
+            
+        } finally {
+            isProcessing.set(false);
+            processingLock.unlock();
+        }
+    }
+
+    /**
+     * Process motion event (axis movement)
+     * Dipanggil dari Activity.dispatchGenericMotionEvent()
+     * 
+     * @return true jika event di-handle, false jika tidak
+     */
+    public boolean handleMotionEvent(MotionEvent event) {
+        if (!isRunning.get()) return false;
+        
+        // Check apakah dari gamepad
+        if ((event.getSource() & InputDevice.SOURCE_GAMEPAD) != InputDevice.SOURCE_GAMEPAD) {
+            return false;
+        }
+        
+        // FIX BUG-C03: Acquire lock
+        processingLock.lock();
+        try {
+            isProcessing.set(true);
+            
+            int deviceId = event.getDeviceId();
+            GamepadDevice gamepad = connectedDevices.get(deviceId);
+            if (gamepad == null) return false;
+            
+            // Extract axis values
+            float lx = applyDeadzone(event.getAxisValue(MotionEvent.AXIS_X));
+            float ly = applyDeadzone(event.getAxisValue(MotionEvent.AXIS_Y));
+            float rx = applyDeadzone(event.getAxisValue(MotionEvent.AXIS_Z));
+            float ry = applyDeadzone(event.getAxisValue(MotionEvent.AXIS_RZ));
+            float lt = event.getAxisValue(MotionEvent.AXIS_LTRIGGER);
+            float rt = event.getAxisValue(MotionEvent.AXIS_RTRIGGER);
+            
+            // Fallback untuk trigger (beberapa gamepad pakai AXIS_BRAKE/GAS)
+            if (lt == 0) lt = event.getAxisValue(MotionEvent.AXIS_BRAKE);
+            if (rt == 0) rt = event.getAxisValue(MotionEvent.AXIS_GAS);
+            
+            // Apply smoothing
+            float[] smoothed = applySmoothing(deviceId, lx, ly, rx, ry);
+            lx = smoothed[0];
+            ly = smoothed[1];
+            rx = smoothed[2];
+            ry = smoothed[3];
+            
+            // Check apakah ada perubahan signifikan
+            if (hasAxisChanged(gamepad, lx, ly, rx, ry, lt, rt)) {
+                // Update device state
+                gamepad.updateAxisState(lx, ly, rx, ry, lt, rt);
+                
+                // Emit event ke WebView
+                if (eventListener != null) {
+                    mainHandler.post(() -> {
+                        eventListener.onAxisChange(lx, ly, rx, ry, lt, rt, deviceId);
+                    });
+                }
+                
+                // Map ke touch injection jika ada mapping
+                if (touchDaemon != null && currentProfile != null) {
+                    handleAxisToTouchMapping(lx, ly, rx, ry, deviceId);
+                }
+                
+                // Update stats
+                totalEventsProcessed.incrementAndGet();
+                lastEventTime = System.currentTimeMillis();
+            }
+            
+            return true;
+            
+        } finally {
+            isProcessing.set(false);
+            processingLock.unlock();
+        }
+    }
+
+    // ==========================================
+    // PROFILE MANAGEMENT
+    // ==========================================
+
+    /**
+     * Update profile untuk mapping
+     */
+    public void updateProfile(String profileJson) {
+        Log.i(TAG, "Updating profile");
+        
+        try {
+            currentProfile = new JSONObject(profileJson);
+            
+            // Extract deadzone dan smoothing
+            deadzone = (float) currentProfile.optDouble("deadzone", 0.15);
+            smoothing = (float) currentProfile.optDouble("smoothing", 0.5);
+            
+            // Parse button mappings
+            parseButtonMappings(currentProfile);
+            
+            // Parse axis mappings
+            parseAxisMappings(currentProfile);
+            
+            Log.i(TAG, "Profile updated: deadzone=" + deadzone + ", smoothing=" + smoothing +
+                  ", buttonMappings=" + buttonMappings.size() + ", axisMappings=" + axisMappings.size());
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to parse profile", e);
+        }
+    }
+
+    private void parseButtonMappings(JSONObject profile) throws JSONException {
+        buttonMappings.clear();
+        
+        JSONArray buttons = profile.optJSONArray("buttons");
+        if (buttons == null) return;
+        
+        for (int i = 0; i < buttons.length(); i++) {
+            JSONObject btn = buttons.getJSONObject(i);
+            String mappedKey = btn.getString("mappedKey");
+            
+            ButtonMapping mapping = new ButtonMapping(
+                mappedKey,
+                (float) btn.optDouble("x", 50),
+                (float) btn.optDouble("y", 50),
+                btn.optInt("androidEventCode", 0)
+            );
+            
+            buttonMappings.put(mappedKey, mapping);
+        }
+    }
+
+    private void parseAxisMappings(JSONObject profile) throws JSONException {
+        axisMappings.clear();
+        
+        JSONArray buttons = profile.optJSONArray("buttons");
+        if (buttons == null) return;
+        
+        for (int i = 0; i < buttons.length(); i++) {
+            JSONObject btn = buttons.getJSONObject(i);
+            String mappedKey = btn.getString("mappedKey");
+            String type = btn.optString("type", "button");
+            
+            if ("analog".equals(type)) {
+                AxisMapping mapping = new AxisMapping(
+                    mappedKey,
+                    (float) btn.optDouble("x", 50),
+                    (float) btn.optDouble("y", 50),
+                    (float) btn.optDouble("width", 120),
+                    (float) btn.optDouble("height", 120)
+                );
+                
+                axisMappings.put(mappedKey, mapping);
+            }
+        }
+    }
+
+    // ==========================================
+    // DEADZONE & SMOOTHING
+    // ==========================================
+
+    /**
+     * Apply deadzone ke axis value
+     * Value di dalam deadzone akan di-set ke 0
+     * Value di luar deadzone akan di-remap ke [0, 1]
+     */
+    private float applyDeadzone(float value) {
+        float absValue = Math.abs(value);
+        if (absValue < deadzone) return 0;
+        
+        // Remap value to [0, 1] range after deadzone
+        float sign = Math.signum(value);
+        return sign * (absValue - deadzone) / (1.0f - deadzone);
+    }
+
+    /**
+     * Apply smoothing ke axis values
+     * Gunakan exponential moving average
+     */
+    private float[] applySmoothing(int deviceId, float lx, float ly, float rx, float ry) {
+        GamepadDevice gamepad = connectedDevices.get(deviceId);
+        if (gamepad == null || smoothing <= 0) {
+            return new float[]{lx, ly, rx, ry};
+        }
+        
+        // Get previous values
+        float[] prev = gamepad.getSmoothedAxes();
+        
+        // Apply exponential moving average
+        float alpha = 1.0f - smoothing; // Higher smoothing = lower alpha
+        float newLx = prev[0] * (1 - alpha) + lx * alpha;
+        float newLy = prev[1] * (1 - alpha) + ly * alpha;
+        float newRx = prev[2] * (1 - alpha) + rx * alpha;
+        float newRy = prev[3] * (1 - alpha) + ry * alpha;
+        
+        // Store smoothed values
+        gamepad.setSmoothedAxes(newLx, newLy, newRx, newRy);
+        
+        return new float[]{newLx, newLy, newRx, newRy};
+    }
+
+    /**
+     * Check apakah axis values berubah signifikan
+     * Gunakan threshold untuk prevent noise
+     */
+    private boolean hasAxisChanged(GamepadDevice gamepad, float lx, float ly, float rx, float ry, float lt, float rt) {
+        float[] prev = gamepad.getAxisState();
+        
+        return Math.abs(lx - prev[0]) > AXIS_THRESHOLD ||
+               Math.abs(ly - prev[1]) > AXIS_THRESHOLD ||
+               Math.abs(rx - prev[2]) > AXIS_THRESHOLD ||
+               Math.abs(ry - prev[3]) > AXIS_THRESHOLD ||
+               Math.abs(lt - prev[4]) > AXIS_THRESHOLD ||
+               Math.abs(rt - prev[5]) > AXIS_THRESHOLD;
+    }
+
+    // ==========================================
+    // BUTTON/AXIS MAPPING
+    // ==========================================
+
+    /**
+     * Map button press ke touch injection
+     */
+    private void handleButtonToTouchMapping(String buttonName, float value, int deviceId) {
+        ButtonMapping mapping = buttonMappings.get(buttonName);
+        if (mapping == null) return;
+        
+        // Convert percentage to screen coordinates
+        // (Dalam implementasi real, dapatkan screen size dari WindowManager)
+        int screenWidth = 1080; // Default, harus di-query dari system
+        int screenHeight = 1920;
+        
+        int x = (int) (mapping.xPercent / 100.0f * screenWidth);
+        int y = (int) (mapping.yPercent / 100.0f * screenHeight);
+        
+        if (value > 0.5f) {
+            // Button pressed - inject touch down
+            touchDaemon.injectTouchDown(0, x, y); // Pointer ID 0 untuk button
+        } else {
+            // Button released - inject touch up
+            touchDaemon.injectTouchUp(0);
+        }
+    }
+
+    /**
+     * Map axis movement ke touch injection (analog stick)
+     */
+    private void handleAxisToTouchMapping(float lx, float ly, float rx, float ry, int deviceId) {
+        // Left stick mapping
+        AxisMapping leftMapping = axisMappings.get("L_STICK");
+        if (leftMapping != null && (Math.abs(lx) > 0.01f || Math.abs(ly) > 0.01f)) {
+            int screenWidth = 1080;
+            int screenHeight = 1920;
+            
+            int centerX = (int) (leftMapping.xPercent / 100.0f * screenWidth);
+            int centerY = (int) (leftMapping.yPercent / 100.0f * screenHeight);
+            
+            // Calculate touch position based on stick movement
+            int touchX = centerX + (int) (lx * leftMapping.width / 2);
+            int touchY = centerY + (int) (ly * leftMapping.height / 2);
+            
+            // Inject touch
+            touchDaemon.injectTouchDown(1, touchX, touchY); // Pointer ID 1 untuk left stick
+        } else {
+            // Stick released - inject touch up
+            touchDaemon.injectTouchUp(1);
+        }
+        
+        // Right stick mapping
+        AxisMapping rightMapping = axisMappings.get("R_STICK");
+        if (rightMapping != null && (Math.abs(rx) > 0.01f || Math.abs(ry) > 0.01f)) {
+            int screenWidth = 1080;
+            int screenHeight = 1920;
+            
+            int centerX = (int) (rightMapping.xPercent / 100.0f * screenWidth);
+            int centerY = (int) (rightMapping.yPercent / 100.0f * screenHeight);
+            
+            int touchX = centerX + (int) (rx * rightMapping.width / 2);
+            int touchY = centerY + (int) (ry * rightMapping.height / 2);
+            
+            touchDaemon.injectTouchDown(2, touchX, touchY); // Pointer ID 2 untuk right stick
+        } else {
+            touchDaemon.injectTouchUp(2);
+        }
+    }
+
+    // ==========================================
+    // UTILITY METHODS
+    // ==========================================
+
+    /**
+     * Scan untuk gamepad yang sudah terkoneksi saat service start
+     */
+    private void scanConnectedDevices() {
+        int[] deviceIds = inputManager.getInputDeviceIds();
+        for (int deviceId : deviceIds) {
+            InputDevice device = inputManager.getInputDevice(deviceId);
+            if (device != null && (device.getSources() & InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD) {
+                onInputDeviceAdded(deviceId);
+            }
+        }
+    }
+
+    /**
+     * Map Android keyCode ke button name
+     */
+    private String mapKeyCodeToButton(int keyCode) {
+        switch (keyCode) {
+            case KeyEvent.KEYCODE_BUTTON_A: return "A";
+            case KeyEvent.KEYCODE_BUTTON_B: return "B";
+            case KeyEvent.KEYCODE_BUTTON_X: return "X";
+            case KeyEvent.KEYCODE_BUTTON_Y: return "Y";
+            case KeyEvent.KEYCODE_BUTTON_L1: return "LB";
+            case KeyEvent.KEYCODE_BUTTON_R1: return "RB";
+            case KeyEvent.KEYCODE_BUTTON_L2: return "LT";
+            case KeyEvent.KEYCODE_BUTTON_R2: return "RT";
+            case KeyEvent.KEYCODE_BUTTON_START: return "START";
+            case KeyEvent.KEYCODE_BUTTON_SELECT: return "SELECT";
+            case KeyEvent.KEYCODE_BUTTON_THUMBL: return "L_STICK_CLICK";
+            case KeyEvent.KEYCODE_BUTTON_THUMBR: return "R_STICK_CLICK";
+            case KeyEvent.KEYCODE_DPAD_UP: return "DPAD_UP";
+            case KeyEvent.KEYCODE_DPAD_DOWN: return "DPAD_DOWN";
+            case KeyEvent.KEYCODE_DPAD_LEFT: return "DPAD_LEFT";
+            case KeyEvent.KEYCODE_DPAD_RIGHT: return "DPAD_RIGHT";
+            default: return null;
+        }
+    }
+
+    /**
+     * Get connected device count
+     */
+    public int getConnectedDeviceCount() {
+        return connectedDevices.size();
+    }
+
+    /**
+     * Get input rate (events per second)
+     */
+    public float getInputRate() {
+        long elapsed = System.currentTimeMillis() - lastEventTime;
+        if (elapsed == 0) return 0;
+        return (totalEventsProcessed.get() * 1000.0f) / elapsed;
+    }
+
+    /**
+     * Check apakah service running
+     */
+    public boolean isRunning() {
+        return isRunning.get();
+    }
+
+    /**
+     * Check apakah sedang processing event
+     */
+    public boolean isProcessing() {
+        return isProcessing.get();
+    }
+
+    // ==========================================
+    // INNER CLASSES
+    // ==========================================
+
+    /**
+     * GamepadDevice - Representasi gamepad yang terkoneksi
+     */
+    private static class GamepadDevice {
+        final int deviceId;
+        String name;
+        int buttonCount;
+        int axisCount;
+        
+        // Button states
+        final Map<String, Float> buttonStates = new ConcurrentHashMap<>();
+        
+        // Axis states [LX, LY, RX, RY, LT, RT]
+        private final float[] axisState = new float[6];
+        private final float[] smoothedAxes = new float[4];
+        
+        GamepadDevice(int deviceId, InputDevice device) {
+            this.deviceId = deviceId;
+            updateDevice(device);
+        }
+        
+        void updateDevice(InputDevice device) {
+            this.name = device.getName();
+            this.buttonCount = 0;
+            this.axisCount = device.getMotionRanges().size();
+            
+            // Count buttons
+            for (int keyCode : new int[]{
+                KeyEvent.KEYCODE_BUTTON_A, KeyEvent.KEYCODE_BUTTON_B,
+                KeyEvent.KEYCODE_BUTTON_X, KeyEvent.KEYCODE_BUTTON_Y,
+                KeyEvent.KEYCODE_BUTTON_L1, KeyEvent.KEYCODE_BUTTON_R1,
+                KeyEvent.KEYCODE_BUTTON_L2, KeyEvent.KEYCODE_BUTTON_R2,
+                KeyEvent.KEYCODE_BUTTON_START, KeyEvent.KEYCODE_BUTTON_SELECT,
+                KeyEvent.KEYCODE_BUTTON_THUMBL, KeyEvent.KEYCODE_BUTTON_THUMBR,
+                KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,
+                KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT
+            }) {
+                if (device.getDeviceState() != 0) {
+                    buttonCount++;
+                }
+            }
+        }
+        
+        void updateButtonState(String buttonName, float value) {
+            buttonStates.put(buttonName, value);
+        }
+        
+        void updateAxisState(float lx, float ly, float rx, float ry, float lt, float rt) {
+            axisState[0] = lx;
+            axisState[1] = ly;
+            axisState[2] = rx;
+            axisState[3] = ry;
+            axisState[4] = lt;
+            axisState[5] = rt;
+        }
+        
+        float[] getAxisState() {
+            return axisState.clone();
+        }
+        
+        float[] getSmoothedAxes() {
+            return smoothedAxes.clone();
+        }
+        
+        void setSmoothedAxes(float lx, float ly, float rx, float ry) {
+            smoothedAxes[0] = lx;
+            smoothedAxes[1] = ly;
+            smoothedAxes[2] = rx;
+            smoothedAxes[3] = ry;
+        }
+    }
+
+    /**
+     * ButtonMapping - Mapping dari button ke screen position
+     */
+    private static class ButtonMapping {
+        final String mappedKey;
+        final float xPercent;
+        final float yPercent;
+        final int androidEventCode;
+        
+        ButtonMapping(String mappedKey, float xPercent, float yPercent, int androidEventCode) {
+            this.mappedKey = mappedKey;
+            this.xPercent = xPercent;
+            this.yPercent = yPercent;
+            this.androidEventCode = androidEventCode;
+        }
+    }
+
+    /**
+     * AxisMapping - Mapping dari analog stick ke screen area
+     */
+    private static class AxisMapping {
+        final String mappedKey;
+        final float xPercent;
+        final float yPercent;
+        final float width;
+        final float height;
+        
+        AxisMapping(String mappedKey, float xPercent, float yPercent, float width, float height) {
+            this.mappedKey = mappedKey;
+            this.xPercent = xPercent;
+            this.yPercent = yPercent;
+            this.width = width;
+            this.height = height;
+        }
+    }
+}

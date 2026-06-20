@@ -54,14 +54,39 @@ public class FloatingOverlayService extends Service {
         }
     }
 
+    /**
+     * Update notification untuk reflect mode edit/play.
+     *
+     * Fix untuk BUG-N10 (regression dari fix BUG-C01):
+     * - Sebelumnya updateNotification memakai notification ID 1 (sama dengan startForeground).
+     * - Notification ID reuse menyebabkan potential conflict saat service di-stop.
+     * - Notification lama mungkin masih terlihat di drawer setelah service stop.
+     *
+     * Pola regression: ID reuse (notification ID reuse antara foreground service dan update).
+     *
+     * Fix:
+     * - Gunakan startForeground(1, notification) untuk update notification foreground service.
+     *   Ini adalah cara Android yang benar untuk update notification foreground service.
+     *   Notification ID 1 tetap dipakai (foreground service ID), tetapi update via
+     *   startForeground bukan NotificationManager.notify.
+     * - NotificationManager.notify hanya untuk notification yang BUKAN foreground service.
+     *   Karena overlay service adalah foreground service, semua update via startForeground.
+     *
+     * Invariant:
+     * - Notification ID 1 hanya untuk foreground service notification
+     * - Update notification via startForeground (bukan NotificationManager.notify)
+     * - Saat service di-stop, notification otomatis di-cancel oleh Android
+     */
     private void updateNotification(boolean isEditing) {
         Intent notificationIntent = new Intent(this, MainActivity.class);
         PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, PendingIntent.FLAG_IMMUTABLE);
-        
+
         Intent actionIntent = new Intent(this, FloatingOverlayService.class);
         actionIntent.setAction(isEditing ? "ACTION_PLAY" : "ACTION_EDIT");
-        PendingIntent actionPendingIntent = PendingIntent.getService(this, isEditing ? 2 : 1, actionIntent, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-        
+        // Request code unik per mode untuk PendingIntent tidak collide
+        int requestCode = isEditing ? 2 : 1;
+        PendingIntent actionPendingIntent = PendingIntent.getService(this, requestCode, actionIntent, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+
         String actionTitle = isEditing ? "Resume Play" : "Edit Layout";
 
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
@@ -71,10 +96,19 @@ public class FloatingOverlayService extends Service {
                 .setContentIntent(pendingIntent)
                 .addAction(android.R.drawable.ic_menu_edit, actionTitle, actionPendingIntent)
                 .build();
-        
-        NotificationManager manager = getSystemService(NotificationManager.class);
-        if (manager != null) {
-            manager.notify(1, notification);
+
+        // Update notification via startForeground (bukan NotificationManager.notify).
+        // Ini cara Android yang benar untuk update foreground service notification.
+        // Notification ID 1 tetap dipakai (foreground service ID).
+        // Saat service di-stop, notification otomatis di-cancel.
+        try {
+            if (Build.VERSION.SDK_INT >= 34) {
+                startForeground(1, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
+            } else {
+                startForeground(1, notification);
+            }
+        } catch (Exception e) {
+            Log.e("GameMapper", "Failed to update foreground notification", e);
         }
     }
 

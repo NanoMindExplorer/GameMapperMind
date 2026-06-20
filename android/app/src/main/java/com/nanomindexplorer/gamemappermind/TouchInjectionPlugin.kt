@@ -36,6 +36,72 @@ class TouchInjectionPlugin : Plugin() {
             data.put("axes", jsArray)
             instance?.get()?.notifyListeners("onGamepadAxis", data)
         }
+
+        /**
+         * REC-01: Static inject methods untuk GamepadMappingService.
+         *
+         * Method-method ini dipanggil langsung dari GamepadMappingService (native foreground
+         * service) tanpa melewati WebView/PluginCall. Memungkinkan low-latency input mapping
+         * karena tidak ada IPC hop ke JavaScript.
+         *
+         * Math-Logic (Pasal 5.1):
+         * - Kompleksitas: O(1) per call (langsung delegate ke touchService)
+         * - Latency: ~2-3ms (binder IPC ke TouchDaemonService) vs ~18ms via WebView
+         *
+         * Invariant:
+         * - touchService wajib non-null (sudah bind via bindService)
+         * - Jika touchService null, return false (caller handle retry)
+         * - Thread-safe: touchService adalah volatile field, binder thread-safe
+         *
+         * @return true jika inject sukses, false jika touchService null atau inject gagal
+         */
+        fun injectButtonDown(pointerId: Int, x: Float, y: Float): Boolean {
+            val service = touchService ?: return false
+            return try {
+                service.touchDown(pointerId, x, y)
+            } catch (e: Exception) {
+                Log.e("GameMapper", "injectButtonDown failed", e)
+                false
+            }
+        }
+
+        fun injectButtonUp(pointerId: Int): Boolean {
+            val service = touchService ?: return false
+            return try {
+                service.touchUp(pointerId)
+            } catch (e: Exception) {
+                Log.e("GameMapper", "injectButtonUp failed", e)
+                false
+            }
+        }
+
+        fun injectAxisMove(pointerId: Int, x: Float, y: Float): Boolean {
+            val service = touchService ?: return false
+            return try {
+                service.touchMove(pointerId, x, y)
+            } catch (e: Exception) {
+                Log.e("GameMapper", "injectAxisMove failed", e)
+                false
+            }
+        }
+
+        fun injectReleaseAllPointers(): Boolean {
+            val service = touchService ?: return false
+            return try {
+                service.releaseAllPointers()
+            } catch (e: Exception) {
+                Log.e("GameMapper", "injectReleaseAllPointers failed", e)
+                false
+            }
+        }
+
+        /**
+         * Check apakah touchService sudah bound dan ready.
+         * GamepadMappingService panggil ini sebelum inject untuk avoid race condition.
+         */
+        fun isTouchServiceReady(): Boolean {
+            return touchService != null
+        }
     }
 
     private var isBound = false

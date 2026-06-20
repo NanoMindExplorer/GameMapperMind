@@ -87,6 +87,14 @@ class GamepadMappingService : Service() {
      * Button pointer (2-9) dikelola oleh TouchDaemonService.
      */
     private val pointerStates = SparseArray<PointerState>()
+
+    /**
+     * REC-01: Map buttonName → pointerId untuk track button press.
+     * Diperlukan karena PointerState tidak punya field untuk buttonName.
+     * Invariant: jika buttonPointerMap[pointerId] = buttonName, maka pointerStates[pointerId].isDown = true.
+     */
+    private val buttonPointerMap: MutableMap<Int, String> = mutableMapOf()
+
     private var baseDownTime: Long = 0L
 
     class PointerState {
@@ -290,61 +298,139 @@ class GamepadMappingService : Service() {
     /**
      * Release pointer analog (0 dan 1) yang masih aktif.
      * Dipanggil saat service destroy.
+     *
+     * REC-01: Sekarang panggil TouchInjectionPlugin.injectButtonUp untuk release pointer
+     * yang masih down, lalu injectReleaseAllPointers sebagai safety net.
      */
     private fun releaseAnalogPointers() {
-        // Iterate keys snapshot untuk avoid ConcurrentModification.
+        // Snapshot keys untuk avoid ConcurrentModification (sama seperti BUG-N03 fix).
         val keys = (0 until pointerStates.size()).map { pointerStates.keyAt(it) }.toList()
         for (key in keys) {
             val state = pointerStates.get(key)
             if (state?.isDown == true) {
-                // TouchInjectionPlugin akan handle touchUp via TouchDaemonService.
-                // Karena service ini tidak punya akses langsung ke TouchDaemonService binder,
-                // kita log saja. TouchInjectionPlugin.onDestroy akan release semua pointer.
-                Log.d("GameMapper", "GamepadMappingService: pointer $key still down on destroy")
+                TouchInjectionPlugin.injectButtonUp(key)
+                state.isDown = false
+                Log.d("GameMapper", "GamepadMappingService: released pointer $key on destroy")
             }
         }
+        // Clear button pointer map juga.
+        buttonPointerMap.clear()
         pointerStates.clear()
+
+        // Safety net: release semua pointer di TouchDaemonService.
+        TouchInjectionPlugin.injectReleaseAllPointers()
     }
 
     /**
      * Method untuk handle gamepad button event dari GamepadListenerService.
-     * GamepadListenerService dapat memanggil method ini langsung (bypass WebView) untuk
-     * performa optimal.
      *
-     * Catatan: saat ini GamepadListenerService emit via Capacitor notifyListeners ke WebView.
-     * Implementasi penuh (langsung panggil method ini) akan dilakukan di iterasi berikutnya
-     * karena melibatkan perubahan GamepadListenerService untuk bind ke service ini.
+     * REC-01: Sekarang menggunakan TouchInjectionPlugin.injectButtonDown/Up static methods
+     * untuk inject touch langsung ke TouchDaemonService tanpa melewati WebView.
+     *
+     * Hop IPC: GamepadListenerService → GamepadMappingService → TouchInjectionPlugin → TouchDaemonService
+     * Total hop: 2 (jauh lebih cepat dari 5 hop via WebView).
+     *
+     * Math-Logic (Pasal 5.1):
+     * - Lookup mapping: O(1) HashMap lookup
+     * - Inject: O(1) binder IPC
+     * - Total: O(1) per event, latency ~2-3ms
+     *
+     * Invariant:
+     * - isProfileLoaded harus true (profile sudah di-load)
+     * - TouchInjectionPlugin.isTouchServiceReady() harus true (touchService sudah bound)
+     * - Pointer ID untuk button: 2-9 (0 dan 1 reserved untuk analog stick)
      *
      * @param buttonName nama tombol (A, B, X, Y, LB, RB, LT, RT, L3, R3, START, SELECT, HOME, dll)
      * @param isPressed true jika tombol ditekan, false jika dilepas
      */
     fun onGamepadButton(buttonName: String, isPressed: Boolean) {
         if (!isProfileLoaded) return
+        if (!TouchInjectionPlugin.isTouchServiceReady()) {
+            Log.w("GameMapper", "GamepadMappingService: touchService not ready, skip $buttonName")
+            return
+        }
 
         val mapping = profileMapping[buttonName] ?: return
         val (screenW, screenH) = getScreenSize()
-        val targetX = (mapping.x * screenW).toInt()
-        val targetY = (mapping.y * screenH).toInt()
+        val targetX = (mapping.x * screenW).toFloat()
+        val targetY = (mapping.y * screenH).toFloat()
 
-        // Dispatch ke TouchInjectionPlugin untuk inject via TouchDaemonService.
-        // TouchInjectionPlugin adalah companion object, bisa diakses langsung.
-        // Catatan: implementasi penuh butuh TouchInjectionPlugin punya method static
-        // untuk inject tanpa PluginCall. Untuk sementara, log saja.
-        Log.d("GameMapper", "Native mapping: $buttonName -> ($targetX, $targetY) pressed=$isPressed")
+        // Apply anti-ban randomization jika enabled.
+        val (finalX, finalY) = if (profileAntiBan) {
+            applyAntiBanRandomization(targetX, targetY)
+        } else {
+            Pair(targetX, targetY)
+        }
 
-        // TODO: implementasi penuh butuh TouchInjectionPlugin.injectButtonDown/Up static method
-        // yang memanggil touchService?.touchDown/Up langsung tanpa PluginCall.
-        // Ini akan diimplementasi di iterasi berikutnya karena melibatkan perubahan
-        // signature TouchInjectionPlugin.
+        // Pointer pool: 0-1 untuk analog, 2-9 untuk button.
+        // Cari pointer slot yang available untuk button press.
+        if (isPressed) {
+            // Cek apakah button sudah pressed (dedup).
+            val existingPointer = findActiveButtonPointer(buttonName)
+            if (existingPointer != null) {
+                // Sudah pressed, skip (avoid double touchDown).
+                return
+            }
+            // Cari slot kosong (ID 2-9).
+            val pointerId = findFreeButtonPointerSlot() ?: return
+            val state = pointerStates.get(pointerId) ?: PointerState().also {
+                pointerStates.put(pointerId, it)
+            }
+            state.x = finalX
+            state.y = finalY
+            state.isDown = true
+            // Simpan buttonName di tag (gunakan map terpisah karena PointerState tidak punya field).
+            buttonPointerMap[pointerId] = buttonName
+
+            val success = TouchInjectionPlugin.injectButtonDown(pointerId, finalX, finalY)
+            if (!success) {
+                state.isDown = false
+                buttonPointerMap.remove(pointerId)
+                Log.w("GameMapper", "injectButtonDown failed for $buttonName (pointer $pointerId)")
+            } else {
+                Log.d("GameMapper", "Native mapping: $buttonName DOWN -> ($finalX, $finalY) pointer=$pointerId")
+            }
+        } else {
+            // Button released: cari pointer dengan buttonName ini, send touchUp.
+            val pointerId = findActiveButtonPointer(buttonName)
+            if (pointerId != null) {
+                val success = TouchInjectionPlugin.injectButtonUp(pointerId)
+                val state = pointerStates.get(pointerId)
+                state?.isDown = false
+                buttonPointerMap.remove(pointerId)
+                if (success) {
+                    Log.d("GameMapper", "Native mapping: $buttonName UP pointer=$pointerId")
+                } else {
+                    Log.w("GameMapper", "injectButtonUp failed for $buttonName (pointer $pointerId)")
+                }
+            }
+        }
     }
 
     /**
      * Method untuk handle gamepad axis event dari GamepadListenerService.
      *
+     * REC-01: Implementasi penuh dengan inject touch ke TouchDaemonService.
+     *
+     * Math-Logic (Pasal 5.1):
+     * - applyRadialDeadzone: O(1) per axis
+     * - Inject: O(1) binder IPC
+     * - Total: O(1) per axis event
+     *
+     * Pointer mapping:
+     * - L_STICK → pointer ID 0
+     * - R_STICK → pointer ID 1
+     *
+     * Invariant:
+     * - Jika magnitude > 0: touchDown (jika belum down) + touchMove
+     * - Jika magnitude == 0 dan pointer down: touchUp
+     * - State pointer 0 dan 1 di pointerStates
+     *
      * @param axes array float [lx, ly, rx, ry, l2, r2]
      */
     fun onGamepadAxis(axes: FloatArray) {
         if (!isProfileLoaded) return
+        if (!TouchInjectionPlugin.isTouchServiceReady()) return
         if (axes.size < 4) return
 
         val lx = axes[0]
@@ -355,34 +441,149 @@ class GamepadMappingService : Service() {
         val (adjLx, adjLy) = applyRadialDeadzone(lx, ly, profileDeadzone)
         val (adjRx, adjRy) = applyRadialDeadzone(rx, ry, profileDeadzone)
 
-        // Process left stick mapping.
+        // Process left stick mapping (pointer 0).
         val lMapping = profileMapping["L_STICK"]
         if (lMapping != null) {
             val lMag = Math.sqrt((adjLx * adjLx + adjLy * adjLy).toDouble()).toFloat()
             val (screenW, screenH) = getScreenSize()
-            val centerX = (lMapping.x * screenW).toInt()
-            val centerY = (lMapping.y * screenH).toInt()
-            val maxRadius = if (lMapping.width > 0) lMapping.width / 2 else 150
+            val centerX = (lMapping.x * screenW).toFloat()
+            val centerY = (lMapping.y * screenH).toFloat()
+            val maxRadius = if (lMapping.width > 0) lMapping.width / 2f else 150f
 
-            if (lMag > 0) {
-                val targetX = centerX + (adjLx * maxRadius).toInt()
-                val targetY = centerY + (adjLy * maxRadius).toInt()
-                Log.d("GameMapper", "Native L_STICK move -> ($targetX, $targetY)")
-                // TODO: inject touchDown/Move via TouchInjectionPlugin static method.
-            } else {
-                Log.d("GameMapper", "Native L_STICK release")
-                // TODO: inject touchUp.
-            }
+            processAnalogStick(pointerId = 0, magnitude = lMag, adjX = adjLx, adjY = adjLy,
+                centerX = centerX, centerY = centerY, maxRadius = maxRadius)
         }
 
-        // Process right stick mapping (sama dengan left stick).
+        // Process right stick mapping (pointer 1).
         val rMapping = profileMapping["R_STICK"]
         if (rMapping != null) {
             val rMag = Math.sqrt((adjRx * adjRx + adjRy * adjRy).toDouble()).toFloat()
-            if (rMag > 0) {
-                Log.d("GameMapper", "Native R_STICK move, mag=$rMag")
-                // TODO: inject.
+            val (screenW, screenH) = getScreenSize()
+            val centerX = (rMapping.x * screenW).toFloat()
+            val centerY = (rMapping.y * screenH).toFloat()
+            val maxRadius = if (rMapping.width > 0) rMapping.width / 2f else 150f
+
+            processAnalogStick(pointerId = 1, magnitude = rMag, adjX = adjRx, adjY = adjRy,
+                centerX = centerX, centerY = centerY, maxRadius = maxRadius)
+        }
+    }
+
+    /**
+     * Helper: process analog stick untuk satu pointer.
+     *
+     * Math-Logic (Pasal 5.1):
+     * - Jika magnitude > 0 dan pointer belum down: touchDown di center
+     * - Jika magnitude > 0 dan pointer sudah down: touchMove ke (center + axis * radius)
+     * - Jika magnitude == 0 dan pointer down: touchUp
+     *
+     * Invariant:
+     * - Pointer state konsisten dengan TouchDaemonService
+     * - Setelah release, pointer.isDown = false
+     */
+    private fun processAnalogStick(
+        pointerId: Int, magnitude: Float, adjX: Float, adjY: Float,
+        centerX: Float, centerY: Float, maxRadius: Float
+    ) {
+        val state = pointerStates.get(pointerId) ?: PointerState().also {
+            pointerStates.put(pointerId, it)
+        }
+
+        if (magnitude > 0) {
+            val targetX = centerX + (adjX * maxRadius)
+            val targetY = centerY + (adjY * maxRadius)
+
+            // Apply anti-ban randomization.
+            val (finalX, finalY) = if (profileAntiBan) {
+                applyAntiBanRandomization(targetX, targetY)
+            } else {
+                Pair(targetX, targetY)
+            }
+
+            if (!state.isDown) {
+                // First touch down di center.
+                val (downX, downY) = if (profileAntiBan) {
+                    applyAntiBanRandomization(centerX, centerY)
+                } else {
+                    Pair(centerX, centerY)
+                }
+                val success = TouchInjectionPlugin.injectButtonDown(pointerId, downX, downY)
+                if (success) {
+                    state.isDown = true
+                    state.x = downX
+                    state.y = downY
+                } else {
+                    Log.w("GameMapper", "Analog stick $pointerId touchDown failed")
+                    return
+                }
+            }
+
+            // Touch move ke target.
+            val moveSuccess = TouchInjectionPlugin.injectAxisMove(pointerId, finalX, finalY)
+            if (moveSuccess) {
+                state.x = finalX
+                state.y = finalY
+            }
+        } else if (state.isDown) {
+            // Release stick.
+            val success = TouchInjectionPlugin.injectButtonUp(pointerId)
+            if (success) {
+                state.isDown = false
+                Log.d("GameMapper", "Analog stick $pointerId released")
+            } else {
+                Log.w("GameMapper", "Analog stick $pointerId release failed")
             }
         }
+    }
+
+    /**
+     * Helper: apply anti-ban randomization (Gaussian offset ±3px).
+     * Sama dengan implementasi TypeScript di useGamepadLoop.
+     *
+     * Math-Logic (Pasal 5.1):
+     * - Box-Muller transform: z = sqrt(-2 * ln(u1)) * cos(2 * pi * u2)
+     * - sigma = 1.5, offset clamped ke [-3, 3]
+     * - Invariant: offset max 3px, direction tidak berubah signifikan
+     */
+    private fun applyAntiBanRandomization(x: Float, y: Float): Pair<Float, Float> {
+        val u1 = Math.max(1e-10, Math.random())
+        val u2 = Math.random()
+        val z1 = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2)
+        val z2 = Math.sqrt(-2.0 * Math.log(u1)) * Math.sin(2.0 * Math.PI * u2)
+
+        val sigma = 1.5
+        val offsetX = Math.max(-3.0, Math.min(3.0, z1 * sigma)).toFloat()
+        val offsetY = Math.max(-3.0, Math.min(3.0, z2 * sigma)).toFloat()
+
+        return Pair(x + offsetX, y + offsetY)
+    }
+
+    /**
+     * Helper: cari pointer slot kosong untuk button (ID 2-9).
+     * @return pointer ID jika ada slot kosong, null jika penuh.
+     */
+    private fun findFreeButtonPointerSlot(): Int? {
+        for (id in 2..9) {
+            val state = pointerStates.get(id)
+            if (state == null || !state.isDown) {
+                return id
+            }
+        }
+        return null
+    }
+
+    /**
+     * Helper: cari pointer ID yang sedang aktif untuk buttonName tertentu.
+     * @return pointer ID jika ditemukan, null jika tidak.
+     */
+    private fun findActiveButtonPointer(buttonName: String): Int? {
+        for ((pointerId, name) in buttonPointerMap) {
+            if (name == buttonName) {
+                val state = pointerStates.get(pointerId)
+                if (state?.isDown == true) {
+                    return pointerId
+                }
+            }
+        }
+        return null
     }
 }

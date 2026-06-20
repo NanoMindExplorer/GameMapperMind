@@ -590,6 +590,12 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, active: boolea
       resetAllPointers().catch((e) => {
         console.error('[useGamepadLoop] Failed to reset pointers on cleanup', e);
       });
+      // Fix untuk BUG-M14: stop native gamepad listener dan unbind service saat cleanup.
+      // Sebelumnya hanya remove JS listener, native service tetap running dan konsumsi baterai.
+      // Sekarang stopGamepadListener dan unbindService dipanggil untuk cleanup native resource.
+      // Catatan: pakai .catch(() => {}) karena jika service belum start, call akan reject.
+      TouchInjection.stopGamepadListener().catch(() => {});
+      TouchInjection.unbindService().catch(() => {});
     };
   }, [mapProfile, active]);
 }

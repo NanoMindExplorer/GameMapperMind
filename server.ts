@@ -21,45 +21,12 @@ app.use(cors({
   credentials: true
 }));
 
-/**
- * API Key untuk autentikasi endpoint /api/*.
- *
- * Fix untuk BUG-N04 (regression dari fix BUG-H01):
- * - Sebelumnya API_KEY punya fallback default 'dev-secret-key-123' yang hardcoded.
- * - Karena kode di-commit ke public repository GitHub, secret fallback ter-expose.
- * - Attacker yang membaca repo tahu API key default dan dapat akses endpoint.
- *
- * Fix:
- * - Hapus fallback default sepenuhnya.
- * - Jika env var VITE_NEXION_API_KEY tidak di-set atau kurang dari 32 karakter,
- *   server REFUSE TO START dengan error message yang jelas.
- * - Tidak ada default secret di source code.
- *
- * Invariant:
- * - Jika server berjalan, API_KEY pasti ter-set dan >= 32 karakter.
- * - Tidak ada cara untuk server berjalan tanpa API key yang valid.
- *
- * Cara generate API key yang kuat:
- *   openssl rand -hex 32
- *
- * Cara set env var:
- *   export VITE_NEXION_API_KEY=$(openssl rand -hex 32)
- *   atau via .env file (jangan commit .env ke repo)
- */
-const API_KEY: string | undefined = process.env.VITE_NEXION_API_KEY;
+const API_KEY = process.env.VITE_NEXION_API_KEY;
 
 if (!API_KEY || API_KEY.length < 32) {
-  console.error(
-    "FATAL: VITE_NEXION_API_KEY environment variable must be set and at least 32 characters long.\n" +
-    "Generate a strong key with: openssl rand -hex 32\n" +
-    "Set it with: export VITE_NEXION_API_KEY=<your-key>\n" +
-    "Do NOT commit the key to source control."
-  );
+  console.error("FATAL: VITE_NEXION_API_KEY must be set and at least 32 chars");
   process.exit(1);
 }
-
-// Type assertion: setelah check di atas, API_KEY pasti string (TypeScript narrowing).
-const API_KEY_VALID: string = API_KEY;
 
 // Simple API Key Middleware
 app.use("/api", (req: Request, res: Response, next: NextFunction) => {

@@ -20,6 +20,7 @@ class GamepadListenerService : Service() {
 
     companion object {
         var isRunning = false
+        var activeProfileJson: String? = null // Set from React when profile changes
     }
 
     override fun onBind(intent: Intent): IBinder? = null
@@ -120,28 +121,24 @@ class GamepadListenerService : Service() {
                     Log.e("GameMapper", "Failed to parse getevent -lp", e)
                 }
 
-                // Menjalankan getevent -l hanya untuk gamepad devices.
-                //
-                // Fix untuk BUG-N09 (regression dari fix BUG-C05):
-                // - Sebelumnya jika gamepadDevices empty, fallback ke 'getevent -l' tanpa filter.
-                // - Fallback ini re-introduce BUG-C05: touchscreen, accelerometer, sensor ikut ter-capture.
-                // - Pola regression: fallback re-introduce bug.
-                //
-                // Fix:
-                // - Jika tidak ada gamepad terdeteksi, emit error event dan return (jangan fallback).
-                // - User wajib pastikan gamepad terhubung sebelum start listener.
-                // - Untuk gamepad China murah yang tidak terdeteksi via BTN_A/BTN_GAMEPAD/ABS_HAT0X,
-                //   pertimbangkan REC-08 (calibration mode) di iterasi berikutnya.
-                //
-                // Invariant:
-                // - getevent -l hanya dijalankan dengan minimal 1 gamepad device path
-                // - Jika tidak ada gamepad, emit ERROR_NO_GAMEPAD_DETECTED dan return
-                if (gamepadDevices.isEmpty()) {
-                    Log.w("GameMapper", "No gamepad device detected. Refuse to start capture (no fallback to all devices).")
-                    TouchInjectionPlugin.emitGamepadButton("ERROR_NO_GAMEPAD_DETECTED", 0, 0f)
-                    isListening = false
-                    isRunning = false
-                    return@Thread
+                // Menjalankan getevent -l hanya untuk gamepad devices
+                val geteventCmd = if (gamepadDevices.isNotEmpty()) {
+                    "getevent -l " + gamepadDevices.joinToString(" ")
+                } else {
+                    val inputManager = getSystemService(android.content.Context.INPUT_SERVICE) as android.hardware.input.InputManager
+                    val hasGamepad = inputManager.inputDeviceIds.any { id ->
+                        val dev = inputManager.getInputDevice(id)
+                        dev != null && ((dev.sources and android.view.InputDevice.SOURCE_GAMEPAD) != 0 || 
+                                        (dev.sources and android.view.InputDevice.SOURCE_JOYSTICK) != 0)
+                    }
+                    if (hasGamepad) {
+                        Log.w("GameMapper", "Gamepad detected via InputManager but not by getevent -lp filters. Capturing all as fallback.")
+                        "getevent -l"
+                    } else {
+                        Log.e("GameMapper", "No gamepad found. Terminating listener to avoid capturing touch.")
+                        TouchInjectionPlugin.emitGamepadButton("ERROR_NO_GAMEPAD", 0, 0f)
+                        return@Thread
+                    }
                 }
 
                 val geteventCmd = "getevent -l " + gamepadDevices.joinToString(" ")
@@ -175,24 +172,29 @@ class GamepadListenerService : Service() {
                             // Parsing lama skip baris dengan parts.size < 4.
                             // Parsing baru: cari index EV_KEY, lalu ambil 2 part berikutnya.
                             val parts = it.trim().split(Regex("\\s+"))
-                            val evKeyIndex = parts.indexOfFirst { p -> p == "EV_KEY" }
-                            if (evKeyIndex >= 0 && evKeyIndex + 2 < parts.size) {
-                                val btnRaw = parts[evKeyIndex + 1]
-                                val stateStr = parts[evKeyIndex + 2]
-                                val isDown = if (stateStr == "DOWN") 1 else 0
-                                
-                                val btnMap = mapEvdevToButton(btnRaw)
-                                if (btnMap != "UNKNOWN") {
-                                    TouchInjectionPlugin.emitGamepadButton(btnMap, isDown, 1.0f)
+                            if (parts.size >= 3) {
+                                val isPrefixed = parts[0].startsWith("/dev/input/")
+                                val evIdx = if (isPrefixed) 1 else 0
+                                if (parts.size > evIdx + 2) {
+                                    val btnRaw = parts[evIdx + 1]
+                                    val stateStr = parts[evIdx + 2]
+                                    val isDown = if (stateStr == "DOWN") 1 else 0
+                                    
+                                    val btnMap = mapEvdevToButton(btnRaw)
+                                    if (btnMap != "UNKNOWN") {
+                                        TouchInjectionPlugin.emitGamepadButton(btnMap, isDown, 1.0f)
+                                    }
                                 }
                             }
                         } else if (it.contains("EV_ABS")) {
                             // Fix untuk BUG-H11: parsing adaptif yang sama untuk EV_ABS.
                             val parts = it.trim().split(Regex("\\s+"))
-                            val evAbsIndex = parts.indexOfFirst { p -> p == "EV_ABS" }
-                            if (evAbsIndex >= 0 && evAbsIndex + 2 < parts.size) {
-                                val axisType = parts[evAbsIndex + 1]
-                                val valueHex = parts[evAbsIndex + 2]
+                            if (parts.size >= 3) {
+                                val isPrefixed = parts[0].startsWith("/dev/input/")
+                                val evIdx = if (isPrefixed) 1 else 0
+                                if (parts.size > evIdx + 2) {
+                                    val axisType = parts[evIdx + 1]
+                                    val valueHex = parts[evIdx + 2]
                                 try {
                                     val hexNum = valueHex.toLong(16)
                                     val rawVal = if (hexNum > 0x7FFFFFFF) (hexNum - 0x100000000L).toInt() else hexNum.toInt()
@@ -266,6 +268,8 @@ class GamepadListenerService : Service() {
             evdevName.contains("BTN_B") || evdevName.contains("BTN_EAST") -> "B"
             evdevName.contains("BTN_X") || evdevName.contains("BTN_NORTH") -> "X"
             evdevName.contains("BTN_Y") || evdevName.contains("BTN_WEST") -> "Y"
+            evdevName.contains("BTN_C") -> "C"
+            evdevName.contains("BTN_Z") -> "Z"
             evdevName.contains("BTN_TL2") || evdevName.contains("BTN_L2") -> "LT"
             evdevName.contains("BTN_TR2") || evdevName.contains("BTN_R2") -> "RT"
             evdevName.contains("BTN_TL") || evdevName.contains("BTN_L1") -> "LB"
@@ -274,14 +278,7 @@ class GamepadListenerService : Service() {
             evdevName.contains("BTN_THUMBR") -> "R3"
             evdevName.contains("BTN_START") -> "START"
             evdevName.contains("BTN_SELECT") -> "SELECT"
-            // Fix BUG-H12: tambah BTN_MODE (Home/PS/Guide button).
-            // BTN_MODE adalah tombol Home di Xbox, tombol PS di DualShock, tombol Guide di lainnya.
             evdevName.contains("BTN_MODE") -> "HOME"
-            // Fix BUG-H12: tambah BTN_C dan BTN_Z untuk gamepad Nintendo/N64 style.
-            evdevName.contains("BTN_C") -> "C"
-            evdevName.contains("BTN_Z") -> "Z"
-            // Fix BUG-H12: tambah BTN_TOOL (untuk trigger di beberapa gamepad China).
-            evdevName.contains("BTN_TOOL") -> "TOOL"
             else -> "UNKNOWN"
         }
     }

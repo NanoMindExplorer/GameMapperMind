@@ -19,6 +19,7 @@ class TouchInjectionPlugin : Plugin() {
 
     companion object {
         var instance: java.lang.ref.WeakReference<TouchInjectionPlugin>? = null
+        var touchService: ITouchService? = null
 
         fun emitGamepadButton(buttonName: String, value: Int, pressure: Float) {
             val data = JSObject()
@@ -37,7 +38,6 @@ class TouchInjectionPlugin : Plugin() {
         }
     }
 
-    private var touchService: ITouchService? = null
     private var isBound = false
     private val USER_SERVICE_ARGS = Shizuku.UserServiceArgs(
         ComponentName("com.nanomindexplorer.gamemappermind", TouchDaemonService::class.java.name)
@@ -70,50 +70,15 @@ class TouchInjectionPlugin : Plugin() {
         Shizuku.addRequestPermissionResultListener(permissionListener)
     }
 
-    /**
-     * Override onDestroy untuk cleanup resource sebelum plugin di-destroy.
-     *
-     * Fix untuk BUG-N07 (regression dari fix BUG-H08):
-     * - Sebelumnya onDestroy tidak memanggil super.onDestroy() dan tidak unbind service.
-     * - Shizuku binder ke TouchDaemonService bisa leak jika plugin di-destroy tanpa unbind.
-     * - Memory leak dan binder leak pada config change atau activity recreate.
-     *
-     * Pola regression: cleanup incomplete (override tanpa super call).
-     *
-     * Fix:
-     * - Remove permission listener (sudah ada sebelumnya)
-     * - Release all pointers via touchService (jika masih bound)
-     * - Unbind Shizuku user service (jika masih bound)
-     * - Set touchService = null dan isBound = false
-     * - Panggil super.onDestroy() di akhir (wajib untuk plugin lifecycle)
-     *
-     * Invariant:
-     * - Setelah onDestroy: isBound == false, touchService == null
-     * - Permission listener sudah di-remove (tidak leak)
-     * - Pointer aktif sudah di-release (tidak stuck)
-     * - Shizuku user service sudah di-unbind (tidak leak binder)
-     */
-    fun onDestroy() {
-        // Remove permission listener untuk mencegah leak.
+    override fun handleOnDestroy() {
         Shizuku.removeRequestPermissionResultListener(permissionListener)
-
-        // Cleanup Shizuku binding jika masih bound.
         if (isBound) {
-            try {
-                // Release semua pointer aktif sebelum unbind (mencegah stuck touch).
-                touchService?.releaseAllPointers()
-                // Unbind user service. Flag true = stop service.
-                Shizuku.unbindUserService(USER_SERVICE_ARGS, serviceConnection, true)
-                touchService = null
-                isBound = false
-            } catch (e: Exception) {
-                Log.e("GameMapper", "Failed to unbind Shizuku user service in onDestroy", e)
-            }
+            touchService?.releaseAllPointers()
+            Shizuku.unbindUserService(USER_SERVICE_ARGS, serviceConnection, true)
+            touchService = null
+            isBound = false
         }
-
-        // Wajib panggil super.onDestroy() untuk plugin lifecycle yang benar.
-        // Tanpa ini, Capacitor bridge tidak akan tahu plugin sudah destroy.
-        super.onDestroy()
+        super.handleOnDestroy()
     }
 
     @PluginMethod
@@ -282,39 +247,12 @@ class TouchInjectionPlugin : Plugin() {
     @PluginMethod
     fun executeShizukuCommand(call: PluginCall) {
         val command = call.getString("command") ?: ""
-
-        // Validasi 1: command tidak boleh kosong
-        if (command.isBlank()) {
-            call.reject("Command cannot be empty")
-            return
-        }
-
-        // Validasi 2: command wajib EXACT MATCH dengan whitelist
-        // Tidak boleh substring match, tidak boleh prefix match, tidak boleh pattern match.
-        // Invariant: jika command tidak ada di set, eksekusi DITOLAK tanpa eksekusi shell.
-        if (!ALLOWED_SHELL_COMMANDS.contains(command)) {
-            Log.w("GameMapper", "Rejected shell command (not in whitelist): $command")
-            val data = JSObject()
-            data.put("output", "")
-            data.put("error", "Command not allowed. Whitelist: ${ALLOWED_SHELL_COMMANDS.joinToString(", ")}")
-            data.put("exitCode", -1)
-            call.resolve(data)
-            return
-        }
-
-        // Validasi 3: command tidak boleh mengandung karakter berbahaya
-        // meskipun sudah lolos whitelist (defense in depth).
-        // Karakter dilarang: ; | & $ ` > < \n \r
-        // Invariant: command yang lolos whitelist seharusnya tidak mengandung karakter ini,
-        // tetapi check ini sebagai safety net jika whitelist di-edit di masa depan.
-        val forbiddenChars = setOf(';', '|', '&', '$', '`', '>', '<', '\n', '\r')
-        if (command.any { it in forbiddenChars }) {
-            Log.w("GameMapper", "Rejected shell command (contains forbidden characters): $command")
-            val data = JSObject()
-            data.put("output", "")
-            data.put("error", "Command contains forbidden characters")
-            data.put("exitCode", -1)
-            call.resolve(data)
+        
+        // Anti-Regression: Fix BUG-N01 via whitelist
+        val ALLOWED_COMMANDS = listOf("getevent -lp", "getevent -l", "dumpsys input", "pm list packages")
+        
+        if (!ALLOWED_COMMANDS.contains(command)) {
+            call.reject("Command not allowed")
             return
         }
 
@@ -345,6 +283,13 @@ class TouchInjectionPlugin : Plugin() {
         } catch (e: Exception) {
             call.reject(e.localizedMessage)
         }
+    }
+
+    @PluginMethod
+    fun updateActiveProfile(call: PluginCall) {
+        val configJson = call.getString("profileJson")
+        GamepadListenerService.activeProfileJson = configJson
+        call.resolve()
     }
 
     @PluginMethod
@@ -387,15 +332,11 @@ class TouchInjectionPlugin : Plugin() {
 
     @PluginMethod
     fun touchDown(call: PluginCall) {
-        val id = call.getInt("pointerId") ?: 0
-        // Fix untuk BUG-H10: validasi x dan y wajib ada dan valid.
-        // Sebelumnya getFloat('x') ?: 0f fallback ke 0 jika null, menyebabkan
-        // touch di-inject di (0,0) yang biasanya pojok kiri atas layar.
-        // Sekarang reject call dengan error jika x atau y null/NaN.
+        val id = call.getInt("pointerId")
         val x = call.getFloat("x")
         val y = call.getFloat("y")
-        if (x == null || y == null || x.isNaN() || y.isNaN()) {
-            call.reject("touchDown: x and y must be valid numbers, got x=$x y=$y")
+        if (id == null || x == null || y == null) {
+            call.reject("pointerId, x, and y must be provided")
             return
         }
         try {
@@ -412,13 +353,12 @@ class TouchInjectionPlugin : Plugin() {
 
     @PluginMethod
     fun touchMove(call: PluginCall) {
-        val id = call.getInt("pointerId") ?: 0
-        // Fix untuk BUG-H10: validasi x dan y wajib ada dan valid (sama dengan touchDown).
+        val id = call.getInt("pointerId")
         val x = call.getFloat("x")
         val y = call.getFloat("y")
-        if (x == null || y == null || x.isNaN() || y.isNaN()) {
-            call.reject("touchMove: x and y must be valid numbers, got x=$x y=$y")
-            return
+        if (id == null || x == null || y == null) {
+             call.reject("pointerId, x, and y must be provided")
+             return
         }
         try {
             val success = touchService?.touchMove(id, x, y) ?: false
@@ -434,7 +374,11 @@ class TouchInjectionPlugin : Plugin() {
 
     @PluginMethod
     fun touchUp(call: PluginCall) {
-        val id = call.getInt("pointerId") ?: 0
+        val id = call.getInt("pointerId")
+        if (id == null) {
+            call.reject("pointerId must be provided")
+            return
+        }
         try {
             val success = touchService?.touchUp(id) ?: false
             if (success) {
@@ -449,11 +393,10 @@ class TouchInjectionPlugin : Plugin() {
 
     @PluginMethod
     fun injectTap(call: PluginCall) {
-        // Fix untuk BUG-H10: validasi x dan y wajib ada dan valid.
         val x = call.getFloat("x")
         val y = call.getFloat("y")
-        if (x == null || y == null || x.isNaN() || y.isNaN()) {
-            call.reject("injectTap: x and y must be valid numbers, got x=$x y=$y")
+        if (x == null || y == null) {
+            call.reject("x and y must be provided")
             return
         }
         try {

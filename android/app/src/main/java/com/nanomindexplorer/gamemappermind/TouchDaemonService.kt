@@ -243,11 +243,10 @@ class TouchDaemonService : Service() {
         val snapshotKeys: List<Int> = (0 until pointers.size()).map { pointers.keyAt(it) }.toList()
 
         var anyReleased = false
-        for (pointerId in snapshotKeys) {
-            // Ambil state dari original pointers (mungkin sudah berubah jika ada concurrent access,
-            // tetapi karena ini service single-threaded untuk touch operations, aman).
+        val keys = (0 until pointers.size()).map { pointers.keyAt(it) }
+        for (pointerId in keys) {
             val state = pointers.get(pointerId)
-            if (state != null && state.isDown) {
+            if (state?.isDown == true) {
                 touchUp(pointerId)
                 anyReleased = true
             }

@@ -299,6 +299,10 @@ public class FloatingOverlayService extends Service {
     @Override
     public void onDestroy() {
         super.onDestroy();
+        NotificationManager manager = getSystemService(NotificationManager.class);
+        if (manager != null) {
+            manager.cancel(1);
+        }
         if (webView != null) {
             windowManager.removeView(webView);
             webView.destroy();

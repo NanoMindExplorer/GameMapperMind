@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import OverlayWysiwyg from './components/OverlayWysiwyg';
 import { GamepadProfile } from './types';
 import { INITIAL_PROFILES } from './defaults';
-import { validateGamepadProfile } from './schemas';
+import { GamepadProfileSchema } from './schemas/profile';
 
 // Declare native interface
 declare global {
@@ -90,29 +90,21 @@ export default function OverlayApp() {
      * - MessageEvent dari origin tidak diizinkan di-reject.
      */
     const handleMessage = (e: MessageEvent) => {
-      // Origin check: hanya izinkan origin yang dikenal.
-      // 'null' origin untuk file:// dan sandboxed iframe di dev mode.
-      if (e.origin && !ALLOWED_MESSAGE_ORIGINS.includes(e.origin)) {
-        console.warn('OverlayApp.handleMessage: rejected message from untrusted origin:', e.origin);
+      // Check origin if possible, but Capacitor WebView might be arbitrary 'http://localhost'
+      if (e.origin !== "https://appassets.androidplatform.net" && e.origin !== "http://localhost") {
         return;
       }
-
       try {
-        let data: unknown = e.data;
-        if (typeof data === 'string') {
-          data = JSON.parse(data);
+        if (e.data) {
+          const parsed = typeof e.data === 'string' ? JSON.parse(e.data) : e.data;
+          const result = GamepadProfileSchema.safeParse(parsed);
+          if (result.success) {
+            setProfile(result.data as GamepadProfile);
+          } else {
+            console.warn('Invalid profile received', result.error);
+          }
         }
-
-        // Zod validation: data wajib valid GamepadProfile.
-        const validation = validateGamepadProfile(data);
-        if (validation.success && validation.data) {
-          setProfile(validation.data);
-        } else {
-          console.error('OverlayApp.handleMessage: invalid profile data:', validation.error);
-        }
-      } catch (err) {
-        console.error('OverlayApp.handleMessage: failed to parse message data:', err);
-      }
+      } catch (err) {}
     };
     window.addEventListener('message', handleMessage);
 

@@ -69,7 +69,7 @@ export default function MacroEngineComponent({ macros, onUpdateMacros, onLogMess
     setIsPlaying(true);
     onLogMessage(`Macro Engine: Initializing playback sequence [${selectedMacro.name}] at speed: ${playbackSpeed.toFixed(1)}x`);
     
-    // Execute each action with configured delay between steps via Shizuku
+    // Execute each action with configured delay between steps
     let tickCount = 0;
     
     const playNext = async () => {

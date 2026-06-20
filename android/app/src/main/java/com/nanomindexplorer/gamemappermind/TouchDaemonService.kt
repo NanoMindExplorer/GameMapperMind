@@ -209,17 +209,63 @@ class TouchDaemonService : Service() {
         return result
     }
 
+    /**
+     * Release semua pointer yang masih aktif (isDown=true) dengan aman.
+     *
+     * Fix untuk BUG-N03 (regression dari fix BUG-C07):
+     * - Sebelumnya iterasi SparseArray sambil memanggil touchUp yang mutasi SparseArray.
+     * - SparseArray seperti ArrayList: tidak aman dimutasi selama iterasi.
+     * - Setelah remove, entry berikutnya bergeser ke indeks yang sedang diiterasi,
+     *   menyebabkan beberapa entry di-skip.
+     * - Untuk kasus clear(), iterasi berhenti prematur.
+     *
+     * Collection Mutation Safety Analysis (Pasal 5.11):
+     * - Collection: SparseArray<PointerState>
+     * - Operasi mutasi selama iterasi: touchUp(key) → pointers.remove(key) atau pointers.clear()
+     * - Risk: ConcurrentModificationException (logic), index shift, entry skip
+     * - Mitigasi: snapshot keys terlebih dahulu ke List immutable, lalu iterasi snapshot
+     *   sambil mutasi original SparseArray. Snapshot tidak terpengaruh oleh mutasi original.
+     *
+     * Invariant:
+     * - Setelah method ini selesai, pointers.size() == 0 (semua pointer di-release)
+     * - Setiap pointer yang isDown=true mendapat touchUp() call
+     * - Tidak ada pointer yang skip (verifikasi via snapshot keys)
+     *
+     * Kompleksitas:
+     * - Snapshot: O(n) untuk membuat List dari SparseArray
+     * - Iterasi + touchUp: O(n) untuk loop, masing-masing touchUp O(n) untuk iterasi internal
+     * - Total: O(n^2) di mana n = jumlah pointer (n maksimal 10, jadi 100 operations max)
+     * - Acceptable karena n kecil dan method ini jarang dipanggil (saat kill switch)
+     */
     fun releaseAllPointers(): Boolean {
+        // Snapshot keys ke List immutable.
+        // Setelah ini, snapshot tidak terpengaruh oleh mutasi pointers (SparseArray).
+        val snapshotKeys: List<Int> = (0 until pointers.size()).map { pointers.keyAt(it) }.toList()
+
         var anyReleased = false
-        for (i in 0 until pointers.size()) {
-            val pointerId = pointers.keyAt(i)
-            val state = pointers.valueAt(i)
-            if (state.isDown) {
+        for (pointerId in snapshotKeys) {
+            // Ambil state dari original pointers (mungkin sudah berubah jika ada concurrent access,
+            // tetapi karena ini service single-threaded untuk touch operations, aman).
+            val state = pointers.get(pointerId)
+            if (state != null && state.isDown) {
                 touchUp(pointerId)
                 anyReleased = true
             }
         }
+
+        // Final safety: clear semua entry untuk memastikan state bersih.
+        // Setelah iterasi snapshot, semua pointer yang isDown=true sudah di-touchUp.
+        // pointers.remove(pointerId) sudah dipanggil di dalam touchUp untuk activeCount > 1,
+        // atau pointers.clear() untuk activeCount == 1.
+        // Clear di sini sebagai safety net untuk handle edge cases.
         pointers.clear()
+
+        // Verify invariant: setelah release, pointers harus kosong.
+        // Jika tidak kosong, log warning (seharusnya tidak terjadi).
+        if (pointers.size() > 0) {
+            Log.w("GameMapper", "releaseAllPointers: pointers not empty after clear, size=${pointers.size()}")
+        }
+
         return anyReleased
     }
 

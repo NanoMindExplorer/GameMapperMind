@@ -169,10 +169,16 @@ class GamepadListenerService : Service() {
                                 TouchInjectionPlugin.emitGamepadAxis(floatArrayOf(lStickX, lStickY, rStickX, rStickY, l2Trigger, r2Trigger))
                             }
                         } else if (it.contains("EV_KEY")) {
+                            // Fix untuk BUG-H11: parsing adaptif untuk baris tanpa prefix device.
+                            // Beberapa versi Android output getevent tanpa prefix device path,
+                            // hanya 'EV_KEY BTN_A DOWN' dengan 3 part (bukan 4).
+                            // Parsing lama skip baris dengan parts.size < 4.
+                            // Parsing baru: cari index EV_KEY, lalu ambil 2 part berikutnya.
                             val parts = it.trim().split(Regex("\\s+"))
-                            if (parts.size >= 4) {
-                                val btnRaw = parts[2]
-                                val stateStr = parts[3]
+                            val evKeyIndex = parts.indexOfFirst { p -> p == "EV_KEY" }
+                            if (evKeyIndex >= 0 && evKeyIndex + 2 < parts.size) {
+                                val btnRaw = parts[evKeyIndex + 1]
+                                val stateStr = parts[evKeyIndex + 2]
                                 val isDown = if (stateStr == "DOWN") 1 else 0
                                 
                                 val btnMap = mapEvdevToButton(btnRaw)
@@ -181,10 +187,12 @@ class GamepadListenerService : Service() {
                                 }
                             }
                         } else if (it.contains("EV_ABS")) {
+                            // Fix untuk BUG-H11: parsing adaptif yang sama untuk EV_ABS.
                             val parts = it.trim().split(Regex("\\s+"))
-                            if (parts.size >= 4) {
-                                val axisType = parts[2]
-                                val valueHex = parts[3]
+                            val evAbsIndex = parts.indexOfFirst { p -> p == "EV_ABS" }
+                            if (evAbsIndex >= 0 && evAbsIndex + 2 < parts.size) {
+                                val axisType = parts[evAbsIndex + 1]
+                                val valueHex = parts[evAbsIndex + 2]
                                 try {
                                     val hexNum = valueHex.toLong(16)
                                     val rawVal = if (hexNum > 0x7FFFFFFF) (hexNum - 0x100000000L).toInt() else hexNum.toInt()
@@ -239,6 +247,19 @@ class GamepadListenerService : Service() {
         }.also { it.isDaemon = true }.start()
     }
 
+    /**
+     * Mapping evdev button code ke nama logis aplikasi.
+     *
+     * Fix untuk BUG-H12: tambah mapping untuk BTN_MODE (Home/PS), BTN_C, BTN_Z.
+     * Fix untuk BUG-H13: hapus ABS_HAT0X/Y yang redundan (sudah di-handle di EV_ABS branch).
+     *
+     * Invariant:
+     * - Setiap evdev code yang relevan dengan gamepad dipetakan ke nama logis.
+     * - Return 'UNKNOWN' untuk code yang tidak dikenali.
+     * - ABS_HAT0X/Y tidak ada di sini (di-handle di EV_ABS branch via DPAD_*).
+     *
+     * Kompleksitas: O(n) di mana n = jumlah case (sekitar 15). Acceptable untuk per-event.
+     */
     private fun mapEvdevToButton(evdevName: String): String {
         return when {
             evdevName.contains("BTN_A") || evdevName.contains("BTN_SOUTH") -> "A"
@@ -253,8 +274,14 @@ class GamepadListenerService : Service() {
             evdevName.contains("BTN_THUMBR") -> "R3"
             evdevName.contains("BTN_START") -> "START"
             evdevName.contains("BTN_SELECT") -> "SELECT"
-            evdevName.contains("ABS_HAT0Y") -> "DPAD" // Need handling down/up
-            evdevName.contains("ABS_HAT0X") -> "DPAD" // Need handling left/right
+            // Fix BUG-H12: tambah BTN_MODE (Home/PS/Guide button).
+            // BTN_MODE adalah tombol Home di Xbox, tombol PS di DualShock, tombol Guide di lainnya.
+            evdevName.contains("BTN_MODE") -> "HOME"
+            // Fix BUG-H12: tambah BTN_C dan BTN_Z untuk gamepad Nintendo/N64 style.
+            evdevName.contains("BTN_C") -> "C"
+            evdevName.contains("BTN_Z") -> "Z"
+            // Fix BUG-H12: tambah BTN_TOOL (untuk trigger di beberapa gamepad China).
+            evdevName.contains("BTN_TOOL") -> "TOOL"
             else -> "UNKNOWN"
         }
     }

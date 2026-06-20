@@ -330,8 +330,16 @@ class TouchInjectionPlugin : Plugin() {
     @PluginMethod
     fun touchDown(call: PluginCall) {
         val id = call.getInt("pointerId") ?: 0
-        val x = call.getFloat("x") ?: 0f
-        val y = call.getFloat("y") ?: 0f
+        // Fix untuk BUG-H10: validasi x dan y wajib ada dan valid.
+        // Sebelumnya getFloat('x') ?: 0f fallback ke 0 jika null, menyebabkan
+        // touch di-inject di (0,0) yang biasanya pojok kiri atas layar.
+        // Sekarang reject call dengan error jika x atau y null/NaN.
+        val x = call.getFloat("x")
+        val y = call.getFloat("y")
+        if (x == null || y == null || x.isNaN() || y.isNaN()) {
+            call.reject("touchDown: x and y must be valid numbers, got x=$x y=$y")
+            return
+        }
         try {
             val success = touchService?.touchDown(id, x, y) ?: false
             if (success) {
@@ -347,8 +355,13 @@ class TouchInjectionPlugin : Plugin() {
     @PluginMethod
     fun touchMove(call: PluginCall) {
         val id = call.getInt("pointerId") ?: 0
-        val x = call.getFloat("x") ?: 0f
-        val y = call.getFloat("y") ?: 0f
+        // Fix untuk BUG-H10: validasi x dan y wajib ada dan valid (sama dengan touchDown).
+        val x = call.getFloat("x")
+        val y = call.getFloat("y")
+        if (x == null || y == null || x.isNaN() || y.isNaN()) {
+            call.reject("touchMove: x and y must be valid numbers, got x=$x y=$y")
+            return
+        }
         try {
             val success = touchService?.touchMove(id, x, y) ?: false
             if (success) {
@@ -378,8 +391,13 @@ class TouchInjectionPlugin : Plugin() {
 
     @PluginMethod
     fun injectTap(call: PluginCall) {
-        val x = call.getFloat("x") ?: 0f
-        val y = call.getFloat("y") ?: 0f
+        // Fix untuk BUG-H10: validasi x dan y wajib ada dan valid.
+        val x = call.getFloat("x")
+        val y = call.getFloat("y")
+        if (x == null || y == null || x.isNaN() || y.isNaN()) {
+            call.reject("injectTap: x and y must be valid numbers, got x=$x y=$y")
+            return
+        }
         try {
             val success = touchService?.injectTap(x, y) ?: false
             if (success) {

@@ -232,16 +232,183 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, active: boolea
    */
   const triggerState = useRef<TriggerState>({ l2Pressed: false, r2Pressed: false });
 
+  /**
+   * Fix untuk BUG-H16: rAF batching untuk axis event.
+   *
+   * latestAxesRef menyimpan axis value terbaru (overwrite pada setiap event).
+   * rAF callback memproses latestAxesRef sekali per frame.
+   *
+   * Math-Logic (Pasal 5.1):
+   * - Batch window = 1 frame (16.67ms pada 60Hz).
+   * - Throughput: 60 proses/detik (sebelumnya 100/detik untuk 100Hz gamepad).
+   * - Latency tambahan: max 16.67ms (1 frame), acceptable untuk analog stick.
+   *
+   * Invariant:
+   * - latestAxesRef selalu berisi axis value terbaru (overwrite pada setiap event).
+   * - rAF callback dipanggil maksimal 60 kali per detik.
+   * - Jika tidak ada axis event, rAF tidak melakukan apa-apa.
+   */
+  const latestAxesRef = useRef<number[] | null>(null);
+
   useEffect(() => {
     if (!active) return;
     let buttonListener: any;
     let axisListener: any;
     let isCleanedUp = false;
+    let rafId: number | null = null;
+
+    const processAxesBatch = async () => {
+      rafId = null; // Reset rafId sebelum proses agar bisa di-schedule ulang.
+      const axes = latestAxesRef.current;
+      if (axes === null) return; // Tidak ada axis event sejak batch terakhir.
+      latestAxesRef.current = null; // Clear setelah dibaca.
+
+      const currentProfile = mapProfileRef.current;
+      if (!currentProfile) return;
+
+      // Left stick
+      const lx = axes[0] || 0;
+      const ly = axes[1] || 0;
+      // Right stick
+      const rx = axes[2] || 0;
+      const ry = axes[3] || 0;
+      // L2 / R2 (analog triggers)
+      const l2Analog = axes[4] ?? -1;
+      const r2Analog = axes[5] ?? -1;
+
+      // (Sisa logic axis processing sama dengan sebelumnya, dipindah ke sini.)
+      // Fix untuk BUG-H17: deadzone dari profile, bukan hardcoded 0.15.
+      const innerDeadzone = currentProfile.deadzone ?? DEFAULT_DEADZONE_INNER;
+      const outerSaturation = DEFAULT_DEADZONE_OUTER;
+
+      // Fix untuk BUG-H19: exponential smoothing.
+      const smoothingFactor = currentProfile.smoothing ?? 0.5;
+
+      smoothingState.current.lx = applyExponentialSmoothing(lx, smoothingState.current.lx, smoothingFactor);
+      smoothingState.current.ly = applyExponentialSmoothing(ly, smoothingState.current.ly, smoothingFactor);
+      smoothingState.current.rx = applyExponentialSmoothing(rx, smoothingState.current.rx, smoothingFactor);
+      smoothingState.current.ry = applyExponentialSmoothing(ry, smoothingState.current.ry, smoothingFactor);
+
+      const [adjLx, adjLy] = applyRadialDeadzone(
+        smoothingState.current.lx, smoothingState.current.ly,
+        innerDeadzone, outerSaturation
+      );
+      const [adjRx, adjRy] = applyRadialDeadzone(
+        smoothingState.current.rx, smoothingState.current.ry,
+        innerDeadzone, outerSaturation
+      );
+
+      // 1. Left Stick (Pointer 0)
+      const lMag = Math.sqrt(adjLx * adjLx + adjLy * adjLy);
+      const lMapping = currentProfile.buttons?.find(b => b.mappedKey === 'L_STICK');
+      const leftPointer = pointers.current.find(p => p.id === 0)!;
+
+      if (lMapping) {
+          const { x: lCenterX, y: lCenterY } = getScreenCoords(lMapping.x, lMapping.y);
+          const maxRadius = getMaxRadiusFromMapping(lMapping);
+          if (lMag > 0) {
+            const targetX = lCenterX + (adjLx * maxRadius);
+            const targetY = lCenterY + (adjLy * maxRadius);
+            const antiBan = currentProfile.antiBanEnabled === true;
+            const [finalX, finalY] = applyAntiBanRandomization(targetX, targetY, antiBan);
+            if (!leftPointer.isActive) {
+              leftPointer.isActive = true;
+              const [downX, downY] = applyAntiBanRandomization(lCenterX, lCenterY, antiBan);
+              await TouchInjection.touchDown({ pointerId: 0, x: downX, y: downY });
+            }
+            await TouchInjection.touchMove({ pointerId: 0, x: finalX, y: finalY });
+          } else if (leftPointer.isActive) {
+            leftPointer.isActive = false;
+            await TouchInjection.touchUp({ pointerId: 0 });
+          }
+      }
+
+      // 2. Right Stick (Pointer 1)
+      const rMag = Math.sqrt(adjRx * adjRx + adjRy * adjRy);
+      const rMapping = currentProfile.buttons?.find(b => b.mappedKey === 'R_STICK');
+      const rightPointer = pointers.current.find(p => p.id === 1)!;
+
+      if (rMapping) {
+          const { x: rCenterX, y: rCenterY } = getScreenCoords(rMapping.x, rMapping.y);
+          const maxRadius = getMaxRadiusFromMapping(rMapping);
+          if (rMag > 0) {
+            const targetX = rCenterX + (adjRx * maxRadius);
+            const targetY = rCenterY + (adjRy * maxRadius);
+            const antiBan = currentProfile.antiBanEnabled === true;
+            const [finalX, finalY] = applyAntiBanRandomization(targetX, targetY, antiBan);
+            if (!rightPointer.isActive) {
+              rightPointer.isActive = true;
+              const [downX, downY] = applyAntiBanRandomization(rCenterX, rCenterY, antiBan);
+              await TouchInjection.touchDown({ pointerId: 1, x: downX, y: downY });
+            }
+            await TouchInjection.touchMove({ pointerId: 1, x: finalX, y: finalY });
+          } else if (rightPointer.isActive) {
+            rightPointer.isActive = false;
+            await TouchInjection.touchUp({ pointerId: 1 });
+          }
+      }
+
+      // 3. L2 (Analog to Button dengan hysteresis)
+      const mapL2 = currentProfile.buttons?.find((m: any) => m.mappedKey === 'LT');
+      if (mapL2 && mapL2.x !== undefined && mapL2.y !== undefined) {
+         if (!triggerState.current.l2Pressed && l2Analog >= TRIGGER_PRESS_THRESHOLD) {
+             triggerState.current.l2Pressed = true;
+             const p = pointers.current.find(c => !c.isActive && c.type === 'button');
+             if (p) {
+                 p.isActive = true; p.virtualKey = 'LT_ANALOG';
+                 const { x: rawX, y: rawY } = getScreenCoords(mapL2.x, mapL2.y);
+                 const antiBan = currentProfile.antiBanEnabled === true;
+                 const [x, y] = applyAntiBanRandomization(rawX, rawY, antiBan);
+                 await TouchInjection.touchDown({ pointerId: p.id, x, y });
+             }
+         } else if (triggerState.current.l2Pressed && l2Analog < TRIGGER_RELEASE_THRESHOLD) {
+             triggerState.current.l2Pressed = false;
+             const p = pointers.current.find(c => c.isActive && c.virtualKey === 'LT_ANALOG');
+             if (p) {
+                 p.isActive = false; p.virtualKey = undefined;
+                 await TouchInjection.touchUp({ pointerId: p.id });
+             }
+         }
+         lastState.current['LT_ANALOG'] = triggerState.current.l2Pressed;
+      }
+
+      // 4. R2 (Analog to Button dengan hysteresis)
+      const mapR2 = currentProfile.buttons?.find((m: any) => m.mappedKey === 'RT');
+      if (mapR2 && mapR2.x !== undefined && mapR2.y !== undefined) {
+         if (!triggerState.current.r2Pressed && r2Analog >= TRIGGER_PRESS_THRESHOLD) {
+             triggerState.current.r2Pressed = true;
+             const p = pointers.current.find(c => !c.isActive && c.type === 'button');
+             if (p) {
+                 p.isActive = true; p.virtualKey = 'RT_ANALOG';
+                 const { x: rawX, y: rawY } = getScreenCoords(mapR2.x, mapR2.y);
+                 const antiBan = currentProfile.antiBanEnabled === true;
+                 const [x, y] = applyAntiBanRandomization(rawX, rawY, antiBan);
+                 await TouchInjection.touchDown({ pointerId: p.id, x, y });
+             }
+         } else if (triggerState.current.r2Pressed && r2Analog < TRIGGER_RELEASE_THRESHOLD) {
+             triggerState.current.r2Pressed = false;
+             const p = pointers.current.find(c => c.isActive && c.virtualKey === 'RT_ANALOG');
+             if (p) {
+                 p.isActive = false; p.virtualKey = undefined;
+                 await TouchInjection.touchUp({ pointerId: p.id });
+             }
+         }
+         lastState.current['RT_ANALOG'] = triggerState.current.r2Pressed;
+      }
+    };
+
+    const scheduleAxisBatch = () => {
+      if (rafId === null) {
+        rafId = window.requestAnimationFrame(() => {
+          processAxesBatch().catch((e) => {
+            console.error('[useGamepadLoop] rAF axis batch failed', e);
+          });
+        });
+      }
+    };
 
     const getScreenCoords = (pctX: number, pctY: number) => {
         // Fix untuk BUG-H25: handle orientation dengan benar.
-        // Jika landscape (width > height): sw = max, sh = min (seperti sebelumnya).
-        // Jika portrait (width < height): sw = width, sh = height (jangan tertukar).
         const w = window.screen.width;
         const h = window.screen.height;
         const isLandscape = w > h;
@@ -255,22 +422,6 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, active: boolea
 
     /**
      * Fix untuk BUG-H24: reset semua pointer aktif saat profile switch atau unmount.
-     * Kirim touchUp untuk setiap pointer yang isActive, lalu reset state.
-     *
-     * Root cause BUG-H24:
-     * - pointers.current adalah ref yang persist.
-     * - Saat profile berubah (useEffect re-run), cleanup tidak reset pointer state.
-     * - Jika button A ditahan saat profile switch, pointer A tetap isActive=true.
-     * - Profile baru mungkin tidak punya mapping A, sehingga touchUp tidak pernah terjadi.
-     * - Akibatnya sentuhan stuck di layar.
-     *
-     * Invariant:
-     * - Setelah reset, semua pointer.isActive = false, virtualKey = undefined.
-     * - Semua pointer yang sebelumnya isActive mendapat touchUp call.
-     *
-     * Collection Mutation Safety (Pasal 5.11):
-     * - pointers.current adalah array, iterasi aman karena tidak ada remove selama iterasi.
-     * - Hanya set isActive=false dan virtualKey=undefined (mutasi field, bukan remove element).
      */
     const resetAllPointers = async () => {
       for (const pointer of pointers.current) {
@@ -284,10 +435,8 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, active: boolea
           pointer.virtualKey = undefined;
         }
       }
-      // Reset trigger state juga (LT_ANALOG, RT_ANALOG).
       triggerState.current.l2Pressed = false;
       triggerState.current.r2Pressed = false;
-      // Reset lastState untuk semua button.
       lastState.current = {};
     };
 
@@ -414,154 +563,12 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, active: boolea
           return;
         }
 
-        axisListener = await TouchInjection.addListener('onGamepadAxis', async ({ axes }) => {
-          const currentProfile = mapProfileRef.current;
-          if (!currentProfile) return;
-
-          // Left stick
-          const lx = axes[0] || 0;
-          const ly = axes[1] || 0;
-          // Right stick
-          const rx = axes[2] || 0;
-          const ry = axes[3] || 0;
-          // L2 / R2 (analog triggers)
-          const l2Analog = axes[4] ?? -1;
-          const r2Analog = axes[5] ?? -1;
-
-          // Fix untuk BUG-H17: deadzone dari profile, bukan hardcoded 0.15.
-          // Profile.deadzone diatur user di UI GameSelector.
-          const innerDeadzone = currentProfile.deadzone ?? DEFAULT_DEADZONE_INNER;
-          const outerSaturation = DEFAULT_DEADZONE_OUTER;
-
-          // Fix untuk BUG-H19: exponential smoothing.
-          // Profile.smoothing diatur user di UI GameSelector, range [0.05, 0.95].
-          const smoothingFactor = currentProfile.smoothing ?? 0.5;
-
-          // Apply smoothing ke raw axis value sebelum deadzone.
-          // Smoothing mengurangi jitter pada analog stick.
-          smoothingState.current.lx = applyExponentialSmoothing(lx, smoothingState.current.lx, smoothingFactor);
-          smoothingState.current.ly = applyExponentialSmoothing(ly, smoothingState.current.ly, smoothingFactor);
-          smoothingState.current.rx = applyExponentialSmoothing(rx, smoothingState.current.rx, smoothingFactor);
-          smoothingState.current.ry = applyExponentialSmoothing(ry, smoothingState.current.ry, smoothingFactor);
-
-          // Apply radial deadzone ke smoothed value.
-          const [adjLx, adjLy] = applyRadialDeadzone(
-            smoothingState.current.lx, smoothingState.current.ly,
-            innerDeadzone, outerSaturation
-          );
-          const [adjRx, adjRy] = applyRadialDeadzone(
-            smoothingState.current.rx, smoothingState.current.ry,
-            innerDeadzone, outerSaturation
-          );
-
-          // 1. Left Stick (Pointer 0)
-          const lMag = Math.sqrt(adjLx * adjLx + adjLy * adjLy);
-          const lMapping = currentProfile.buttons?.find(b => b.mappedKey === 'L_STICK');
-          const leftPointer = pointers.current.find(p => p.id === 0)!;
-
-          if (lMapping) {
-              const { x: lCenterX, y: lCenterY } = getScreenCoords(lMapping.x, lMapping.y);
-              // Fix untuk BUG-H18: maxRadius dari mapping, bukan hardcoded 150.
-              const maxRadius = getMaxRadiusFromMapping(lMapping);
-              if (lMag > 0) {
-                const targetX = lCenterX + (adjLx * maxRadius);
-                const targetY = lCenterY + (adjLy * maxRadius);
-                // Anti-ban randomization untuk touch move.
-                const antiBan = currentProfile.antiBanEnabled === true;
-                const [finalX, finalY] = applyAntiBanRandomization(targetX, targetY, antiBan);
-                if (!leftPointer.isActive) {
-                  leftPointer.isActive = true;
-                  const [downX, downY] = applyAntiBanRandomization(lCenterX, lCenterY, antiBan);
-                  await TouchInjection.touchDown({ pointerId: 0, x: downX, y: downY });
-                }
-                await TouchInjection.touchMove({ pointerId: 0, x: finalX, y: finalY });
-              } else if (leftPointer.isActive) {
-                leftPointer.isActive = false;
-                await TouchInjection.touchUp({ pointerId: 0 });
-              }
-          }
-
-          // 2. Right Stick (Pointer 1)
-          const rMag = Math.sqrt(adjRx * adjRx + adjRy * adjRy);
-          const rMapping = currentProfile.buttons?.find(b => b.mappedKey === 'R_STICK');
-          const rightPointer = pointers.current.find(p => p.id === 1)!;
-
-          if (rMapping) {
-              const { x: rCenterX, y: rCenterY } = getScreenCoords(rMapping.x, rMapping.y);
-              // Fix untuk BUG-H18: maxRadius dari mapping.
-              const maxRadius = getMaxRadiusFromMapping(rMapping);
-              if (rMag > 0) {
-                const targetX = rCenterX + (adjRx * maxRadius);
-                const targetY = rCenterY + (adjRy * maxRadius);
-                const antiBan = currentProfile.antiBanEnabled === true;
-                const [finalX, finalY] = applyAntiBanRandomization(targetX, targetY, antiBan);
-                if (!rightPointer.isActive) {
-                  rightPointer.isActive = true;
-                  const [downX, downY] = applyAntiBanRandomization(rCenterX, rCenterY, antiBan);
-                  await TouchInjection.touchDown({ pointerId: 1, x: downX, y: downY });
-                }
-                await TouchInjection.touchMove({ pointerId: 1, x: finalX, y: finalY });
-              } else if (rightPointer.isActive) {
-                rightPointer.isActive = false;
-                await TouchInjection.touchUp({ pointerId: 1 });
-              }
-          }
-
-          // 3. L2 (Analog to Button emulation dengan hysteresis)
-          // Fix untuk BUG-H15: trigger threshold dengan hysteresis.
-          // Press threshold 0.3, release threshold 0.15.
-          // Hysteresis mencegah flicker saat value berada di sekitar threshold.
-          const mapL2 = currentProfile.buttons?.find((m: any) => m.mappedKey === 'LT');
-          if (mapL2 && mapL2.x !== undefined && mapL2.y !== undefined) {
-             // Logika hysteresis:
-             // - Jika tidak pressed dan value >= pressThreshold: pressed
-             // - Jika pressed dan value < releaseThreshold: released
-             // - Else: state tidak berubah
-             if (!triggerState.current.l2Pressed && l2Analog >= TRIGGER_PRESS_THRESHOLD) {
-                 triggerState.current.l2Pressed = true;
-                 const p = pointers.current.find(c => !c.isActive && c.type === 'button');
-                 if (p) {
-                     p.isActive = true; p.virtualKey = 'LT_ANALOG';
-                     const { x: rawX, y: rawY } = getScreenCoords(mapL2.x, mapL2.y);
-                     const antiBan = currentProfile.antiBanEnabled === true;
-                     const [x, y] = applyAntiBanRandomization(rawX, rawY, antiBan);
-                     await TouchInjection.touchDown({ pointerId: p.id, x, y });
-                 }
-             } else if (triggerState.current.l2Pressed && l2Analog < TRIGGER_RELEASE_THRESHOLD) {
-                 triggerState.current.l2Pressed = false;
-                 const p = pointers.current.find(c => c.isActive && c.virtualKey === 'LT_ANALOG');
-                 if (p) {
-                     p.isActive = false; p.virtualKey = undefined;
-                     await TouchInjection.touchUp({ pointerId: p.id });
-                 }
-             }
-             // Update lastState untuk backward compatibility dengan tracking lama.
-             lastState.current['LT_ANALOG'] = triggerState.current.l2Pressed;
-          }
-
-          // 4. R2 (Analog to Button emulation dengan hysteresis)
-          const mapR2 = currentProfile.buttons?.find((m: any) => m.mappedKey === 'RT');
-          if (mapR2 && mapR2.x !== undefined && mapR2.y !== undefined) {
-             if (!triggerState.current.r2Pressed && r2Analog >= TRIGGER_PRESS_THRESHOLD) {
-                 triggerState.current.r2Pressed = true;
-                 const p = pointers.current.find(c => !c.isActive && c.type === 'button');
-                 if (p) {
-                     p.isActive = true; p.virtualKey = 'RT_ANALOG';
-                     const { x: rawX, y: rawY } = getScreenCoords(mapR2.x, mapR2.y);
-                     const antiBan = currentProfile.antiBanEnabled === true;
-                     const [x, y] = applyAntiBanRandomization(rawX, rawY, antiBan);
-                     await TouchInjection.touchDown({ pointerId: p.id, x, y });
-                 }
-             } else if (triggerState.current.r2Pressed && r2Analog < TRIGGER_RELEASE_THRESHOLD) {
-                 triggerState.current.r2Pressed = false;
-                 const p = pointers.current.find(c => c.isActive && c.virtualKey === 'RT_ANALOG');
-                 if (p) {
-                     p.isActive = false; p.virtualKey = undefined;
-                     await TouchInjection.touchUp({ pointerId: p.id });
-                 }
-             }
-             lastState.current['RT_ANALOG'] = triggerState.current.r2Pressed;
-          }
+        axisListener = await TouchInjection.addListener('onGamepadAxis', ({ axes }) => {
+          // Fix untuk BUG-H16: rAF batching untuk axis event.
+          // Simpan axis value terbaru ke ref, schedule rAF untuk proses.
+          // rAF callback akan memproses latestAxesRef sekali per frame.
+          latestAxesRef.current = axes;
+          scheduleAxisBatch();
         });
       } catch (err) {
         console.error('[useGamepadLoop] Setup listeners failed:', err);
@@ -574,9 +581,12 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, active: boolea
       isCleanedUp = true;
       buttonListener?.remove();
       axisListener?.remove();
+      // Fix untuk BUG-H16: cancel rAF yang masih pending saat cleanup.
+      if (rafId !== null) {
+        window.cancelAnimationFrame(rafId);
+        rafId = null;
+      }
       // Fix untuk BUG-H24: reset semua pointer aktif saat profile switch atau unmount.
-      // Panggil resetAllPointers untuk release semua sentuhan yang masih aktif.
-      // Tanpa ini, sentuhan bisa stuck di layar setelah profile switch.
       resetAllPointers().catch((e) => {
         console.error('[useGamepadLoop] Failed to reset pointers on cleanup', e);
       });

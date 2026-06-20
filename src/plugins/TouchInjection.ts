@@ -10,6 +10,10 @@ export interface TouchInjectionPluginType {
   stopOverlay(): Promise<void>;
   checkPermission(): Promise<{ granted: boolean }>;
   requestPermission(): Promise<{ granted: boolean, requested?: boolean }>;
+  checkDaemonRunning(): Promise<{ daemonRunning: boolean }>;
+  executeShizukuCommand(options: { command: string }): Promise<{ output: string, error: string, exitCode: number }>;
+  checkBattery(): Promise<{ isIgnoring: boolean }>;
+  requestBatteryIgnore(): Promise<void>;
   
   touchDown(options: { pointerId: number; x: number; y: number }): Promise<void>;
   touchMove(options: { pointerId: number; x: number; y: number }): Promise<void>;

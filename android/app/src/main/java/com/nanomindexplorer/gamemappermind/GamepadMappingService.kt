@@ -130,12 +130,40 @@ class GamepadMappingService : Service() {
     override fun onCreate() {
         super.onCreate()
         Log.d("GameMapper", "GamepadMappingService: onCreate")
+
+        // REC-23: Initialize logger.
+        GamepadLogger.init(this)
+        GamepadLogger.log(GamepadLogger.Level.INFO, "GamepadMappingService", "Service onCreate")
+
         createNotificationChannel()
         startForegroundService()
         registerProfileUpdateReceiver()
         loadProfileFromSharedPreferences()
         isRunning = true
         Companion.isRunning = true
+    }
+
+    /**
+     * REC-25: Background input guarantee via foreground service priority.
+     *
+     * START_STICKY: jika service di-kill oleh system (misal low memory),
+     * system akan restart service otomatis. Intent yang dikirim ke restart
+     * akan null, sehingga service perlu handle onCreate() untuk re-init state.
+     *
+     * Invariant:
+     * - Service akan selalu di-restart oleh system jika killed
+     * - State (profile, pointer) perlu re-init di onCreate()
+     * - Notification persistent agar user aware service running
+     */
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        GamepadLogger.log(GamepadLogger.Level.INFO, "GamepadMappingService",
+            "onStartCommand, intent=${intent?.action ?: "null"}")
+
+        // Reload profile dari SharedPreferences (jika service di-restart, profile perlu re-load).
+        loadProfileFromSharedPreferences()
+
+        // START_STICKY: system akan restart service jika killed.
+        return START_STICKY
     }
 
     private fun startForegroundService() {
@@ -286,6 +314,7 @@ class GamepadMappingService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         Log.d("GameMapper", "GamepadMappingService: onDestroy")
+        GamepadLogger.log(GamepadLogger.Level.INFO, "GamepadMappingService", "Service onDestroy")
         isRunning = false
         Companion.isRunning = false
         LocalBroadcastManager.getInstance(this).unregisterReceiver(profileUpdateReceiver)
@@ -293,6 +322,9 @@ class GamepadMappingService : Service() {
         // Catatan: release pointer dilakukan oleh TouchInjectionPlugin.unbindService,
         // di sini kita hanya release pointer analog yang dikelola service ini.
         releaseAnalogPointers()
+
+        // REC-23: Close logger.
+        GamepadLogger.close()
     }
 
     /**

@@ -20,6 +20,7 @@ class GamepadListenerService : Service() {
 
     companion object {
         var isRunning = false
+        var activeProfileJson: String? = null // Set from React when profile changes
     }
 
     override fun onBind(intent: Intent): IBinder? = null
@@ -124,9 +125,20 @@ class GamepadListenerService : Service() {
                 val geteventCmd = if (gamepadDevices.isNotEmpty()) {
                     "getevent -l " + gamepadDevices.joinToString(" ")
                 } else {
-                    // Fallback if none found, we might just use default to not break
-                    Log.w("GameMapper", "No explicit gamepad input device found. Capturing all.")
-                    "getevent -l"
+                    val inputManager = getSystemService(android.content.Context.INPUT_SERVICE) as android.hardware.input.InputManager
+                    val hasGamepad = inputManager.inputDeviceIds.any { id ->
+                        val dev = inputManager.getInputDevice(id)
+                        dev != null && ((dev.sources and android.view.InputDevice.SOURCE_GAMEPAD) != 0 || 
+                                        (dev.sources and android.view.InputDevice.SOURCE_JOYSTICK) != 0)
+                    }
+                    if (hasGamepad) {
+                        Log.w("GameMapper", "Gamepad detected via InputManager but not by getevent -lp filters. Capturing all as fallback.")
+                        "getevent -l"
+                    } else {
+                        Log.e("GameMapper", "No gamepad found. Terminating listener to avoid capturing touch.")
+                        TouchInjectionPlugin.emitGamepadButton("ERROR_NO_GAMEPAD", 0, 0f)
+                        return@Thread
+                    }
                 }
 
                 evdevProcess = newProcessMethod.invoke(null, arrayOf("sh", "-c", geteventCmd), null as Array<String>?, null as String?) as Process
@@ -154,21 +166,28 @@ class GamepadListenerService : Service() {
                             }
                         } else if (it.contains("EV_KEY")) {
                             val parts = it.trim().split(Regex("\\s+"))
-                            if (parts.size >= 4) {
-                                val btnRaw = parts[2]
-                                val stateStr = parts[3]
-                                val isDown = if (stateStr == "DOWN") 1 else 0
-                                
-                                val btnMap = mapEvdevToButton(btnRaw)
-                                if (btnMap != "UNKNOWN") {
-                                    TouchInjectionPlugin.emitGamepadButton(btnMap, isDown, 1.0f)
+                            if (parts.size >= 3) {
+                                val isPrefixed = parts[0].startsWith("/dev/input/")
+                                val evIdx = if (isPrefixed) 1 else 0
+                                if (parts.size > evIdx + 2) {
+                                    val btnRaw = parts[evIdx + 1]
+                                    val stateStr = parts[evIdx + 2]
+                                    val isDown = if (stateStr == "DOWN") 1 else 0
+                                    
+                                    val btnMap = mapEvdevToButton(btnRaw)
+                                    if (btnMap != "UNKNOWN") {
+                                        TouchInjectionPlugin.emitGamepadButton(btnMap, isDown, 1.0f)
+                                    }
                                 }
                             }
                         } else if (it.contains("EV_ABS")) {
                             val parts = it.trim().split(Regex("\\s+"))
-                            if (parts.size >= 4) {
-                                val axisType = parts[2]
-                                val valueHex = parts[3]
+                            if (parts.size >= 3) {
+                                val isPrefixed = parts[0].startsWith("/dev/input/")
+                                val evIdx = if (isPrefixed) 1 else 0
+                                if (parts.size > evIdx + 2) {
+                                    val axisType = parts[evIdx + 1]
+                                    val valueHex = parts[evIdx + 2]
                                 try {
                                     val hexNum = valueHex.toLong(16)
                                     val rawVal = if (hexNum > 0x7FFFFFFF) (hexNum - 0x100000000L).toInt() else hexNum.toInt()
@@ -229,6 +248,8 @@ class GamepadListenerService : Service() {
             evdevName.contains("BTN_B") || evdevName.contains("BTN_EAST") -> "B"
             evdevName.contains("BTN_X") || evdevName.contains("BTN_NORTH") -> "X"
             evdevName.contains("BTN_Y") || evdevName.contains("BTN_WEST") -> "Y"
+            evdevName.contains("BTN_C") -> "C"
+            evdevName.contains("BTN_Z") -> "Z"
             evdevName.contains("BTN_TL2") || evdevName.contains("BTN_L2") -> "LT"
             evdevName.contains("BTN_TR2") || evdevName.contains("BTN_R2") -> "RT"
             evdevName.contains("BTN_TL") || evdevName.contains("BTN_L1") -> "LB"
@@ -237,8 +258,7 @@ class GamepadListenerService : Service() {
             evdevName.contains("BTN_THUMBR") -> "R3"
             evdevName.contains("BTN_START") -> "START"
             evdevName.contains("BTN_SELECT") -> "SELECT"
-            evdevName.contains("ABS_HAT0Y") -> "DPAD" // Need handling down/up
-            evdevName.contains("ABS_HAT0X") -> "DPAD" // Need handling left/right
+            evdevName.contains("BTN_MODE") -> "HOME"
             else -> "UNKNOWN"
         }
     }

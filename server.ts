@@ -21,7 +21,12 @@ app.use(cors({
   credentials: true
 }));
 
-const API_KEY = process.env.VITE_NEXION_API_KEY || "dev-secret-key-123";
+const API_KEY = process.env.VITE_NEXION_API_KEY;
+
+if (!API_KEY || API_KEY.length < 32) {
+  console.error("FATAL: VITE_NEXION_API_KEY must be set and at least 32 chars");
+  process.exit(1);
+}
 
 // Simple API Key Middleware
 app.use("/api", (req: Request, res: Response, next: NextFunction) => {

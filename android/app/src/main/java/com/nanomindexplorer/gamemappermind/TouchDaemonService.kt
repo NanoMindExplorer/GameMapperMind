@@ -211,10 +211,10 @@ class TouchDaemonService : Service() {
 
     fun releaseAllPointers(): Boolean {
         var anyReleased = false
-        for (i in 0 until pointers.size()) {
-            val pointerId = pointers.keyAt(i)
-            val state = pointers.valueAt(i)
-            if (state.isDown) {
+        val keys = (0 until pointers.size()).map { pointers.keyAt(it) }
+        for (pointerId in keys) {
+            val state = pointers.get(pointerId)
+            if (state?.isDown == true) {
                 touchUp(pointerId)
                 anyReleased = true
             }

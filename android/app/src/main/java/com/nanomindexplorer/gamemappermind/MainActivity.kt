@@ -28,7 +28,30 @@ class MainActivity : BridgeActivity() {
         }
     }
 
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if ((event.source and InputDevice.SOURCE_GAMEPAD) != 0 ||
+            (event.source and InputDevice.SOURCE_JOYSTICK) != 0) {
+            bridge?.webView?.dispatchKeyEvent(event)
+            return true
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
+        if ((event.source and InputDevice.SOURCE_GAMEPAD) != 0 ||
+            (event.source and InputDevice.SOURCE_JOYSTICK) != 0) {
+            bridge?.webView?.dispatchKeyEvent(event)
+            return true
+        }
+        return super.onKeyUp(keyCode, event)
+    }
+
     override fun onGenericMotionEvent(event: MotionEvent): Boolean {
+        if ((event.source and InputDevice.SOURCE_GAMEPAD) != 0 ||
+            (event.source and InputDevice.SOURCE_JOYSTICK) != 0) {
+            bridge?.webView?.dispatchGenericMotionEvent(event)
+            return true
+        }
         return super.onGenericMotionEvent(event)
     }
 }

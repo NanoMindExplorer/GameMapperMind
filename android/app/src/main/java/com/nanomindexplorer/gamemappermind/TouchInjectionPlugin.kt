@@ -19,6 +19,7 @@ class TouchInjectionPlugin : Plugin() {
 
     companion object {
         var instance: java.lang.ref.WeakReference<TouchInjectionPlugin>? = null
+        var touchService: ITouchService? = null
 
         fun emitGamepadButton(buttonName: String, value: Int, pressure: Float) {
             val data = JSObject()
@@ -37,7 +38,6 @@ class TouchInjectionPlugin : Plugin() {
         }
     }
 
-    private var touchService: ITouchService? = null
     private var isBound = false
     private val USER_SERVICE_ARGS = Shizuku.UserServiceArgs(
         ComponentName("com.nanomindexplorer.gamemappermind", TouchDaemonService::class.java.name)
@@ -70,8 +70,15 @@ class TouchInjectionPlugin : Plugin() {
         Shizuku.addRequestPermissionResultListener(permissionListener)
     }
 
-    fun onDestroy() {
+    override fun handleOnDestroy() {
         Shizuku.removeRequestPermissionResultListener(permissionListener)
+        if (isBound) {
+            touchService?.releaseAllPointers()
+            Shizuku.unbindUserService(USER_SERVICE_ARGS, serviceConnection, true)
+            touchService = null
+            isBound = false
+        }
+        super.handleOnDestroy()
     }
 
     @PluginMethod
@@ -167,6 +174,15 @@ class TouchInjectionPlugin : Plugin() {
     @PluginMethod
     fun executeShizukuCommand(call: PluginCall) {
         val command = call.getString("command") ?: ""
+        
+        // Anti-Regression: Fix BUG-N01 via whitelist
+        val ALLOWED_COMMANDS = listOf("getevent -lp", "getevent -l", "dumpsys input", "pm list packages")
+        
+        if (!ALLOWED_COMMANDS.contains(command)) {
+            call.reject("Command not allowed")
+            return
+        }
+
         try {
             val process = Shizuku.newProcess(arrayOf("sh", "-c", command), null, null)
             val reader = java.io.BufferedReader(java.io.InputStreamReader(process.inputStream))
@@ -192,6 +208,13 @@ class TouchInjectionPlugin : Plugin() {
         } catch (e: Exception) {
             call.reject(e.localizedMessage)
         }
+    }
+
+    @PluginMethod
+    fun updateActiveProfile(call: PluginCall) {
+        val configJson = call.getString("profileJson")
+        GamepadListenerService.activeProfileJson = configJson
+        call.resolve()
     }
 
     @PluginMethod
@@ -234,9 +257,13 @@ class TouchInjectionPlugin : Plugin() {
 
     @PluginMethod
     fun touchDown(call: PluginCall) {
-        val id = call.getInt("pointerId") ?: 0
-        val x = call.getFloat("x") ?: 0f
-        val y = call.getFloat("y") ?: 0f
+        val id = call.getInt("pointerId")
+        val x = call.getFloat("x")
+        val y = call.getFloat("y")
+        if (id == null || x == null || y == null) {
+            call.reject("pointerId, x, and y must be provided")
+            return
+        }
         try {
             val success = touchService?.touchDown(id, x, y) ?: false
             if (success) {
@@ -251,9 +278,13 @@ class TouchInjectionPlugin : Plugin() {
 
     @PluginMethod
     fun touchMove(call: PluginCall) {
-        val id = call.getInt("pointerId") ?: 0
-        val x = call.getFloat("x") ?: 0f
-        val y = call.getFloat("y") ?: 0f
+        val id = call.getInt("pointerId")
+        val x = call.getFloat("x")
+        val y = call.getFloat("y")
+        if (id == null || x == null || y == null) {
+             call.reject("pointerId, x, and y must be provided")
+             return
+        }
         try {
             val success = touchService?.touchMove(id, x, y) ?: false
             if (success) {
@@ -268,7 +299,11 @@ class TouchInjectionPlugin : Plugin() {
 
     @PluginMethod
     fun touchUp(call: PluginCall) {
-        val id = call.getInt("pointerId") ?: 0
+        val id = call.getInt("pointerId")
+        if (id == null) {
+            call.reject("pointerId must be provided")
+            return
+        }
         try {
             val success = touchService?.touchUp(id) ?: false
             if (success) {
@@ -283,8 +318,12 @@ class TouchInjectionPlugin : Plugin() {
 
     @PluginMethod
     fun injectTap(call: PluginCall) {
-        val x = call.getFloat("x") ?: 0f
-        val y = call.getFloat("y") ?: 0f
+        val x = call.getFloat("x")
+        val y = call.getFloat("y")
+        if (x == null || y == null) {
+            call.reject("x and y must be provided")
+            return
+        }
         try {
             val success = touchService?.injectTap(x, y) ?: false
             if (success) {

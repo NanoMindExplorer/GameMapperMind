@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import OverlayWysiwyg from './components/OverlayWysiwyg';
 import { GamepadProfile } from './types';
 import { INITIAL_PROFILES } from './defaults';
+import { GamepadProfileSchema } from './schemas/profile';
 
 // Declare native interface
 declare global {
@@ -50,8 +51,20 @@ export default function OverlayApp() {
     };
 
     const handleMessage = (e: MessageEvent) => {
+      // Check origin if possible, but Capacitor WebView might be arbitrary 'http://localhost'
+      if (e.origin !== "https://appassets.androidplatform.net" && e.origin !== "http://localhost") {
+        return;
+      }
       try {
-        if (e.data) setProfile(typeof e.data === 'string' ? JSON.parse(e.data) : e.data);
+        if (e.data) {
+          const parsed = typeof e.data === 'string' ? JSON.parse(e.data) : e.data;
+          const result = GamepadProfileSchema.safeParse(parsed);
+          if (result.success) {
+            setProfile(result.data as GamepadProfile);
+          } else {
+            console.warn('Invalid profile received', result.error);
+          }
+        }
       } catch (err) {}
     };
     window.addEventListener('message', handleMessage);

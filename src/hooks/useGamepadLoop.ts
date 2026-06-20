@@ -253,6 +253,44 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, active: boolea
         };
     };
 
+    /**
+     * Fix untuk BUG-H24: reset semua pointer aktif saat profile switch atau unmount.
+     * Kirim touchUp untuk setiap pointer yang isActive, lalu reset state.
+     *
+     * Root cause BUG-H24:
+     * - pointers.current adalah ref yang persist.
+     * - Saat profile berubah (useEffect re-run), cleanup tidak reset pointer state.
+     * - Jika button A ditahan saat profile switch, pointer A tetap isActive=true.
+     * - Profile baru mungkin tidak punya mapping A, sehingga touchUp tidak pernah terjadi.
+     * - Akibatnya sentuhan stuck di layar.
+     *
+     * Invariant:
+     * - Setelah reset, semua pointer.isActive = false, virtualKey = undefined.
+     * - Semua pointer yang sebelumnya isActive mendapat touchUp call.
+     *
+     * Collection Mutation Safety (Pasal 5.11):
+     * - pointers.current adalah array, iterasi aman karena tidak ada remove selama iterasi.
+     * - Hanya set isActive=false dan virtualKey=undefined (mutasi field, bukan remove element).
+     */
+    const resetAllPointers = async () => {
+      for (const pointer of pointers.current) {
+        if (pointer.isActive) {
+          try {
+            await TouchInjection.touchUp({ pointerId: pointer.id });
+          } catch (e) {
+            console.error('[useGamepadLoop] Failed to release pointer', pointer.id, e);
+          }
+          pointer.isActive = false;
+          pointer.virtualKey = undefined;
+        }
+      }
+      // Reset trigger state juga (LT_ANALOG, RT_ANALOG).
+      triggerState.current.l2Pressed = false;
+      triggerState.current.r2Pressed = false;
+      // Reset lastState untuk semua button.
+      lastState.current = {};
+    };
+
     const setupListeners = async () => {
       try {
         await TouchInjection.bindService().catch(() => {});
@@ -278,19 +316,93 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, active: boolea
           const { x: rawX, y: rawY } = getScreenCoords(mapping.x, mapping.y);
           const [x, y] = applyAntiBanRandomization(rawX, rawY, antiBan);
 
-          if (isPressed && !wasPressed) {
+          // Fix untuk BUG-H21: handler per button type.
+          // Sebelumnya hanya type 'button' dan 'analog_stick' (via axis) yang ditangani.
+          // Sekarang: dpad = button directional, swipe = touch_down+move+up dengan direction,
+          // macro = trigger macro playback (TODO: belum diimplementasi penuh, butuh REC-20),
+          // gyro_area = baca sensor (TODO: butuh REC-19),
+          // button = default (sentuh biasa).
+          //
+          // Untuk type yang belum diimplementasi penuh (macro, gyro_area), fallback ke
+          // behavior 'button' (sentuh biasa) agar tidak silent fail.
+          const buttonType = mapping.type || 'button';
+
+          if (buttonType === 'swipe' && isPressed && !wasPressed) {
+            // Swipe: touch_down di center, touch_move ke arah swipeDirection, touch_up.
+            // swipeDuration menentukan kecepatan swipe (ms).
+            const direction = mapping.swipeDirection || 'UP';
+            const duration = mapping.swipeDuration || 100;
+            const swipeDistance = 100; // pixel, bisa di-override via mapping.width
+
+            // Hitung target berdasarkan direction.
+            let targetX = x;
+            let targetY = y;
+            switch (direction) {
+              case 'UP': targetY = y - swipeDistance; break;
+              case 'DOWN': targetY = y + swipeDistance; break;
+              case 'LEFT': targetX = x - swipeDistance; break;
+              case 'RIGHT': targetX = x + swipeDistance; break;
+            }
+
             const pointer = pointers.current.find(p => !p.isActive && p.type === 'button');
             if (pointer) {
               pointer.isActive = true;
               pointer.virtualKey = buttonName;
-              await TouchInjection.touchDown({ pointerId: pointer.id, x, y });
+              try {
+                await TouchInjection.touchDown({ pointerId: pointer.id, x, y });
+                // Move ke target dengan beberapa step untuk smooth swipe.
+                const steps = 5;
+                for (let i = 1; i <= steps; i++) {
+                  const interpX = x + (targetX - x) * (i / steps);
+                  const interpY = y + (targetY - y) * (i / steps);
+                  await TouchInjection.touchMove({ pointerId: pointer.id, x: Math.round(interpX), y: Math.round(interpY) });
+                  await new Promise(r => setTimeout(r, duration / steps));
+                }
+                await TouchInjection.touchUp({ pointerId: pointer.id });
+                pointer.isActive = false;
+                pointer.virtualKey = undefined;
+              } catch (e) {
+                console.error('[useGamepadLoop] Swipe failed', e);
+                pointer.isActive = false;
+                pointer.virtualKey = undefined;
+              }
             }
-          } else if (!isPressed && wasPressed) {
-            const pointer = pointers.current.find(p => p.isActive && p.type === 'button' && p.virtualKey === buttonName);
-            if (pointer) {
-              pointer.isActive = false;
-              pointer.virtualKey = undefined;
-              await TouchInjection.touchUp({ pointerId: pointer.id });
+          } else if (buttonType === 'dpad') {
+            // Dpad: sama dengan button biasa, tetapi mappedKey sudah termasuk direction
+            // (DPAD_UP, DPAD_DOWN, DPAD_LEFT, DPAD_RIGHT). Treat as regular button.
+            if (isPressed && !wasPressed) {
+              const pointer = pointers.current.find(p => !p.isActive && p.type === 'button');
+              if (pointer) {
+                pointer.isActive = true;
+                pointer.virtualKey = buttonName;
+                await TouchInjection.touchDown({ pointerId: pointer.id, x, y });
+              }
+            } else if (!isPressed && wasPressed) {
+              const pointer = pointers.current.find(p => p.isActive && p.type === 'button' && p.virtualKey === buttonName);
+              if (pointer) {
+                pointer.isActive = false;
+                pointer.virtualKey = undefined;
+                await TouchInjection.touchUp({ pointerId: pointer.id });
+              }
+            }
+          } else {
+            // Default: type 'button', 'macro', 'gyro_area' (fallback ke sentuh biasa).
+            // Catatan: 'macro' dan 'gyro_area' akan diimplementasi penuh di REC-20 dan REC-19.
+            // Untuk saat ini, fallback ke behavior 'button' agar tidak silent fail.
+            if (isPressed && !wasPressed) {
+              const pointer = pointers.current.find(p => !p.isActive && p.type === 'button');
+              if (pointer) {
+                pointer.isActive = true;
+                pointer.virtualKey = buttonName;
+                await TouchInjection.touchDown({ pointerId: pointer.id, x, y });
+              }
+            } else if (!isPressed && wasPressed) {
+              const pointer = pointers.current.find(p => p.isActive && p.type === 'button' && p.virtualKey === buttonName);
+              if (pointer) {
+                pointer.isActive = false;
+                pointer.virtualKey = undefined;
+                await TouchInjection.touchUp({ pointerId: pointer.id });
+              }
             }
           }
 
@@ -462,6 +574,12 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, active: boolea
       isCleanedUp = true;
       buttonListener?.remove();
       axisListener?.remove();
+      // Fix untuk BUG-H24: reset semua pointer aktif saat profile switch atau unmount.
+      // Panggil resetAllPointers untuk release semua sentuhan yang masih aktif.
+      // Tanpa ini, sentuhan bisa stuck di layar setelah profile switch.
+      resetAllPointers().catch((e) => {
+        console.error('[useGamepadLoop] Failed to reset pointers on cleanup', e);
+      });
     };
   }, [mapProfile, active]);
 }

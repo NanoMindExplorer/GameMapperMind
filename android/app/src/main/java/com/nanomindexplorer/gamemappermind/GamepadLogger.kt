@@ -3,6 +3,7 @@ package com.nanomindexplorer.gamemappermind
 import android.content.Context
 import android.util.Log
 import java.io.File
+import java.io.FileOutputStream
 import java.io.PrintWriter
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -71,7 +72,7 @@ object GamepadLogger {
                 }
                 val lf = File(logDir, LOG_FILE_NAME)
                 logFile = lf
-                val pw = PrintWriter(lf, true) // append mode, auto-flush
+                val pw = PrintWriter(FileOutputStream(lf), true) // auto-flush
                 writer = pw
                 Log.d("GameMapper", "REC-23: Logger initialized at ${logFile?.absolutePath}")
             } catch (e: Exception) {
@@ -152,7 +153,7 @@ object GamepadLogger {
             // Create new log file.
             val lf = File(dir, LOG_FILE_NAME)
             logFile = lf
-            val pw = PrintWriter(lf, true)
+            val pw = PrintWriter(FileOutputStream(lf), true)
             writer = pw
 
             Log.d("GameMapper", "REC-23: Logs rotated")

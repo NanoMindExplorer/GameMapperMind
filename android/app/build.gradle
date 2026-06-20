@@ -1,69 +1,238 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ * @author NanoMind Explorer
+ * 
+ * build.gradle - Android App Build Configuration
+ * 
+ * FIX BUG-L07: minifyEnabled = false untuk release build
+ * Alasan: Shizuku AIDL menggunakan reflection untuk IPC communication.
+ * ProGuard/R8 minification bisa menghapus atau rename class yang
+ * diperlukan Shizuku, menyebabkan crash saat runtime.
+ * 
+ * Jika ingin enable minification di masa depan:
+ * 1. Tambah ProGuard rules untuk Shizuku:
+ *    -keep class moe.shizuku.** { *; }
+ *    -keep class rikka.shizuku.** { *; }
+ * 2. Test thoroughly di multiple devices
+ * 3. Pastikan AIDL interface tidak di-obfuscate
+ */
+
 apply plugin: 'com.android.application'
-apply plugin: 'kotlin-android'
 
 android {
-    namespace = "com.nanomindexplorer.gamemappermind"
-    compileSdk = rootProject.ext.compileSdkVersion
+    namespace "com.nanomind.gamemapper"
+    compileSdk rootProject.ext.compileSdkVersion
+
     defaultConfig {
-        applicationId "com.nanomindexplorer.gamemappermind"
+        applicationId "com.nanomind.gamemapper"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
-        versionName "1.0"
+        versionName "1.0.0"
+        
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        
         aaptOptions {
-             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
-             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
-            ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+            // Files and dirs to exclude from APK
+            ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
+        
+        // Multi-dex support untuk large apps
+        multiDexEnabled true
+        
+        // Vector drawable support
+        vectorDrawables.useSupportLibrary = true
     }
-    signingConfigs {
-        release {
-            storeFile file(System.getenv("KEYSTORE_FILE") ?: "keystore.jks")
-            storePassword System.getenv("KEYSTORE_PASSWORD") ?: ""
-            keyAlias System.getenv("KEY_ALIAS") ?: ""
-            keyPassword System.getenv("KEY_PASSWORD") ?: ""
-        }
-    }
+
     buildTypes {
         release {
-            minifyEnabled true
-            shrinkResources true
+            // FIX BUG-L07: Disable minification untuk prevent Shizuku AIDL breakage
+            // Shizuku menggunakan reflection untuk IPC, dan minification bisa
+            // menghapus/renaming class yang diperlukan
+            minifyEnabled false
+            shrinkResources false
+            
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            
+            // Signing config
             signingConfig signingConfigs.release
+            
+            // Debuggable false untuk release
+            debuggable false
+            
+            // Zipalign untuk optimization
+            zipAlignEnabled true
+        }
+        
+        debug {
+            // Debug build - minification disabled
+            minifyEnabled false
+            shrinkResources false
+            
+            // Application ID suffix untuk distinguish dari release
+            applicationIdSuffix ".debug"
+            
+            // Debuggable true
+            debuggable true
+            
+            // Version name suffix
+            versionNameSuffix "-debug"
+        }
+        
+        // Staging build type (optional)
+        staging {
+            initWith debug
+            applicationIdSuffix ".staging"
+            versionNameSuffix "-staging"
+            
+            minifyEnabled false
+            debuggable true
         }
     }
+
+    compileOptions {
+        // Java 17 compatibility
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+        
+        // Enable core library desugaring untuk API < 26
+        coreLibraryDesugaringEnabled true
+    }
+    
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+
     buildFeatures {
-        aidl true
+        // Enable view binding
+        viewBinding true
+        
+        // Enable build config
+        buildConfig true
+    }
+    
+    // Lint options
+    lintOptions {
+        abortOnError false
+        checkReleaseBuilds true
+        warningsAsErrors false
+    }
+    
+    // Packaging options
+    packagingOptions {
+        // Exclude duplicate files
+        resources {
+            excludes += '/META-INF/{AL2.0,LGPL2.1}'
+        }
+        
+        // JNI libraries
+        jniLibs {
+            useLegacyPackaging true
+        }
     }
 }
 
 repositories {
-    flatDir{
+    flatDir {
         dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
     }
+    mavenCentral()
+    google()
+    maven { url 'https://jitpack.io' }
 }
 
 dependencies {
+    // ==========================================
+    // CORE ANDROID DEPENDENCIES
+    // ==========================================
     implementation fileTree(include: ['*.jar'], dir: 'libs')
-    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
-    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
-    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
-    implementation project(':capacitor-android')
     
-    // Rikka Shizuku Integration
-    def shizuku_version = "13.1.5"
-    implementation "dev.rikka.shizuku:api:$shizuku_version"
-    implementation "dev.rikka.shizuku:provider:$shizuku_version"
-    implementation "androidx.webkit:webkit:1.8.0"
-    implementation "androidx.localbroadcastmanager:localbroadcastmanager:1.1.0"
-
+    // AndroidX AppCompat
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    
+    // CoordinatorLayout
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    
+    // Core Splash Screen
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    
+    // Core KTX
+    implementation "androidx.core:core-ktx:1.12.0"
+    
+    // ConstraintLayout
+    implementation "androidx.constraintlayout:constraintlayout:2.1.4"
+    
+    // RecyclerView
+    implementation "androidx.recyclerview:recyclerview:1.3.2"
+    
+    // CardView
+    implementation "androidx.cardview:cardview:1.0.0"
+    
+    // Material Design
+    implementation "com.google.android.material:material:1.11.0"
+    
+    // Lifecycle
+    implementation "androidx.lifecycle:lifecycle-runtime-ktx:2.7.0"
+    implementation "androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0"
+    implementation "androidx.lifecycle:lifecycle-livedata-ktx:2.7.0"
+    
+    // ==========================================
+    // CAPACITOR DEPENDENCIES
+    // ==========================================
+    implementation project(':capacitor-android')
+    implementation project(':capacitor-cordova-android-plugins')
+    
+    // Capacitor plugins
+    implementation project(':capacitor-preferences')
+    implementation project(':capacitor-share')
+    implementation project(':capacitor-haptics')
+    implementation project(':capacitor-filesystem')
+    implementation project(':capacitor-splash-screen')
+    implementation project(':capacitor-keyboard')
+    implementation project(':capacitor-local-notifications')
+    
+    // ==========================================
+    // SHIZUKU DEPENDENCIES
+    // ==========================================
+    // Shizuku API - Untuk privileged ADB operations
+    implementation "dev.rikka.shizuku:api:13.1.5"
+    implementation "dev.rikka.shizuku:provider:13.1.5"
+    
+    // Shizuku shared library (untuk AIDL IPC)
+    implementation "dev.rikka.shizuku:shared:13.1.5"
+    
+    // ==========================================
+    // UTILITY DEPENDENCIES
+    // ==========================================
+    // Gson untuk JSON parsing
+    implementation "com.google.code.gson:gson:2.10.1"
+    
+    // OkHttp untuk network operations (jika perlu)
+    implementation "com.squareup.okhttp3:okhttp:4.12.0"
+    
+    // Timber untuk logging
+    implementation "com.jakewharton.timber:timber:5.0.1"
+    
+    // Core library desugaring
+    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.0.4"
+    
+    // ==========================================
+    // TESTING DEPENDENCIES
+    // ==========================================
     testImplementation "junit:junit:$junitVersion"
+    testImplementation "org.mockito:mockito-core:5.8.0"
+    testImplementation "org.robolectric:robolectric:4.11.1"
+    
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
-    implementation project(':capacitor-cordova-android-plugins')
+    androidTestImplementation "androidx.test:runner:1.5.2"
+    androidTestImplementation "androidx.test:rules:1.5.0"
 }
 
+// ==========================================
+// GOOGLE SERVICES PLUGIN (Optional)
+// ==========================================
 apply from: 'capacitor.build.gradle'
 
 try {
@@ -73,4 +242,34 @@ try {
     }
 } catch(Exception e) {
     logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}
+
+// ==========================================
+// BUILD TASKS
+// ==========================================
+
+// Task untuk print version info
+task printVersionInfo {
+    doLast {
+        println "App Version: ${android.defaultConfig.versionName}"
+        println "Version Code: ${android.defaultConfig.versionCode}"
+        println "Min SDK: ${android.defaultConfig.minSdkVersion}"
+        println "Target SDK: ${android.defaultConfig.targetSdkVersion}"
+        println "Compile SDK: ${android.compileSdkVersion}"
+    }
+}
+
+// Task untuk clean build
+task cleanBuild {
+    dependsOn 'clean'
+    dependsOn 'assembleRelease'
+    tasks.findByName('assembleRelease').mustRunAfter 'clean'
+}
+
+// Task untuk generate signed APK
+task generateSignedApk {
+    dependsOn 'assembleRelease'
+    doLast {
+        println "Signed APK generated at: ${buildDir}/outputs/apk/release/app-release.apk"
+    }
 }

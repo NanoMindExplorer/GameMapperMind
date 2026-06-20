@@ -54,6 +54,30 @@ public class FloatingOverlayService extends Service {
         }
     }
 
+    private void updateNotification(boolean isEditing) {
+        Intent notificationIntent = new Intent(this, MainActivity.class);
+        PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, PendingIntent.FLAG_IMMUTABLE);
+        
+        Intent actionIntent = new Intent(this, FloatingOverlayService.class);
+        actionIntent.setAction(isEditing ? "ACTION_PLAY" : "ACTION_EDIT");
+        PendingIntent actionPendingIntent = PendingIntent.getService(this, isEditing ? 2 : 1, actionIntent, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        
+        String actionTitle = isEditing ? "Resume Play" : "Edit Layout";
+
+        Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle("GameMapperMind Overlay")
+                .setContentText(isEditing ? "Overlay is in Edit Mode" : "Overlay is running")
+                .setSmallIcon(android.R.drawable.ic_menu_compass)
+                .setContentIntent(pendingIntent)
+                .addAction(android.R.drawable.ic_menu_edit, actionTitle, actionPendingIntent)
+                .build();
+        
+        NotificationManager manager = getSystemService(NotificationManager.class);
+        if (manager != null) {
+            manager.notify(1, notification);
+        }
+    }
+
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         Log.d("GameMapper", "FloatingOverlayService onStartCommand");
@@ -62,11 +86,16 @@ public class FloatingOverlayService extends Service {
         Intent notificationIntent = new Intent(this, MainActivity.class);
         PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, PendingIntent.FLAG_IMMUTABLE);
         
+        Intent actionIntent = new Intent(this, FloatingOverlayService.class);
+        actionIntent.setAction("ACTION_EDIT");
+        PendingIntent actionPendingIntent = PendingIntent.getService(this, 1, actionIntent, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("GameMapperMind Overlay")
                 .setContentText("Overlay is running")
                 .setSmallIcon(android.R.drawable.ic_menu_compass)
                 .setContentIntent(pendingIntent)
+                .addAction(android.R.drawable.ic_menu_edit, "Edit Layout", actionPendingIntent)
                 .build();
         
         try {
@@ -77,6 +106,26 @@ public class FloatingOverlayService extends Service {
             }
         } catch (Exception e) {
             Log.e("GameMapper", "startForeground failed", e);
+        }
+
+        if ("ACTION_EDIT".equals(intent.getAction())) {
+            setOverlayInteractive(true);
+            if (webView != null) {
+                new Handler(Looper.getMainLooper()).post(() -> {
+                    webView.evaluateJavascript("if(window.togglePalette) window.togglePalette(true);", null);
+                });
+            }
+            updateNotification(true);
+            return START_STICKY;
+        } else if ("ACTION_PLAY".equals(intent.getAction())) {
+            setOverlayInteractive(false);
+            if (webView != null) {
+                new Handler(Looper.getMainLooper()).post(() -> {
+                    webView.evaluateJavascript("if(window.togglePalette) window.togglePalette(false);", null);
+                });
+            }
+            updateNotification(false);
+            return START_STICKY;
         }
 
         if (intent != null && intent.hasExtra("config")) {

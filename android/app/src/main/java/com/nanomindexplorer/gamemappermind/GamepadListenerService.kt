@@ -120,15 +120,31 @@ class GamepadListenerService : Service() {
                     Log.e("GameMapper", "Failed to parse getevent -lp", e)
                 }
 
-                // Menjalankan getevent -l hanya untuk gamepad devices
-                val geteventCmd = if (gamepadDevices.isNotEmpty()) {
-                    "getevent -l " + gamepadDevices.joinToString(" ")
-                } else {
-                    // Fallback if none found, we might just use default to not break
-                    Log.w("GameMapper", "No explicit gamepad input device found. Capturing all.")
-                    "getevent -l"
+                // Menjalankan getevent -l hanya untuk gamepad devices.
+                //
+                // Fix untuk BUG-N09 (regression dari fix BUG-C05):
+                // - Sebelumnya jika gamepadDevices empty, fallback ke 'getevent -l' tanpa filter.
+                // - Fallback ini re-introduce BUG-C05: touchscreen, accelerometer, sensor ikut ter-capture.
+                // - Pola regression: fallback re-introduce bug.
+                //
+                // Fix:
+                // - Jika tidak ada gamepad terdeteksi, emit error event dan return (jangan fallback).
+                // - User wajib pastikan gamepad terhubung sebelum start listener.
+                // - Untuk gamepad China murah yang tidak terdeteksi via BTN_A/BTN_GAMEPAD/ABS_HAT0X,
+                //   pertimbangkan REC-08 (calibration mode) di iterasi berikutnya.
+                //
+                // Invariant:
+                // - getevent -l hanya dijalankan dengan minimal 1 gamepad device path
+                // - Jika tidak ada gamepad, emit ERROR_NO_GAMEPAD_DETECTED dan return
+                if (gamepadDevices.isEmpty()) {
+                    Log.w("GameMapper", "No gamepad device detected. Refuse to start capture (no fallback to all devices).")
+                    TouchInjectionPlugin.emitGamepadButton("ERROR_NO_GAMEPAD_DETECTED", 0, 0f)
+                    isListening = false
+                    isRunning = false
+                    return@Thread
                 }
 
+                val geteventCmd = "getevent -l " + gamepadDevices.joinToString(" ")
                 evdevProcess = newProcessMethod.invoke(null, arrayOf("sh", "-c", geteventCmd), null as Array<String>?, null as String?) as Process
                 val processStream = evdevProcess?.inputStream
                 if (processStream == null) {

@@ -31,19 +31,11 @@ jobs:
 
       - name: Build Web Assets
         env:
-          # Set API key untuk server.ts (BUG-N04 fix: tidak ada default)
-          # Generate random key untuk build saja (tidak dipakai di APK)
           VITE_NEXION_API_KEY: 'ci-build-placeholder-key-not-used-in-apk-32chars'
         run: npm run build
 
       - name: Capacitor Sync
         run: npx cap sync android
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          # Pakai wrapper version yang ada di repo
-          gradle-version: wrapper
 
       - name: Build Android APK
         run: |

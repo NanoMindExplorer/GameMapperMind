@@ -38,13 +38,12 @@ jobs:
           VITE_NEXION_API_KEY: 'ci-build-placeholder-key-not-used-in-apk-32chars'
         run: npm run build
 
-      - name: Verify dist/client and index.html
+      - name: Verify dist and index.html
         run: |
           echo "Checking build output..."
           ls -la dist/
-          ls -la dist/client/
-          if [ ! -f "dist/client/index.html" ]; then
-            echo "::error::index.html not found in dist/client!"
+          if [ ! -f "dist/index.html" ]; then
+            echo "::error::index.html not found in dist!"
             exit 1
           fi
           echo "Build output verified successfully."

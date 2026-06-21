@@ -578,6 +578,24 @@ export const DEVICE_RAW_NODES = [
 ] as const;
 
 // ============================================
+// INITIAL DATA (untuk App.tsx)
+// ============================================
+
+/**
+ * Initial profiles untuk state awal aplikasi
+ * Digunakan oleh App.tsx sebagai default state
+ */
+export const INITIAL_PROFILES: GamepadProfile[] = [
+  DEFAULT_GAMEPAD_PROFILE,
+];
+
+/**
+ * Initial macros untuk state awal aplikasi
+ * Digunakan oleh App.tsx sebagai default state
+ */
+export const INITIAL_MACROS: GamepadMacro[] = DEFAULT_MACROS;
+
+// ============================================
 // EXPORT SUMMARY
 // ============================================
 

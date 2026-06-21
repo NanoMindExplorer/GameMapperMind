@@ -1,38 +1,25 @@
-import tailwindcss from '@tailwindcss/vite';
-import react from '@vitejs/plugin-react';
-import path from 'path';
-import {defineConfig} from 'vite';
+import type { CapacitorConfig } from '@capacitor/cli';
 
-export default defineConfig(() => {
-  return {
-    base: './',
-    plugins: [react(), tailwindcss()],
-    resolve: {
-      alias: {
-        '@': path.resolve(__dirname, './src'),
-      },
-    },
-    build: {
-      outDir: 'dist/client',
-      chunkSizeWarningLimit: 800,
-      rollupOptions: {
-        output: {
-          manualChunks: {
-            'vendor-react': ['react', 'react-dom'],
-            'vendor-recharts': ['recharts'],
-            'vendor-icons': ['lucide-react'],
-            'vendor-capacitor': ['@capacitor/core'],
-            'vendor-motion': ['motion']
-          }
-        }
-      }
-    },
-    server: {
-      // HMR is disabled in AI Studio via DISABLE_HMR env var.
-      // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
-      hmr: process.env.DISABLE_HMR !== 'true',
-      // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
-      watch: process.env.DISABLE_HMR === 'true' ? false : {},
-    },
-  };
-});
+/**
+ * Capacitor Configuration
+ * 
+ * FIX: webDir diubah menjadi 'dist/client' untuk mencocokkan 
+ * konfigurasi `build.outDir` di vite.config.ts.
+ * Tanpa ini, Capacitor akan mencari index.html di folder 'www' 
+ * dan menyebabkan error build.
+ */
+const config: CapacitorConfig = {
+  appId: 'com.nanomind.gamemapper',
+  appName: 'GameMapperMind',
+  
+  // PENTING: Harus sama dengan outDir di vite.config.ts
+  webDir: 'dist/client', 
+  
+  bundledWebRuntime: false,
+  
+  server: {
+    androidScheme: 'https',
+  },
+};
+
+export default config;

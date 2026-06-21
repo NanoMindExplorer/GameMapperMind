@@ -1,8 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">GameMapperMind</string>
-    <string name="title_activity_main">GameMapperMind</string>
-    <string name="package_name">com.nanomindexplorer.gamemappermind</string>
-    <string name="custom_url_scheme">com.nanomindexplorer.gamemappermind</string>
-    <string name="accessibility_service_description">GameMapperMind uses Accessibility Services to inject touch input if Shizuku is not available.</string>
+    <string name="app_name">Gamepad Mapper Mind</string>
+    <string name="title_activity_main">Gamepad Mapper Mind</string>
+    <string name="package_name">com.nanomind.gamemapper</string>
+    <string name="custom_url_scheme">com.nanomind.gamemapper</string>
 </resources>

@@ -38,6 +38,17 @@ jobs:
           VITE_NEXION_API_KEY: 'ci-build-placeholder-key-not-used-in-apk-32chars'
         run: npm run build
 
+      - name: Verify dist/client and index.html
+        run: |
+          echo "Checking build output..."
+          ls -la dist/
+          ls -la dist/client/
+          if [ ! -f "dist/client/index.html" ]; then
+            echo "::error::index.html not found in dist/client!"
+            exit 1
+          fi
+          echo "Build output verified successfully."
+
       - name: Capacitor Sync
         run: npx cap sync android
 

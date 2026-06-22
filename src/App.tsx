@@ -231,8 +231,7 @@ export default function App() {
   };
 
   const syncActiveProfileIdOnServer = (id: string) => {
-    // Only local in Capacitor
-    console.log("Profile active set to", id);
+    // Local processing only via Capacitor
   };
 
   React.useEffect(() => {

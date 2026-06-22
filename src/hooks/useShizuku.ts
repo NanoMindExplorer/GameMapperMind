@@ -6,8 +6,14 @@ export const useShizuku = () => {
   const checkShizukuStatus = async (currentState: ShizukuState): Promise<ShizukuState> => {
     if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
       try {
-        const { granted } = await TouchInjection.checkPermission();
+        const { granted, touchServiceAlive } = await TouchInjection.checkPermission();
         const { daemonRunning } = await TouchInjection.checkDaemonRunning();
+        
+        if (granted && (!touchServiceAlive || !daemonRunning)) {
+            // Auto re-bind if permission is fine but service died
+            await bindAndStart();
+        }
+
         return {
           ...currentState,
           daemonRunning: !!daemonRunning, 

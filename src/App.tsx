@@ -284,7 +284,11 @@ export default function App() {
 
   const activeProfile = profiles.find(p => p.id === activeProfileId) || profiles[0];
 
-  useGamepadLoop(activeProfile, shizukuState.status === 'CONNECTED_SHIZUKU' || shizukuState.status === 'CONNECTED_ADB');
+  useGamepadLoop(
+    activeProfile, 
+    shizukuState.status === 'CONNECTED_SHIZUKU' || shizukuState.status === 'CONNECTED_ADB',
+    overlayActive
+  );
 
   const handleLogMessage = React.useCallback((msg: string) => {
     setShizukuState(prev => {

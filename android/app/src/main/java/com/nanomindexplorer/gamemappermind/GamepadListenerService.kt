@@ -238,15 +238,28 @@ class GamepadListenerService : Service() {
                                             val max = range?.second ?: 32767
                                             val mid = min + (max - min) / 2f
                                             val half = (max - min) / 2f
-                                            val normalizedVal = if (half > 0) (rawVal - mid) / half else 0f
-                                            val finalVal = normalizedVal.coerceIn(-1f, 1f)
+                                            
+                                            var finalVal = 0f
+                                            if (axisType == "ABS_Z" || axisType == "ABS_RZ") {
+                                                // Triggers 0 to 1
+                                                finalVal = if (max > min) ((rawVal - min).toFloat() / (max - min).toFloat()).coerceIn(0f, 1f) else 0f
+                                            } else {
+                                                // Analog sticks -1 to 1
+                                                var normalizedVal = if (half > 0) (rawVal - mid) / half else 0f
+                                                // Apply deadzone
+                                                if (Math.abs(normalizedVal) < 0.15f) {
+                                                    normalizedVal = 0f
+                                                }
+                                                finalVal = normalizedVal.coerceIn(-1f, 1f)
+                                            }
+                                            
                                             when (axisType) {
                                                 "ABS_X"  -> { lStickX = finalVal; hasAxisChange = true }
                                                 "ABS_Y"  -> { lStickY = finalVal; hasAxisChange = true }
                                                 "ABS_RX" -> { rStickX = finalVal; hasAxisChange = true }
                                                 "ABS_RY" -> { rStickY = finalVal; hasAxisChange = true }
-                                                "ABS_Z"  -> { l2Trigger = finalVal; hasAxisChange = true }
-                                                "ABS_RZ" -> { r2Trigger = finalVal; hasAxisChange = true }
+                                                "ABS_Z", "ABS_GAS"   -> { l2Trigger = finalVal; hasAxisChange = true }
+                                                "ABS_RZ", "ABS_BRAKE"-> { r2Trigger = finalVal; hasAxisChange = true }
                                             }
                                         }
                                     }

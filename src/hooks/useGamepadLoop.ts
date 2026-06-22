@@ -2,9 +2,9 @@ import { useEffect } from 'react';
 import TouchInjection from '../plugins/TouchInjection';
 import { GamepadProfile } from '../types';
 
-export function useGamepadLoop(mapProfile: GamepadProfile | null, active: boolean) {
+export function useGamepadLoop(mapProfile: GamepadProfile | null, connected: boolean, injectActive: boolean) {
   useEffect(() => {
-    if (!active || !mapProfile) return;
+    if (!connected || !mapProfile) return;
 
     let isCleanedUp = false;
 
@@ -15,7 +15,8 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, active: boolea
         
         if (isCleanedUp) return;
         
-        await TouchInjection.updateActiveProfile({ profileJson: JSON.stringify(mapProfile) });
+        const profileStr = injectActive ? JSON.stringify(mapProfile) : "{}";
+        await TouchInjection.updateActiveProfile({ profileJson: profileStr });
       } catch (err) {
         console.error("Failed to setup native gamepad listener", err);
       }
@@ -34,9 +35,7 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, active: boolea
       isCleanedUp = true;
       btnListener.then(l => l.remove());
       axisListener.then(l => l.remove());
-      if (!active) {
-        TouchInjection.updateActiveProfile({ profileJson: "{}" }).catch(() => {});
-      }
+      TouchInjection.updateActiveProfile({ profileJson: "{}" }).catch(() => {});
     };
-  }, [mapProfile, active]);
+  }, [mapProfile, connected, injectActive]);
 }

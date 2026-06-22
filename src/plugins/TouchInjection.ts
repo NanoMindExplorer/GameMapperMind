@@ -9,7 +9,7 @@ export interface TouchInjectionPluginType {
   updateActiveProfile(options: { profileJson: string }): Promise<void>;
   startOverlay(options: { profile: any }): Promise<void>;
   stopOverlay(): Promise<void>;
-  checkPermission(): Promise<{ granted: boolean }>;
+  checkPermission(): Promise<{ granted: boolean, isBound?: boolean, touchServiceAlive?: boolean }>;
   requestPermission(): Promise<{ granted: boolean, requested?: boolean }>;
   checkDaemonRunning(): Promise<{ daemonRunning: boolean }>;
   executeShizukuCommand(options: { command: string }): Promise<{ output: string, error: string, exitCode: number }>;

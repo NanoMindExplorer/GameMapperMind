@@ -28,5 +28,5 @@
     <path android:fillColor="#89b4fa" android:pathData="M 192 122 A 8 8 0 1 0 192 138 A 8 8 0 1 0 192 122" />
     <path android:strokeColor="#89b4fa" android:strokeWidth="6" android:strokeLineCap="round" android:strokeLineJoin="round"
         android:pathData="M 192 70 L 150 100 M 192 70 L 234 100 M 150 100 L 192 130 M 234 100 L 192 130 M 192 70 L 192 30" />
-  </g>
+  </group>
 </vector>

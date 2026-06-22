@@ -1,0 +1,32 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+
+  <path android:fillColor="#11111B" android:pathData="M 0 0 L 512 0 L 512 512 L 0 512 Z" />
+
+  <group android:translateX="64" android:translateY="120">
+    <!-- Gamepad Outer shape -->
+    <path android:strokeColor="#cba6f7" android:strokeWidth="24" android:strokeLineJoin="round"
+        android:pathData="M 64 64 C 0 32 0 160 32 192 L 64 192 C 128 256 256 256 320 192 L 352 192 C 384 160 384 32 320 64 C 256 0 128 0 64 64 Z" />
+
+    <!-- D-pad -->
+    <path android:fillColor="#cba6f7"
+        android:pathData="M 100 120 L 100 100 L 120 100 L 120 120 L 140 120 L 140 140 L 120 140 L 120 160 L 100 160 L 100 140 L 80 140 L 80 120 Z" />
+
+    <!-- Action Buttons -->
+    <path android:fillColor="#f38ba8" android:pathData="M 280 94 A 16 16 0 1 0 280 126 A 16 16 0 1 0 280 94" />
+    <path android:fillColor="#89b4fa" android:pathData="M 250 124 A 16 16 0 1 0 250 156 A 16 16 0 1 0 250 124" />
+    <path android:fillColor="#fab387" android:pathData="M 310 124 A 16 16 0 1 0 310 156 A 16 16 0 1 0 310 124" />
+    <path android:fillColor="#a6e3a1" android:pathData="M 280 154 A 16 16 0 1 0 280 186 A 16 16 0 1 0 280 154" />
+
+    <!-- Brain nodes linking -->
+    <path android:fillColor="#89b4fa" android:pathData="M 192 58 A 12 12 0 1 0 192 82 A 12 12 0 1 0 192 58" />
+    <path android:fillColor="#89b4fa" android:pathData="M 150 92 A 8 8 0 1 0 150 108 A 8 8 0 1 0 150 92" />
+    <path android:fillColor="#89b4fa" android:pathData="M 234 92 A 8 8 0 1 0 234 108 A 8 8 0 1 0 234 92" />
+    <path android:fillColor="#89b4fa" android:pathData="M 192 122 A 8 8 0 1 0 192 138 A 8 8 0 1 0 192 122" />
+    <path android:strokeColor="#89b4fa" android:strokeWidth="6" android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M 192 70 L 150 100 M 192 70 L 234 100 M 150 100 L 192 130 M 234 100 L 192 130 M 192 70 L 192 30" />
+  </g>
+</vector>

@@ -79,7 +79,7 @@ export default function OverlayApp() {
       <OverlayWysiwyg 
         activeProfile={profile}
         onUpdateProfile={(updated) => setProfile(updated)}
-        onLogMessage={(msg) => console.log(msg)}
+        onLogMessage={() => {}}
         activeKeys={[]}
         activeAxes={{lx:0, ly:0, rx:0, ry:0}}
         isNativeOverlay={true}

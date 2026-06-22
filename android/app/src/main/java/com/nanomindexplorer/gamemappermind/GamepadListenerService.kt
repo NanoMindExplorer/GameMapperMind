@@ -25,12 +25,18 @@ class GamepadListenerService : Service() {
 
     override fun onBind(intent: Intent): IBinder? = null
 
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (!isListening) {
+            startGetEventCapture()
+        }
+        return START_STICKY
+    }
+
     override fun onCreate() {
         super.onCreate()
         Log.d("GameMapper", "GamepadListenerService: onCreate")
         createNotificationChannel()
         startForegroundService()
-        startGetEventCapture()
         isRunning = true
     }
 
@@ -94,7 +100,9 @@ class GamepadListenerService : Service() {
                             val pathMatch = Regex("/dev/input/event\\d+").find(line)
                             currentDevicePath = pathMatch?.value
                             currentDeviceIsGamepad = false
-                        } else if (line.contains("BTN_A") || line.contains("BTN_GAMEPAD") || line.contains("ABS_HAT0X")) {
+                        } else if (line.contains("BTN_A") || line.contains("BTN_GAMEPAD") || line.contains("ABS_HAT0X") ||
+                                   line.contains("BTN_SOUTH") || line.contains("BTN_EAST") || line.contains("BTN_X") || line.contains("BTN_Y") ||
+                                   line.contains("BTN_NORTH") || line.contains("BTN_WEST")) {
                             currentDeviceIsGamepad = true
                         }
                         
@@ -124,18 +132,9 @@ class GamepadListenerService : Service() {
                 val geteventCmd = if (gamepadDevices.isNotEmpty()) {
                     "getevent -l " + gamepadDevices.joinToString(" ")
                 } else {
-                    val inputManager = getSystemService(android.content.Context.INPUT_SERVICE) as android.hardware.input.InputManager
-                    val hasGamepad = inputManager.inputDeviceIds.any { id ->
-                        val dev = inputManager.getInputDevice(id)
-                        dev != null && ((dev.sources and android.view.InputDevice.SOURCE_GAMEPAD) != 0 || 
-                                        (dev.sources and android.view.InputDevice.SOURCE_JOYSTICK) != 0)
-                    }
-                    if (hasGamepad) {
-                        "getevent -l"
-                    } else {
-                        TouchInjectionPlugin.emitGamepadButton("ERROR_NO_GAMEPAD", 0, 0f)
-                        return@Thread
-                    }
+                    TouchInjectionPlugin.emitGamepadButton("ERROR_NO_GAMEPAD", 0, 0f)
+                    isListening = false
+                    return@Thread
                 }
 
                 var lStickX = 0f
@@ -268,7 +267,9 @@ class GamepadListenerService : Service() {
                             }
                         }
                     }
-                    override fun onExit(code: Int) {}
+                    override fun onExit(code: Int) {
+                        isListening = false
+                    }
                 }
 
                 TouchInjectionPlugin.touchService?.executeStreamCommand(geteventCmd, streamListener)
@@ -276,6 +277,7 @@ class GamepadListenerService : Service() {
             } catch (e: Exception) {
                 Log.e("GameMapper", "getevent loop failed", e)
                 TouchInjectionPlugin.emitGamepadButton("ERROR_SHIZUKU_EXCEPTION", 0, 0f)
+                isListening = false
             }
         }.also { it.isDaemon = true }.start()
     }

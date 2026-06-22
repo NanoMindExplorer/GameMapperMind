@@ -15,7 +15,14 @@ class NativeGamepadMapper(private val context: Context) {
         var instance: NativeGamepadMapper? = null
         
         fun resetAll() {
-            instance?.pointers?.forEach { it.isActive = false }
+            instance?.pointers?.forEach { 
+                if (it.isActive) {
+                    try {
+                        TouchInjectionPlugin.touchService?.touchUp(it.id)
+                    } catch(e: Exception) {}
+                    it.isActive = false 
+                }
+            }
             instance?.lastState?.clear()
         }
     }
@@ -71,6 +78,16 @@ class NativeGamepadMapper(private val context: Context) {
     fun handleButton(buttonName: String, isDown: Boolean) {
         val mapping = findButtonMapping(buttonName)
         if (mapping == null || !mapping.has("x") || !mapping.has("y")) {
+            val wasDown = lastState[buttonName] ?: false
+            // Complete pending touchUp if it was mapped previously
+            if (!isDown && wasDown) {
+                val p = pointers.find { it.isActive && it.virtualKey == buttonName }
+                if (p != null) {
+                    p.isActive = false
+                    p.virtualKey = null
+                    try { TouchInjectionPlugin.touchService?.touchUp(p.id) } catch(e:Exception){}
+                }
+            }
             lastState[buttonName] = isDown
             return
         }
@@ -142,6 +159,9 @@ class NativeGamepadMapper(private val context: Context) {
                 lp.isActive = false
                 TouchInjectionPlugin.touchService?.touchUp(lp.id)
             }
+        } else if (lp.isActive) {
+            lp.isActive = false
+            TouchInjectionPlugin.touchService?.touchUp(lp.id)
         }
         
         val rMag = sqrt(sRx*sRx + sRy*sRy)
@@ -164,6 +184,9 @@ class NativeGamepadMapper(private val context: Context) {
                 rp.isActive = false
                 TouchInjectionPlugin.touchService?.touchUp(rp.id)
             }
+        } else if (rp.isActive) {
+            rp.isActive = false
+            TouchInjectionPlugin.touchService?.touchUp(rp.id)
         }
         
         if (l2 > 0.05f) {

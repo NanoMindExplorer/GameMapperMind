@@ -93,7 +93,8 @@ class TouchInjectionPlugin : Plugin() {
     fun bindService(call: PluginCall) {
         try {
             if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
-                if (!isBound || touchService == null) {
+                val serviceAlive = touchService != null && touchService!!.asBinder().isBinderAlive
+                if (!isBound || !serviceAlive) {
                     pendingBindCalls.add(call)
                     try {
                         if (isBound) {
@@ -278,7 +279,7 @@ class TouchInjectionPlugin : Plugin() {
     fun checkPermission(call: PluginCall) {
         try {
             val granted = Shizuku.pingBinder() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
-            val touchServiceAlive = touchService != null && touchService?.isAlive() == true
+            val touchServiceAlive = touchService != null && touchService!!.asBinder().isBinderAlive
             val data = JSObject()
             data.put("granted", granted)
             data.put("isBound", isBound)

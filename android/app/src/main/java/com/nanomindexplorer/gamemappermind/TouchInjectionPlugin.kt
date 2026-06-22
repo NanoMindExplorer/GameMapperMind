@@ -73,7 +73,11 @@ class TouchInjectionPlugin : Plugin() {
     override fun handleOnDestroy() {
         Shizuku.removeRequestPermissionResultListener(permissionListener)
         if (isBound) {
-            touchService?.releaseAllPointers()
+            try {
+                touchService?.destroy()
+            } catch (e: Exception) {
+                // ignore
+            }
             Shizuku.unbindUserService(USER_SERVICE_ARGS, serviceConnection, true)
             touchService = null
             isBound = false
@@ -103,7 +107,11 @@ class TouchInjectionPlugin : Plugin() {
     fun unbindService(call: PluginCall) {
         try {
             if (isBound) {
-                touchService?.releaseAllPointers()
+                try {
+                    touchService?.destroy()
+                } catch (e: Exception) {
+                    // ignore
+                }
                 Shizuku.unbindUserService(USER_SERVICE_ARGS, serviceConnection, true)
                 touchService = null
                 isBound = false
@@ -198,29 +206,18 @@ class TouchInjectionPlugin : Plugin() {
             return
         }
 
+        if (touchService == null) {
+            call.reject("Shizuku user service not bound. Please bind service first.")
+            return
+        }
+
         try {
-            val newProcessMethod = Shizuku::class.java.getDeclaredMethod("newProcess", Array<String>::class.java, Array<String>::class.java, String::class.java)
-            newProcessMethod.isAccessible = true
-            val process = newProcessMethod.invoke(null, arrayOf("sh", "-c", command), null as Array<String>?, null as String?) as Process
-            val reader = java.io.BufferedReader(java.io.InputStreamReader(process.inputStream))
-            val errorReader = java.io.BufferedReader(java.io.InputStreamReader(process.errorStream))
-            
-            val output = StringBuilder()
-            val errorOutput = StringBuilder()
-            
-            var line: String?
-            while (reader.readLine().also { line = it } != null) {
-                output.append(line).append("\n")
-            }
-            while (errorReader.readLine().also { line = it } != null) {
-                errorOutput.append(line).append("\n")
-            }
-            
-            val exitCode = process.waitFor()
+            val jsonResult = touchService?.executeShellCommand(command) ?: "{}"
+            val obj = org.json.JSONObject(jsonResult)
             val data = JSObject()
-            data.put("output", output.toString())
-            data.put("error", errorOutput.toString())
-            data.put("exitCode", exitCode)
+            data.put("output", obj.optString("output", ""))
+            data.put("error", obj.optString("error", ""))
+            data.put("exitCode", obj.optInt("exitCode", -1))
             call.resolve(data)
         } catch (e: Exception) {
             call.reject(e.localizedMessage)

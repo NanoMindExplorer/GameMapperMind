@@ -66,30 +66,31 @@ class GamepadListenerService : Service() {
             TouchInjectionPlugin.emitGamepadButton("ERROR_SHIZUKU_NO_PERMISSION", 0, 0f)
             return
         }
+        if (TouchInjectionPlugin.touchService == null) {
+            Log.w("GameMapper", "TouchService tidak terhubung")
+            TouchInjectionPlugin.emitGamepadButton("ERROR_SHIZUKU_NOT_RUNNING", 0, 0f)
+            return
+        }
         isListening = true
         Thread {
             try {
                 // Get min/max first using getevent -p
-                val newProcessMethod = rikka.shizuku.Shizuku::class.java.getDeclaredMethod("newProcess", Array<String>::class.java, Array<String>::class.java, String::class.java)
-                newProcessMethod.isAccessible = true
-                
                 val absRanges = mutableMapOf<String, Pair<Int, Int>>()
                 val gamepadDevices = mutableSetOf<String>()
                 
                 try {
-                    val pProcess = newProcessMethod.invoke(null, arrayOf("sh", "-c", "getevent -lp"), null as Array<String>?, null as String?) as Process
-                    val pReader = BufferedReader(InputStreamReader(pProcess.inputStream))
-                    var pLine: String?
+                    val pJson = TouchInjectionPlugin.touchService?.executeShellCommand("getevent -lp") ?: "{}"
+                    val pOutput = org.json.JSONObject(pJson).optString("output", "")
+                    val lines = pOutput.split("\n")
+                    
                     var currentDevicePath: String? = null
                     var currentDeviceIsGamepad = false
                     
-                    while (pReader.readLine().also { pLine = it } != null) {
-                        val line = pLine!!
+                    for (line in lines) {
                         if (line.contains("add device")) {
                             if (currentDeviceIsGamepad && currentDevicePath != null) {
                                 gamepadDevices.add(currentDevicePath)
                             }
-                            // Extract path like: add device 1: /dev/input/event4
                             val pathMatch = Regex("/dev/input/event\\d+").find(line)
                             currentDevicePath = pathMatch?.value
                             currentDeviceIsGamepad = false
@@ -116,12 +117,10 @@ class GamepadListenerService : Service() {
                     if (currentDeviceIsGamepad && currentDevicePath != null) {
                         gamepadDevices.add(currentDevicePath)
                     }
-                    pProcess.destroy()
                 } catch (e: Exception) {
                     Log.e("GameMapper", "Failed to parse getevent -lp", e)
                 }
 
-                // Menjalankan getevent -l hanya untuk gamepad devices
                 val geteventCmd = if (gamepadDevices.isNotEmpty()) {
                     "getevent -l " + gamepadDevices.joinToString(" ")
                 } else {
@@ -132,25 +131,13 @@ class GamepadListenerService : Service() {
                                         (dev.sources and android.view.InputDevice.SOURCE_JOYSTICK) != 0)
                     }
                     if (hasGamepad) {
-                        Log.w("GameMapper", "Gamepad detected via InputManager but not by getevent -lp filters. Capturing all as fallback.")
                         "getevent -l"
                     } else {
-                        Log.e("GameMapper", "No gamepad found. Terminating listener to avoid capturing touch.")
                         TouchInjectionPlugin.emitGamepadButton("ERROR_NO_GAMEPAD", 0, 0f)
                         return@Thread
                     }
                 }
 
-                evdevProcess = newProcessMethod.invoke(null, arrayOf("sh", "-c", geteventCmd), null as Array<String>?, null as String?) as Process
-                val processStream = evdevProcess?.inputStream
-                if (processStream == null) {
-                    Log.e("GameMapper", "getevent stream is null. newProcess silently failed.")
-                    TouchInjectionPlugin.emitGamepadButton("ERROR_SHIZUKU_SILENT_FAILURE", 0, 0f)
-                    return@Thread
-                }
-                val reader = BufferedReader(InputStreamReader(processStream))
-                var line: String? = null
-                
                 var lStickX = 0f
                 var lStickY = 0f
                 var rStickX = 0f
@@ -160,12 +147,10 @@ class GamepadListenerService : Service() {
                 var hasAxisChange = false
                 
                 val nativeMapper = NativeGamepadMapper(this@GamepadListenerService)
-
-                while (isListening) {
-                    line = reader.readLine()
-                    if (line == null) break
-                    
-                    line?.let {
+                
+                val streamListener = object : ICommandOutputListener.Stub() {
+                    override fun onOutputLine(it: String?) {
+                        if (!isListening || it == null) return
                         if (it.contains("EV_SYN")) {
                             if (it.contains("SYN_REPORT")) {
                                 if (hasAxisChange) {
@@ -270,7 +255,10 @@ class GamepadListenerService : Service() {
                             }
                         }
                     }
-                } // end while
+                    override fun onExit(code: Int) {}
+                }
+
+                TouchInjectionPlugin.touchService?.executeStreamCommand(geteventCmd, streamListener)
 
             } catch (e: Exception) {
                 Log.e("GameMapper", "getevent loop failed", e)
@@ -307,7 +295,7 @@ class GamepadListenerService : Service() {
         isListening = false
         TouchInjectionPlugin.touchService?.releaseAllPointers()
         try {
-            evdevProcess?.destroy()
+            TouchInjectionPlugin.touchService?.stopStreamCommand()
         } catch (e: Exception) {}
     }
 }

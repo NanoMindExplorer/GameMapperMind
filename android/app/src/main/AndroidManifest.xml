@@ -51,12 +51,6 @@
             />
         </service>
 
-        <service
-            android:name=".TouchDaemonService"
-            android:exported="true"
-            android:permission="moe.shizuku.manager.permission.API_V23"
-        />
-
         <provider
             android:name="rikka.shizuku.ShizukuProvider"
             android:authorities="${applicationId}.shizuku"

@@ -11,42 +11,93 @@ import android.view.InputDevice
 import android.view.MotionEvent
 import rikka.shizuku.Shizuku
 
-class TouchDaemonService : Service() {
+class TouchDaemonService : ITouchService.Stub {
 
-    private val touchStub = object : ITouchService.Stub() {
-        override fun touchDown(pointerId: Int, x: Float, y: Float): Boolean {
-            return this@TouchDaemonService.touchDown(pointerId, x, y)
-        }
+    constructor() : super()
 
-        override fun touchMove(pointerId: Int, x: Float, y: Float): Boolean {
-            return this@TouchDaemonService.touchMove(pointerId, x, y)
-        }
+    // Optionally accept Context for Shizuku v13+
+    constructor(context: android.content.Context?) : super() {
+        // we can store context if needed
+    }
 
-        override fun touchUp(pointerId: Int): Boolean {
-            return this@TouchDaemonService.touchUp(pointerId)
-        }
-
-        override fun injectTap(x: Float, y: Float): Boolean {
-            return this@TouchDaemonService.injectTap(x, y)
-        }
-
-        override fun isAlive(): Boolean {
-            return true
-        }
-
-        override fun releaseAllPointers(): Boolean {
-            return this@TouchDaemonService.releaseAllPointers()
+    override fun executeShellCommand(command: String): String {
+        return try {
+            val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", command))
+            val reader = java.io.BufferedReader(java.io.InputStreamReader(process.inputStream))
+            val errorReader = java.io.BufferedReader(java.io.InputStreamReader(process.errorStream))
+            
+            val output = StringBuilder()
+            val errorOutput = StringBuilder()
+            
+            var line: String?
+            while (reader.readLine().also { line = it } != null) {
+                output.append(line).append("\n")
+            }
+            while (errorReader.readLine().also { line = it } != null) {
+                errorOutput.append(line).append("\n")
+            }
+            
+            val exitCode = process.waitFor()
+            // We can serialize as JSON or just return output since right now TouchInjectionPlugin parses this?
+            // Actually, wait, TouchInjectionPlugin expects exitCode and everything. Let's return a JSON string manually or just return the output if exitCode==0
+            // Since it's a string, we can return JSON string.
+            val json = org.json.JSONObject()
+            json.put("output", output.toString())
+            json.put("error", errorOutput.toString())
+            json.put("exitCode", exitCode)
+            json.toString()
+        } catch (e: Exception) {
+            val json = org.json.JSONObject()
+            json.put("output", "")
+            json.put("error", e.localizedMessage)
+            json.put("exitCode", -1)
+            json.toString()
         }
     }
 
-    override fun onBind(intent: Intent?): IBinder? {
-        return touchStub
+    private var streamProcess: Process? = null
+    private var streamThread: Thread? = null
+
+    override fun executeStreamCommand(command: String, listener: ICommandOutputListener) {
+        stopStreamCommand()
+        streamThread = Thread {
+            try {
+                streamProcess = Runtime.getRuntime().exec(arrayOf("sh", "-c", command))
+                val reader = java.io.BufferedReader(java.io.InputStreamReader(streamProcess!!.inputStream))
+                var line: String?
+                while (reader.readLine().also { line = it } != null) {
+                    try {
+                        listener.onOutputLine(line)
+                    } catch (e: Exception) {}
+                }
+                val exitCode = streamProcess?.waitFor() ?: -1
+                try {
+                    listener.onExit(exitCode)
+                } catch (e: Exception) {}
+            } catch (e: Exception) {
+                try {
+                    listener.onOutputLine("ERROR: " + e.localizedMessage)
+                    listener.onExit(-1)
+                } catch (ex: Exception) {}
+            }
+        }
+        streamThread?.start()
     }
 
-    // Clean up pointers if the service is destroyed
-    override fun onDestroy() {
-        super.onDestroy()
+    override fun stopStreamCommand() {
+        try {
+            streamProcess?.destroy()
+        } catch (e: Exception) {}
+        streamProcess = null
+        try {
+            streamThread?.interrupt()
+        } catch (e: Exception) {}
+        streamThread = null
+    }
+
+    override fun destroy() {
         releaseAllPointers()
+        System.exit(0)
     }
 
     private val inputManager: InputManager? by lazy {
@@ -150,7 +201,7 @@ class TouchDaemonService : Service() {
         }
     }
 
-    fun touchDown(pointerId: Int, x: Float, y: Float): Boolean {
+    override fun touchDown(pointerId: Int, x: Float, y: Float): Boolean {
         var state = pointers.get(pointerId)
         if (state == null) {
             state = PointerState()

@@ -271,7 +271,13 @@ public class FloatingOverlayService extends Service {
             manager.cancel(1);
         }
         if (webView != null) {
-            windowManager.removeView(webView);
+            try {
+                if (webView.isAttachedToWindow() || webView.getWindowToken() != null) {
+                    windowManager.removeViewImmediate(webView);
+                }
+            } catch (Exception e) {
+                Log.e("GameMapper", "Exception removing webview from window manager", e);
+            }
             webView.destroy();
             webView = null;
         }

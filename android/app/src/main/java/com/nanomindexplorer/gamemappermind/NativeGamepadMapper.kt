@@ -1,28 +1,46 @@
 package com.nanomindexplorer.gamemappermind
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
+import android.view.WindowManager
 import org.json.JSONObject
-import org.json.JSONArray
 import kotlin.math.sqrt
+import kotlin.math.cos
+import kotlin.math.sin
+import kotlin.random.Random
 
 class NativeGamepadMapper(private val context: Context) {
+    companion object {
+        var instance: NativeGamepadMapper? = null
+        
+        fun resetAll() {
+            instance?.pointers?.forEach { it.isActive = false }
+            instance?.lastState?.clear()
+        }
+    }
+
     class PointerState(val id: Int, var isActive: Boolean, val type: String, var virtualKey: String? = null)
     
-    private val pointers = mutableListOf(
+    val pointers = mutableListOf(
         PointerState(0, false, "analog"),
         PointerState(1, false, "analog")
     ).apply {
-        for (i in 2..9) add(PointerState(i, false, "button"))
+        for (i in 2..15) add(PointerState(i, false, "button"))
     }
 
-    private val lastState = mutableMapOf<String, Boolean>()
+    val lastState = mutableMapOf<String, Boolean>()
     
-    // Config values
-    private val deadzone = 0.15f
-    private val maxRadius = 150f
+    private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    init {
+        instance = this
+    }
 
     private fun getScreenCoords(pctX: Double, pctY: Double): Pair<Float, Float> {
-        val dm = context.resources.displayMetrics
+        val dm = android.util.DisplayMetrics()
+        windowManager.defaultDisplay.getRealMetrics(dm)
         val sw = Math.max(dm.widthPixels, dm.heightPixels)
         val sh = Math.min(dm.widthPixels, dm.heightPixels)
         return Pair(((pctX / 100.0) * sw).toFloat(), ((pctY / 100.0) * sh).toFloat())
@@ -43,21 +61,43 @@ class NativeGamepadMapper(private val context: Context) {
         return null
     }
 
-    // Call from Service thread
+    private fun getAntiBanOffset(antiBanEnabled: Boolean): Pair<Float, Float> {
+        if (!antiBanEnabled) return Pair(0f, 0f)
+        val radius = Random.nextFloat() * 8f
+        val angle = Random.nextFloat() * 2 * Math.PI
+        return Pair((radius * cos(angle)).toFloat(), (radius * sin(angle)).toFloat())
+    }
+
     fun handleButton(buttonName: String, isDown: Boolean) {
         val mapping = findButtonMapping(buttonName)
         if (mapping == null || !mapping.has("x") || !mapping.has("y")) {
             lastState[buttonName] = isDown
             return
         }
+        
+        val antiBanEnabled = mapping.optBoolean("antiBanEnabled", false)
+        val type = mapping.optString("type", "button")
+        
         val wasDown = lastState[buttonName] ?: false
         if (isDown && !wasDown) {
             val p = pointers.find { !it.isActive && it.type == "button" }
             if (p != null) {
                 p.isActive = true
                 p.virtualKey = buttonName
-                val (x, y) = getScreenCoords(mapping.getDouble("x"), mapping.getDouble("y"))
+                var (x, y) = getScreenCoords(mapping.getDouble("x"), mapping.getDouble("y"))
+                val (ox, oy) = getAntiBanOffset(antiBanEnabled)
+                x += ox
+                y += oy
                 TouchInjectionPlugin.touchService?.touchDown(p.id, x, y)
+                
+                if (type == "swipe" && mapping.has("swipeEndX") && mapping.has("swipeEndY")) {
+                    val (ex, ey) = getScreenCoords(mapping.getDouble("swipeEndX"), mapping.getDouble("swipeEndY"))
+                    mainHandler.postDelayed({
+                        if (p.isActive) {
+                            TouchInjectionPlugin.touchService?.touchMove(p.id, ex + ox, ey + oy)
+                        }
+                    }, 50)
+                }
             }
         } else if (!isDown && wasDown) {
             val p = pointers.find { it.isActive && it.virtualKey == buttonName }
@@ -70,16 +110,29 @@ class NativeGamepadMapper(private val context: Context) {
         lastState[buttonName] = isDown
     }
 
+    private var sLx = 0f
+    private var sLy = 0f
+    private var sRx = 0f
+    private var sRy = 0f
+    private val smoothingFactor = 0.6f
+
     fun handleAxes(lx: Float, ly: Float, rx: Float, ry: Float, l2: Float, r2: Float) {
-        // 1. Left stick
-        val lMag = sqrt(lx*lx + ly*ly)
+        sLx = sLx * smoothingFactor + lx * (1f - smoothingFactor)
+        sLy = sLy * smoothingFactor + ly * (1f - smoothingFactor)
+        sRx = sRx * smoothingFactor + rx * (1f - smoothingFactor)
+        sRy = sRy * smoothingFactor + ry * (1f - smoothingFactor)
+    
+        val lMag = sqrt(sLx*sLx + sLy*sLy)
         val lMap = findButtonMapping("L_STICK")
         val lp = pointers[0]
         if (lMap != null && lMap.has("x") && lMap.has("y")) {
+            val deadzone = lMap.optDouble("deadzone", 0.15).toFloat()
+            val maxRadius = lMap.optDouble("radius", 100.0).toFloat()
+            
             val (cX, cY) = getScreenCoords(lMap.getDouble("x"), lMap.getDouble("y"))
             if (lMag > deadzone) {
-                val tX = cX + (lx * maxRadius)
-                val tY = cY + (ly * maxRadius)
+                val tX = cX + (sLx * maxRadius)
+                val tY = cY + (sLy * maxRadius)
                 if (!lp.isActive) {
                     lp.isActive = true
                     TouchInjectionPlugin.touchService?.touchDown(lp.id, cX, cY)
@@ -91,15 +144,17 @@ class NativeGamepadMapper(private val context: Context) {
             }
         }
         
-        // 2. Right stick
-        val rMag = sqrt(rx*rx + ry*ry)
+        val rMag = sqrt(sRx*sRx + sRy*sRy)
         val rMap = findButtonMapping("R_STICK")
         val rp = pointers[1]
         if (rMap != null && rMap.has("x") && rMap.has("y")) {
+            val deadzone = rMap.optDouble("deadzone", 0.15).toFloat()
+            val maxRadius = rMap.optDouble("radius", 150.0).toFloat()
+            
             val (cX, cY) = getScreenCoords(rMap.getDouble("x"), rMap.getDouble("y"))
             if (rMag > deadzone) {
-                val tX = cX + (rx * maxRadius)
-                val tY = cY + (ry * maxRadius)
+                val tX = cX + (sRx * maxRadius)
+                val tY = cY + (sRy * maxRadius)
                 if (!rp.isActive) {
                     rp.isActive = true
                     TouchInjectionPlugin.touchService?.touchDown(rp.id, cX, cY)
@@ -111,15 +166,13 @@ class NativeGamepadMapper(private val context: Context) {
             }
         }
         
-        // 3. L2 Analog to Button
-        if (l2 > 0.0f) {
+        if (l2 > 0.05f) {
             handleButton("LT", true)
         } else {
             handleButton("LT", false)
         }
         
-        // 4. R2 Analog to Button
-        if (r2 > 0.0f) {
+        if (r2 > 0.05f) {
             handleButton("RT", true)
         } else {
             handleButton("RT", false)

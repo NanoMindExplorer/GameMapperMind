@@ -229,6 +229,8 @@ class TouchInjectionPlugin : Plugin() {
     fun updateActiveProfile(call: PluginCall) {
         val configJson = call.getString("profileJson")
         GamepadListenerService.activeProfileJson = configJson
+        touchService?.releaseAllPointers()
+        NativeGamepadMapper.resetAll()
         call.resolve()
     }
 

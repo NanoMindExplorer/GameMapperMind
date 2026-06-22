@@ -13,8 +13,6 @@ declare global {
       closeOverlay: () => void;
     };
     injectConfig: (configJson: string) => void;
-    injectActiveKeys: (keysJson: string) => void;
-    injectActiveAxes: (axesJson: string) => void;
     togglePalette?: (isOpen: boolean) => void;
   }
 }
@@ -22,8 +20,6 @@ declare global {
 
 export default function OverlayApp() {
   const [profile, setProfile] = useState<GamepadProfile | null>(null);
-  const [activeKeys, setActiveKeys] = useState<string[]>([]);
-  const [activeAxes, setActiveAxes] = useState({lx:0, ly:0, rx:0, ry:0});
 
   useEffect(() => {
     // Prevent scrolling from keydown globally in overlay
@@ -40,14 +36,6 @@ export default function OverlayApp() {
       try {
         setProfile(JSON.parse(json));
       } catch(e) { console.error('Failed to parse config'); }
-    };
-
-    window.injectActiveKeys = (json: string) => {
-      try { setActiveKeys(JSON.parse(json)); } catch(e) {}
-    };
-
-    window.injectActiveAxes = (json: string) => {
-      try { setActiveAxes(JSON.parse(json)); } catch(e) {}
     };
 
     const handleMessage = (e: MessageEvent) => {
@@ -92,8 +80,8 @@ export default function OverlayApp() {
         activeProfile={profile}
         onUpdateProfile={(updated) => setProfile(updated)}
         onLogMessage={(msg) => console.log(msg)}
-        activeKeys={activeKeys}
-        activeAxes={activeAxes}
+        activeKeys={[]}
+        activeAxes={{lx:0, ly:0, rx:0, ry:0}}
         isNativeOverlay={true}
       />
     </div>

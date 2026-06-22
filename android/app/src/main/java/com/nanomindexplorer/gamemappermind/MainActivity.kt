@@ -28,30 +28,21 @@ class MainActivity : BridgeActivity() {
         }
     }
 
-    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if ((event.source and InputDevice.SOURCE_GAMEPAD) != 0 ||
-            (event.source and InputDevice.SOURCE_JOYSTICK) != 0) {
-            bridge?.webView?.dispatchKeyEvent(event)
+            (event.source and InputDevice.SOURCE_JOYSTICK) != 0 ||
+            (event.source and InputDevice.SOURCE_DPAD) != 0) {
             return true
         }
-        return super.onKeyDown(keyCode, event)
+        return super.dispatchKeyEvent(event)
     }
 
-    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
+    override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
         if ((event.source and InputDevice.SOURCE_GAMEPAD) != 0 ||
-            (event.source and InputDevice.SOURCE_JOYSTICK) != 0) {
-            bridge?.webView?.dispatchKeyEvent(event)
+            (event.source and InputDevice.SOURCE_JOYSTICK) != 0 ||
+            (event.source and InputDevice.SOURCE_DPAD) != 0) {
             return true
         }
-        return super.onKeyUp(keyCode, event)
-    }
-
-    override fun onGenericMotionEvent(event: MotionEvent): Boolean {
-        if ((event.source and InputDevice.SOURCE_GAMEPAD) != 0 ||
-            (event.source and InputDevice.SOURCE_JOYSTICK) != 0) {
-            bridge?.webView?.dispatchGenericMotionEvent(event)
-            return true
-        }
-        return super.onGenericMotionEvent(event)
+        return super.dispatchGenericMotionEvent(event)
     }
 }

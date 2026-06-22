@@ -241,7 +241,7 @@ export default function App() {
   }, [shizukuState]);
 
   // Query real simulation logs and stats from server, override with Native plugin state if on device
-  const fetchStatus = async () => {
+  const fetchStatus = React.useCallback(async () => {
     try {
       // Just re-check native dependencies directly
       const nextState = await checkShizukuStatus(shizukuStateRef.current);
@@ -249,7 +249,7 @@ export default function App() {
     } catch (err) {
       console.error('Failed to sync native state', err);
     }
-  };
+  }, [checkShizukuStatus]);
 
   const syncActiveProfileIdOnServer = (id: string) => {
     // Local processing only via Capacitor
@@ -259,7 +259,27 @@ export default function App() {
     fetchStatus();
     // Native background checker
     const interval = setInterval(fetchStatus, 5000);
-    return () => clearInterval(interval);
+    
+    let appListener: any;
+    import('@capacitor/app').then(({ App: CapacitorApp }) => {
+      appListener = CapacitorApp.addListener('appStateChange', (state) => {
+        if (state.isActive) {
+           fetchStatus();
+           import('./plugins/TouchInjection').then(({ default: TouchInjection }) => {
+               TouchInjection.bindService().catch(()=>{});
+               TouchInjection.startGamepadListener().catch(()=>{});
+           });
+        }
+      });
+    });
+
+    return () => {
+      clearInterval(interval);
+      if (appListener) {
+         appListener.then((l: any) => l.remove());
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const activeProfile = profiles.find(p => p.id === activeProfileId) || profiles[0];

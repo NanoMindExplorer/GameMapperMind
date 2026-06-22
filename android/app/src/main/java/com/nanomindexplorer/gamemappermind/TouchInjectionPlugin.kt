@@ -43,10 +43,14 @@ class TouchInjectionPlugin : Plugin() {
         ComponentName("com.nanomindexplorer.gamemappermind", TouchDaemonService::class.java.name)
     ).daemon(false).processNameSuffix("touch_daemon").version(1)
 
+    private var pendingBindCalls = mutableListOf<PluginCall>()
+
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(componentName: ComponentName, binder: IBinder) {
             touchService = ITouchService.Stub.asInterface(binder)
             Log.d("GameMapper", "Shizuku Touch Service connected")
+            pendingBindCalls.forEach { it.resolve() }
+            pendingBindCalls.clear()
         }
 
         override fun onServiceDisconnected(componentName: ComponentName) {
@@ -89,11 +93,13 @@ class TouchInjectionPlugin : Plugin() {
     fun bindService(call: PluginCall) {
         try {
             if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
-                if (!isBound) {
+                if (!isBound || touchService == null) {
+                    pendingBindCalls.add(call)
                     Shizuku.bindUserService(USER_SERVICE_ARGS, serviceConnection)
                     isBound = true
+                } else {
+                    call.resolve()
                 }
-                call.resolve()
             } else {
                 call.reject("Shizuku permission not granted")
             }

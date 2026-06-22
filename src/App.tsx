@@ -110,6 +110,27 @@ export default function App() {
   const [activeKeys, setActiveKeys] = React.useState<string[]>([]);
   const [activeAxes, setActiveAxes] = React.useState<{lx: number, ly: number, rx: number, ry: number}>({lx: 0, ly: 0, rx: 0, ry: 0});
 
+  React.useEffect(() => {
+    const handleBtn = (e: Event) => {
+      const data = (e as CustomEvent).detail;
+      if (data.value === 1) {
+        setActiveKeys(prev => prev.includes(data.buttonName) ? prev : [...prev, data.buttonName]);
+      } else {
+        setActiveKeys(prev => prev.filter(k => k !== data.buttonName));
+      }
+    };
+    const handleAxis = (e: Event) => {
+      const data = (e as CustomEvent).detail;
+      setActiveAxes({ lx: data.axes[0], ly: data.axes[1], rx: data.axes[2], ry: data.axes[3] });
+    };
+    window.addEventListener('native-gamepad-button', handleBtn);
+    window.addEventListener('native-gamepad-axis', handleAxis);
+    return () => {
+      window.removeEventListener('native-gamepad-button', handleBtn);
+      window.removeEventListener('native-gamepad-axis', handleAxis);
+    };
+  }, []);
+
   const saveSettingsToStorage = async (socket: string, polling: number) => {
     try {
       const { Preferences } = await import('@capacitor/preferences');

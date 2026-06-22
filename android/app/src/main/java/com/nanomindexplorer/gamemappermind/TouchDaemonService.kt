@@ -62,7 +62,13 @@ class TouchDaemonService : ITouchService.Stub {
         stopStreamCommand()
         streamThread = Thread {
             try {
-                streamProcess = Runtime.getRuntime().exec(arrayOf("sh", "-c", command))
+                // If it's a getevent command, execute it directly avoiding 'sh -c' pipe buffering
+                val cmdArray = if (command.startsWith("getevent")) {
+                    command.split(" ").toTypedArray()
+                } else {
+                    arrayOf("sh", "-c", command)
+                }
+                streamProcess = Runtime.getRuntime().exec(cmdArray)
                 val reader = java.io.BufferedReader(java.io.InputStreamReader(streamProcess!!.inputStream))
                 var line: String?
                 while (reader.readLine().also { line = it } != null) {

@@ -174,8 +174,40 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
       onLogMessage(`[HARDWARE] Physical gamepad disconnected: ${e.gamepad.id}`);
     };
 
+    const handleNativeBtn = (e: Event) => {
+      const data = (e as CustomEvent).detail;
+      setPressedButtons(prev => {
+         const next = { ...prev };
+         const kMap: Record<string, string> = {
+            'BUTTON_A': 'a', 'BUTTON_B': 'b', 'BUTTON_X': 'x', 'BUTTON_Y': 'y',
+            'DPAD_UP': 'd_up', 'DPAD_DOWN': 'd_down', 'DPAD_LEFT': 'd_left', 'DPAD_RIGHT': 'd_right',
+            'L1': 'l_shoulder', 'R1': 'r_shoulder',
+            'SELECT': 'select', 'START': 'start', 'L3': 'l3', 'R3': 'r3'
+         };
+         const mapped = kMap[data.buttonName];
+         if (mapped) {
+            if (data.value === 1) next[mapped] = true;
+            else delete next[mapped];
+         }
+         return next;
+      });
+      // Fallback connected status purely visual
+      if (!connectedGamepad) {
+        setConnectedGamepad({ id: 'Shizuku Emulated Native Gamepad', buttons: [], axes: [], mapping: 'standard' } as any);
+      }
+    };
+    
+    const handleNativeAxis = (e: Event) => {
+        const data = (e as CustomEvent).detail;
+        setStickLeft({ x: data.axes[0], y: data.axes[1] });
+        setStickRight({ x: data.axes[2], y: data.axes[3] });
+        setTriggers({ lt: data.axes[4], rt: data.axes[5] });
+    };
+
     window.addEventListener("gamepadconnected", handleConnect);
     window.addEventListener("gamepaddisconnected", handleDisconnect);
+    window.addEventListener('native-gamepad-button', handleNativeBtn);
+    window.addEventListener('native-gamepad-axis', handleNativeAxis);
     
     animationFrameId = requestAnimationFrame(pollGamepads);
 
@@ -183,6 +215,8 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
       cancelAnimationFrame(animationFrameId);
       window.removeEventListener("gamepadconnected", handleConnect);
       window.removeEventListener("gamepaddisconnected", handleDisconnect);
+      window.removeEventListener('native-gamepad-button', handleNativeBtn);
+      window.removeEventListener('native-gamepad-axis', handleNativeAxis);
     };
   }, [onLogMessage]);
   

@@ -23,8 +23,17 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, active: boolea
 
     setupNative();
 
+    const btnListener = TouchInjection.addListener('onGamepadButton', (data: any) => {
+        window.dispatchEvent(new CustomEvent('native-gamepad-button', { detail: data }));
+    });
+    const axisListener = TouchInjection.addListener('onGamepadAxis', (data: any) => {
+        window.dispatchEvent(new CustomEvent('native-gamepad-axis', { detail: data }));
+    });
+
     return () => {
       isCleanedUp = true;
+      btnListener.then(l => l.remove());
+      axisListener.then(l => l.remove());
       if (!active) {
         TouchInjection.updateActiveProfile({ profileJson: "{}" }).catch(() => {});
       }

@@ -221,7 +221,8 @@ public class FloatingOverlayService extends Service {
     private void setOverlayInteractive(boolean interactive) {
         if (windowManager == null || webViewParams == null || webView == null) return;
         if (interactive) {
-            webViewParams.flags = WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
+            webViewParams.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                    | WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
                     | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN;
         } else {
             webViewParams.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE

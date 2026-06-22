@@ -83,19 +83,19 @@ class TouchInjectionPlugin : Plugin() {
 
     @PluginMethod
     fun bindService(call: PluginCall) {
-        if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
-            try {
+        try {
+            if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
                 if (!isBound) {
                     Shizuku.bindUserService(USER_SERVICE_ARGS, serviceConnection)
                     isBound = true
                 }
                 call.resolve()
-            } catch (e: Exception) {
-                Log.e("GameMapper", "Failed to bind Shizuku user service", e)
-                call.reject(e.localizedMessage)
+            } else {
+                call.reject("Shizuku permission not granted")
             }
-        } else {
-            call.reject("Shizuku permission not granted")
+        } catch (e: Exception) {
+            Log.e("GameMapper", "Failed to bind Shizuku user service", e)
+            call.reject("Failed to bind Shizuku service: ${e.message}")
         }
     }
 
@@ -117,12 +117,17 @@ class TouchInjectionPlugin : Plugin() {
     @PluginMethod
     fun startGamepadListener(call: PluginCall) {
         val intent = Intent(context, GamepadListenerService::class.java)
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-            context.startForegroundService(intent)
-        } else {
-            context.startService(intent)
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+            call.resolve()
+        } catch (e: Exception) {
+            Log.e("GameMapper", "Failed to start gamepad listener service", e)
+            call.reject("Failed to start gamepad listener service: ${e.message}")
         }
-        call.resolve()
     }
 
     @PluginMethod
@@ -131,12 +136,17 @@ class TouchInjectionPlugin : Plugin() {
         val profileJson = profileObj?.toString() ?: "{}"
         val intent = Intent(context, FloatingOverlayService::class.java)
         intent.putExtra("config", profileJson)
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-            context.startForegroundService(intent)
-        } else {
-            context.startService(intent)
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+            call.resolve()
+        } catch (e: Exception) {
+            Log.e("GameMapper", "Failed to start overlay service", e)
+            call.reject("Failed to start overlay service: ${e.message}")
         }
-        call.resolve()
     }
 
     @PluginMethod
@@ -155,19 +165,24 @@ class TouchInjectionPlugin : Plugin() {
 
     @PluginMethod
     fun requestPermission(call: PluginCall) {
-        val granted = Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
-        if (granted) {
-            val data = JSObject()
-            data.put("granted", true)
-            call.resolve(data)
-        } else if (Shizuku.shouldShowRequestPermissionRationale()) {
-            call.reject("Permission denied previously.")
-        } else {
-            Shizuku.requestPermission(1234)
-            val data = JSObject()
-            data.put("granted", false)
-            data.put("requested", true)
-            call.resolve(data)
+        try {
+            val granted = Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+            if (granted) {
+                val data = JSObject()
+                data.put("granted", true)
+                call.resolve(data)
+            } else if (Shizuku.shouldShowRequestPermissionRationale()) {
+                call.reject("Permission denied previously.")
+            } else {
+                Shizuku.requestPermission(1234)
+                val data = JSObject()
+                data.put("granted", false)
+                data.put("requested", true)
+                call.resolve(data)
+            }
+        } catch (e: Exception) {
+            Log.e("GameMapper", "Shizuku request permission error", e)
+            call.reject("Shizuku request permission error: ${e.message}")
         }
     }
 
@@ -249,10 +264,16 @@ class TouchInjectionPlugin : Plugin() {
 
     @PluginMethod
     fun checkPermission(call: PluginCall) {
-        val granted = Shizuku.pingBinder() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
-        val data = JSObject()
-        data.put("granted", granted)
-        call.resolve(data)
+        try {
+            val granted = Shizuku.pingBinder() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+            val data = JSObject()
+            data.put("granted", granted)
+            call.resolve(data)
+        } catch (e: Exception) {
+            val data = JSObject()
+            data.put("granted", false)
+            call.resolve(data)
+        }
     }
 
     @PluginMethod

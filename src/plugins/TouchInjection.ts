@@ -6,6 +6,7 @@ export interface TouchInjectionPluginType {
   unbindService(): Promise<void>;
   startGamepadListener(): Promise<void>;
   stopGamepadListener(): Promise<void>;
+  updateActiveProfile(options: { profileJson: string }): Promise<void>;
   startOverlay(options: { profile: any }): Promise<void>;
   stopOverlay(): Promise<void>;
   checkPermission(): Promise<{ granted: boolean }>;

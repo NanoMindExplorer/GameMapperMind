@@ -157,12 +157,19 @@ class GamepadListenerService : Service() {
                 var rStickY = 0f
                 var l2Trigger = 0f
                 var r2Trigger = 0f
+                var hasAxisChange = false
                 
+                val nativeMapper = NativeGamepadMapper(this@GamepadListenerService)
+
                 while (isListening && reader.readLine().also { line = it } != null) {
                     line?.let {
                         if (it.contains("EV_SYN")) {
                             if (it.contains("SYN_REPORT")) {
-                                TouchInjectionPlugin.emitGamepadAxis(floatArrayOf(lStickX, lStickY, rStickX, rStickY, l2Trigger, r2Trigger))
+                                if (hasAxisChange) {
+                                    nativeMapper.handleAxes(lStickX, lStickY, rStickX, rStickY, l2Trigger, r2Trigger)
+                                    TouchInjectionPlugin.emitGamepadAxis(floatArrayOf(lStickX, lStickY, rStickX, rStickY, l2Trigger, r2Trigger))
+                                    hasAxisChange = false
+                                }
                             }
                         } else if (it.contains("EV_KEY")) {
                             val parts = it.trim().split(Regex("\\s+"))
@@ -176,6 +183,7 @@ class GamepadListenerService : Service() {
                                     
                                     val btnMap = mapEvdevToButton(btnRaw)
                                     if (btnMap != "UNKNOWN") {
+                                        nativeMapper.handleButton(btnMap, isDown == 1)
                                         TouchInjectionPlugin.emitGamepadButton(btnMap, isDown, 1.0f)
                                     }
                                 }
@@ -194,22 +202,46 @@ class GamepadListenerService : Service() {
                                     when (axisType) {
                                         "ABS_HAT0Y" -> {
                                             when (rawVal) {
-                                                -1 -> { TouchInjectionPlugin.emitGamepadButton("DPAD_UP", 1, 1f)
-                                                        TouchInjectionPlugin.emitGamepadButton("DPAD_DOWN", 0, 0f) }
-                                                1  -> { TouchInjectionPlugin.emitGamepadButton("DPAD_DOWN", 1, 1f)
-                                                        TouchInjectionPlugin.emitGamepadButton("DPAD_UP", 0, 0f) }
-                                                0  -> { TouchInjectionPlugin.emitGamepadButton("DPAD_UP", 0, 0f)
-                                                        TouchInjectionPlugin.emitGamepadButton("DPAD_DOWN", 0, 0f) }
+                                                -1 -> { 
+                                                    nativeMapper.handleButton("DPAD_UP", true)
+                                                    nativeMapper.handleButton("DPAD_DOWN", false)
+                                                    TouchInjectionPlugin.emitGamepadButton("DPAD_UP", 1, 1f)
+                                                    TouchInjectionPlugin.emitGamepadButton("DPAD_DOWN", 0, 0f) 
+                                                }
+                                                1  -> { 
+                                                    nativeMapper.handleButton("DPAD_DOWN", true)
+                                                    nativeMapper.handleButton("DPAD_UP", false)
+                                                    TouchInjectionPlugin.emitGamepadButton("DPAD_DOWN", 1, 1f)
+                                                    TouchInjectionPlugin.emitGamepadButton("DPAD_UP", 0, 0f) 
+                                                }
+                                                0  -> { 
+                                                    nativeMapper.handleButton("DPAD_UP", false)
+                                                    nativeMapper.handleButton("DPAD_DOWN", false)
+                                                    TouchInjectionPlugin.emitGamepadButton("DPAD_UP", 0, 0f)
+                                                    TouchInjectionPlugin.emitGamepadButton("DPAD_DOWN", 0, 0f) 
+                                                }
                                             }
                                         }
                                         "ABS_HAT0X" -> {
                                             when (rawVal) {
-                                                -1 -> { TouchInjectionPlugin.emitGamepadButton("DPAD_LEFT", 1, 1f)
-                                                        TouchInjectionPlugin.emitGamepadButton("DPAD_RIGHT", 0, 0f) }
-                                                1  -> { TouchInjectionPlugin.emitGamepadButton("DPAD_RIGHT", 1, 1f)
-                                                        TouchInjectionPlugin.emitGamepadButton("DPAD_LEFT", 0, 0f) }
-                                                0  -> { TouchInjectionPlugin.emitGamepadButton("DPAD_LEFT", 0, 0f)
-                                                        TouchInjectionPlugin.emitGamepadButton("DPAD_RIGHT", 0, 0f) }
+                                                -1 -> { 
+                                                    nativeMapper.handleButton("DPAD_LEFT", true)
+                                                    nativeMapper.handleButton("DPAD_RIGHT", false)
+                                                    TouchInjectionPlugin.emitGamepadButton("DPAD_LEFT", 1, 1f)
+                                                    TouchInjectionPlugin.emitGamepadButton("DPAD_RIGHT", 0, 0f) 
+                                                }
+                                                1  -> { 
+                                                    nativeMapper.handleButton("DPAD_RIGHT", true)
+                                                    nativeMapper.handleButton("DPAD_LEFT", false)
+                                                    TouchInjectionPlugin.emitGamepadButton("DPAD_RIGHT", 1, 1f)
+                                                    TouchInjectionPlugin.emitGamepadButton("DPAD_LEFT", 0, 0f) 
+                                                }
+                                                0  -> { 
+                                                    nativeMapper.handleButton("DPAD_LEFT", false)
+                                                    nativeMapper.handleButton("DPAD_RIGHT", false)
+                                                    TouchInjectionPlugin.emitGamepadButton("DPAD_LEFT", 0, 0f)
+                                                    TouchInjectionPlugin.emitGamepadButton("DPAD_RIGHT", 0, 0f) 
+                                                }
                                             }
                                         }
                                         else -> {
@@ -221,12 +253,12 @@ class GamepadListenerService : Service() {
                                             val normalizedVal = if (half > 0) (rawVal - mid) / half else 0f
                                             val finalVal = normalizedVal.coerceIn(-1f, 1f)
                                             when (axisType) {
-                                                "ABS_X"  -> lStickX = finalVal
-                                                "ABS_Y"  -> lStickY = finalVal
-                                                "ABS_RX" -> rStickX = finalVal
-                                                "ABS_RY" -> rStickY = finalVal
-                                                "ABS_Z"  -> l2Trigger = finalVal
-                                                "ABS_RZ" -> r2Trigger = finalVal
+                                                "ABS_X"  -> { lStickX = finalVal; hasAxisChange = true }
+                                                "ABS_Y"  -> { lStickY = finalVal; hasAxisChange = true }
+                                                "ABS_RX" -> { rStickX = finalVal; hasAxisChange = true }
+                                                "ABS_RY" -> { rStickY = finalVal; hasAxisChange = true }
+                                                "ABS_Z"  -> { l2Trigger = finalVal; hasAxisChange = true }
+                                                "ABS_RZ" -> { r2Trigger = finalVal; hasAxisChange = true }
                                             }
                                         }
                                     }
@@ -268,6 +300,7 @@ class GamepadListenerService : Service() {
         Log.d("GameMapper", "GamepadListenerService: onDestroy")
         isRunning = false
         isListening = false
+        TouchInjectionPlugin.touchService?.releaseAllPointers()
         try {
             evdevProcess?.destroy()
         } catch (e: Exception) {}

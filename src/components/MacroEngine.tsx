@@ -172,7 +172,7 @@ export default function MacroEngineComponent({ macros, onUpdateMacros, onLogMess
             <p className="text-[11px] text-slate-400">High-resolution gesture playback sequences</p>
           </div>
 
-          <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
+          <div className="space-y-2 max-h-[220px] md:max-h-[350px] overflow-y-auto pr-1">
             {macros.map((m) => {
               const isActive = m.id === selectedMacroId;
               return (

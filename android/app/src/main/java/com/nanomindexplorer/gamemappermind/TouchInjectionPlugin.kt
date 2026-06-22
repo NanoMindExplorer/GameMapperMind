@@ -199,7 +199,9 @@ class TouchInjectionPlugin : Plugin() {
         }
 
         try {
-            val process = Shizuku.newProcess(arrayOf("sh", "-c", command), null, null)
+            val newProcessMethod = Shizuku::class.java.getDeclaredMethod("newProcess", Array<String>::class.java, Array<String>::class.java, String::class.java)
+            newProcessMethod.isAccessible = true
+            val process = newProcessMethod.invoke(null, arrayOf("sh", "-c", command), null as Array<String>?, null as String?) as Process
             val reader = java.io.BufferedReader(java.io.InputStreamReader(process.inputStream))
             val errorReader = java.io.BufferedReader(java.io.InputStreamReader(process.errorStream))
             

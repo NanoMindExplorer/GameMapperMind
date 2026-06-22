@@ -161,7 +161,10 @@ class GamepadListenerService : Service() {
                 
                 val nativeMapper = NativeGamepadMapper(this@GamepadListenerService)
 
-                while (isListening && reader.readLine().also { line = it } != null) {
+                while (isListening) {
+                    line = reader.readLine()
+                    if (line == null) break
+                    
                     line?.let {
                         if (it.contains("EV_SYN")) {
                             if (it.contains("SYN_REPORT")) {
@@ -263,10 +266,12 @@ class GamepadListenerService : Service() {
                                         }
                                     }
                                 } catch (e: NumberFormatException) { }
+                                }
                             }
                         }
                     }
-                }
+                } // end while
+
             } catch (e: Exception) {
                 Log.e("GameMapper", "getevent loop failed", e)
                 TouchInjectionPlugin.emitGamepadButton("ERROR_SHIZUKU_EXCEPTION", 0, 0f)

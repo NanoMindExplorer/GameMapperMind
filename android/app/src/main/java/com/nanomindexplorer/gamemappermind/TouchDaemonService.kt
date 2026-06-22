@@ -68,7 +68,9 @@ class TouchDaemonService : ITouchService.Stub {
                 while (reader.readLine().also { line = it } != null) {
                     try {
                         listener.onOutputLine(line)
-                    } catch (e: Exception) {}
+                    } catch (e: Exception) {
+                        break
+                    }
                 }
                 val exitCode = streamProcess?.waitFor() ?: -1
                 try {
@@ -226,7 +228,7 @@ class TouchDaemonService : ITouchService.Stub {
         }
     }
 
-    fun touchMove(pointerId: Int, x: Float, y: Float): Boolean {
+    override fun touchMove(pointerId: Int, x: Float, y: Float): Boolean {
         val state = pointers.get(pointerId) ?: return false
         state.x = x
         state.y = y
@@ -236,7 +238,7 @@ class TouchDaemonService : ITouchService.Stub {
         return false
     }
 
-    fun touchUp(pointerId: Int): Boolean {
+    override fun touchUp(pointerId: Int): Boolean {
         val state = pointers.get(pointerId) ?: return false
         val compactedIdx = getCompactedIndex(pointerId)
         
@@ -260,7 +262,7 @@ class TouchDaemonService : ITouchService.Stub {
         return result
     }
 
-    fun releaseAllPointers(): Boolean {
+    override fun releaseAllPointers(): Boolean {
         var anyReleased = false
         val keys = (0 until pointers.size()).map { pointers.keyAt(it) }
         for (pointerId in keys) {
@@ -275,7 +277,7 @@ class TouchDaemonService : ITouchService.Stub {
     }
 
     private var nextTapId = 90
-    fun injectTap(x: Float, y: Float): Boolean {
+    override fun injectTap(x: Float, y: Float): Boolean {
         val id = nextTapId
         nextTapId++
         if (nextTapId > 99) nextTapId = 90
@@ -286,7 +288,7 @@ class TouchDaemonService : ITouchService.Stub {
         return downRes
     }
 
-    fun isAlive(): Boolean {
+    override fun isAlive(): Boolean {
         return true
     }
 }

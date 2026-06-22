@@ -34,12 +34,25 @@ class MainActivity : BridgeActivity() {
             (event.source and InputDevice.SOURCE_DPAD) != 0) {
             return true
         }
+        val kc = event.keyCode
+        if (kc == KeyEvent.KEYCODE_DPAD_UP || kc == KeyEvent.KEYCODE_DPAD_DOWN ||
+            kc == KeyEvent.KEYCODE_DPAD_LEFT || kc == KeyEvent.KEYCODE_DPAD_RIGHT ||
+            kc == KeyEvent.KEYCODE_BUTTON_A || kc == KeyEvent.KEYCODE_BUTTON_B ||
+            kc == KeyEvent.KEYCODE_BUTTON_X || kc == KeyEvent.KEYCODE_BUTTON_Y ||
+            kc == KeyEvent.KEYCODE_BUTTON_L1 || kc == KeyEvent.KEYCODE_BUTTON_R1 ||
+            kc == KeyEvent.KEYCODE_BUTTON_L2 || kc == KeyEvent.KEYCODE_BUTTON_R2 ||
+            kc == KeyEvent.KEYCODE_BUTTON_THUMBL || kc == KeyEvent.KEYCODE_BUTTON_THUMBR ||
+            kc == KeyEvent.KEYCODE_BUTTON_START || kc == KeyEvent.KEYCODE_BUTTON_SELECT ||
+            kc == KeyEvent.KEYCODE_BUTTON_MODE) {
+            return true
+        }
         return super.dispatchKeyEvent(event)
     }
 
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
         if ((event.source and InputDevice.SOURCE_GAMEPAD) != 0 ||
             (event.source and InputDevice.SOURCE_JOYSTICK) != 0 ||
+            (event.source and InputDevice.SOURCE_CLASS_JOYSTICK) != 0 ||
             (event.source and InputDevice.SOURCE_DPAD) != 0) {
             return true
         }

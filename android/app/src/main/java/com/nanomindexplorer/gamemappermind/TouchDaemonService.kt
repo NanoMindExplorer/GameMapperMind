@@ -210,76 +210,97 @@ class TouchDaemonService : ITouchService.Stub {
     }
 
     override fun touchDown(pointerId: Int, x: Float, y: Float): Boolean {
-        var state = pointers.get(pointerId)
-        if (state == null) {
-            state = PointerState()
-            pointers.put(pointerId, state)
-        }
-        state.x = x
-        state.y = y
-        state.isDown = true
+        synchronized(pointers) {
+            var state = pointers.get(pointerId)
+            if (state == null) {
+                state = PointerState()
+                pointers.put(pointerId, state)
+            }
+            state.x = x
+            state.y = y
+            state.isDown = true
 
-        var activeCount = 0
-        for (i in 0 until pointers.size()) {
-            if (pointers.valueAt(i).isDown) activeCount++
-        }
+            var activeCount = 0
+            for (i in 0 until pointers.size()) {
+                if (pointers.valueAt(i).isDown) activeCount++
+            }
 
-        return if (activeCount == 1) {
-            baseDownTime = SystemClock.uptimeMillis()
-            injectMotionEvent(MotionEvent.ACTION_DOWN, 0)
-        } else {
-            val compactedIdx = getCompactedIndex(pointerId)
-            val action = MotionEvent.ACTION_POINTER_DOWN or (compactedIdx shl MotionEvent.ACTION_POINTER_INDEX_SHIFT)
-            injectMotionEvent(action, compactedIdx)
+            return if (activeCount == 1) {
+                baseDownTime = SystemClock.uptimeMillis()
+                injectMotionEvent(MotionEvent.ACTION_DOWN, 0)
+            } else {
+                val compactedIdx = getCompactedIndex(pointerId)
+                val action = MotionEvent.ACTION_POINTER_DOWN or (compactedIdx shl MotionEvent.ACTION_POINTER_INDEX_SHIFT)
+                injectMotionEvent(action, compactedIdx)
+            }
         }
     }
 
     override fun touchMove(pointerId: Int, x: Float, y: Float): Boolean {
-        val state = pointers.get(pointerId) ?: return false
-        state.x = x
-        state.y = y
-        if (state.isDown) {
-            return injectMotionEvent(MotionEvent.ACTION_MOVE, 0)
+        synchronized(pointers) {
+            val state = pointers.get(pointerId) ?: return false
+            state.x = x
+            state.y = y
+            if (state.isDown) {
+                return injectMotionEvent(MotionEvent.ACTION_MOVE, 0)
+            }
+            return false
         }
-        return false
     }
 
     override fun touchUp(pointerId: Int): Boolean {
-        val state = pointers.get(pointerId) ?: return false
-        val compactedIdx = getCompactedIndex(pointerId)
-        
-        var activeCount = 0
-        for (i in 0 until pointers.size()) {
-            if (pointers.valueAt(i).isDown) activeCount++
-        }
+        synchronized(pointers) {
+            val state = pointers.get(pointerId) ?: return false
+            val compactedIdx = getCompactedIndex(pointerId)
+            
+            var activeCount = 0
+            for (i in 0 until pointers.size()) {
+                if (pointers.valueAt(i).isDown) activeCount++
+            }
 
-        val result = if (activeCount == 1) {
-            val res = injectMotionEvent(MotionEvent.ACTION_UP, 0)
-            pointers.clear()
-            res
-        } else {
-            val action = MotionEvent.ACTION_POINTER_UP or (compactedIdx shl MotionEvent.ACTION_POINTER_INDEX_SHIFT)
-            val res = injectMotionEvent(action, compactedIdx)
-            pointers.remove(pointerId)
-            res
+            val result = if (activeCount <= 1) {
+                val res = injectMotionEvent(MotionEvent.ACTION_UP, 0)
+                pointers.clear()
+                res
+            } else {
+                val action = MotionEvent.ACTION_POINTER_UP or (compactedIdx shl MotionEvent.ACTION_POINTER_INDEX_SHIFT)
+                val res = injectMotionEvent(action, compactedIdx)
+                pointers.remove(pointerId)
+                res
+            }
+            
+            state.isDown = false
+            return result
         }
-        
-        state.isDown = false
-        return result
     }
 
     override fun releaseAllPointers(): Boolean {
-        var anyReleased = false
-        val keys = (0 until pointers.size()).map { pointers.keyAt(it) }
-        for (pointerId in keys) {
-            val state = pointers.get(pointerId)
-            if (state?.isDown == true) {
-                touchUp(pointerId)
-                anyReleased = true
+        synchronized(pointers) {
+            var anyReleased = false
+            val keys = (0 until pointers.size()).map { pointers.keyAt(it) }
+            for (pointerId in keys) {
+                val state = pointers.get(pointerId)
+                if (state?.isDown == true) {
+                    val compactedIdx = getCompactedIndex(pointerId)
+                    var activeCount = 0
+                    for (i in 0 until pointers.size()) {
+                        if (pointers.valueAt(i).isDown) activeCount++
+                    }
+                    if (activeCount <= 1) {
+                        injectMotionEvent(MotionEvent.ACTION_UP, 0)
+                        pointers.clear()
+                    } else {
+                        val action = MotionEvent.ACTION_POINTER_UP or (compactedIdx shl MotionEvent.ACTION_POINTER_INDEX_SHIFT)
+                        injectMotionEvent(action, compactedIdx)
+                        pointers.remove(pointerId)
+                    }
+                    state.isDown = false
+                    anyReleased = true
+                }
             }
+            pointers.clear()
+            return anyReleased
         }
-        pointers.clear()
-        return anyReleased
     }
 
     private var nextTapId = 90

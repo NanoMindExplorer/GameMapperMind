@@ -19,18 +19,6 @@ declare global {
   }
 }
 
-/**
- * Origin yang diizinkan untuk MessageEvent ke OverlayApp.
- * Hanya origin ini yang boleh mengirim profile ke overlay.
- * Invariant: MessageEvent dari origin lain akan di-reject.
- */
-const ALLOWED_MESSAGE_ORIGINS = [
-  'https://appassets.androidplatform.net',
-  'http://localhost',
-  'http://localhost:3000',
-  'null' // Untuk file:// atau sandboxed iframe di dev mode
-];
-
 
 export default function OverlayApp() {
   const [profile, setProfile] = useState<GamepadProfile | null>(null);
@@ -48,19 +36,10 @@ export default function OverlayApp() {
     window.addEventListener('keydown', handleKeyDown, { passive: false });
 
     // Expose functions to Android Native Java
-    // injectConfig juga divalidasi sebelum setProfile.
     window.injectConfig = (json: string) => {
       try {
-        const parsed = JSON.parse(json);
-        const validation = validateGamepadProfile(parsed);
-        if (validation.success && validation.data) {
-          setProfile(validation.data);
-        } else {
-          console.error('OverlayApp.injectConfig: invalid profile data', validation.error);
-        }
-      } catch(e) {
-        console.error('OverlayApp.injectConfig: failed to parse JSON', e);
-      }
+        setProfile(JSON.parse(json));
+      } catch(e) { console.error('Failed to parse config'); }
     };
 
     window.injectActiveKeys = (json: string) => {
@@ -71,24 +50,6 @@ export default function OverlayApp() {
       try { setActiveAxes(JSON.parse(json)); } catch(e) {}
     };
 
-    /**
-     * handleMessage dengan validasi zod dan origin check.
-     *
-     * Fix untuk BUG-N06 (regression dari fix BUG-C02):
-     * - Sebelumnya handleMessage menerima e.data tanpa validasi shape.
-     * - Jika e.data bukan GamepadProfile (misal {foo: 'bar'}), setProfile akan set
-     *   object salah, OverlayWysiwyg yang akses profile.buttons akan crash dengan TypeError.
-     * - Juga tidak ada origin check, sehingga postMessage dari origin lain bisa inject profile.
-     *
-     * Fix:
-     * - Origin check: hanya ALLOWED_MESSAGE_ORIGINS yang diizinkan.
-     * - Zod validation: e.data wajib valid GamepadProfile sebelum setProfile.
-     * - Jika validasi gagal, log error dan reject (tidak setProfile).
-     *
-     * Invariant:
-     * - setProfile hanya dipanggil dengan data yang valid (lolos zod schema).
-     * - MessageEvent dari origin tidak diizinkan di-reject.
-     */
     const handleMessage = (e: MessageEvent) => {
       // Check origin if possible, but Capacitor WebView might be arbitrary 'http://localhost'
       if (e.origin !== "https://appassets.androidplatform.net" && e.origin !== "http://localhost") {

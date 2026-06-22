@@ -1,0 +1,30 @@
+[
+	{
+		"pkg": "@capacitor/app",
+		"classpath": "com.capacitorjs.plugins.app.AppPlugin"
+	},
+	{
+		"pkg": "@capacitor/haptics",
+		"classpath": "com.capacitorjs.plugins.haptics.HapticsPlugin"
+	},
+	{
+		"pkg": "@capacitor/keyboard",
+		"classpath": "com.capacitorjs.plugins.keyboard.KeyboardPlugin"
+	},
+	{
+		"pkg": "@capacitor/preferences",
+		"classpath": "com.capacitorjs.plugins.preferences.PreferencesPlugin"
+	},
+	{
+		"pkg": "@capacitor-community/keep-awake",
+		"classpath": "com.getcapacitor.community.keepawake.KeepAwakePlugin"
+	},
+	{
+		"pkg": "@capacitor/screen-orientation",
+		"classpath": "com.capacitorjs.plugins.screenorientation.ScreenOrientationPlugin"
+	},
+	{
+		"pkg": "@capacitor/status-bar",
+		"classpath": "com.capacitorjs.plugins.statusbar.StatusBarPlugin"
+	}
+]

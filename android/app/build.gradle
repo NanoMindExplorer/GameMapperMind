@@ -1,10 +1,11 @@
 apply plugin: 'com.android.application'
+apply plugin: 'kotlin-android'
 
 android {
-    namespace = "com.nanomind.gamemapper"
+    namespace = "com.nanomindexplorer.gamemappermind"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.nanomind.gamemapper"
+        applicationId "com.nanomindexplorer.gamemappermind"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
@@ -16,11 +17,24 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            storeFile file(System.getenv("KEYSTORE_FILE") ?: "keystore.jks")
+            storePassword System.getenv("KEYSTORE_PASSWORD") ?: ""
+            keyAlias System.getenv("KEY_ALIAS") ?: ""
+            keyPassword System.getenv("KEY_PASSWORD") ?: ""
+        }
+    }
     buildTypes {
         release {
-            minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig signingConfigs.release
         }
+    }
+    buildFeatures {
+        aidl true
     }
 }
 
@@ -36,6 +50,13 @@ dependencies {
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
+    
+    // Rikka Shizuku Integration
+    def shizuku_version = "13.1.5"
+    implementation "dev.rikka.shizuku:api:$shizuku_version"
+    implementation "dev.rikka.shizuku:provider:$shizuku_version"
+    implementation "androidx.webkit:webkit:1.8.0"
+
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"

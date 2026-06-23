@@ -241,6 +241,9 @@ class TouchInjectionPlugin : Plugin() {
         val configJson = call.getString("profileJson")
         GamepadListenerService.activeProfileJson = configJson
         touchService?.releaseAllPointers()
+        if (configJson != null) {
+            try { touchService?.updateConfig(configJson) } catch (e: Exception) {}
+        }
         NativeGamepadMapper.resetAll()
         call.resolve()
     }

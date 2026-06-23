@@ -1,27 +1,38 @@
 import { Capacitor } from '@capacitor/core';
+import React from 'react';
 import { PointerIdRange } from '../types/pointer';
 import TouchInjection from '../plugins/TouchInjection';
 import { ShizukuState } from '../types';
 
 export const useShizuku = () => {
+  const [recoveryState, setRecoveryState] = React.useState<'INSTALLED' | 'RUNNING' | 'PERMISSION' | 'BOUND' | 'DAEMON_ALIVE'>('INSTALLED');
+  const [retryCount, setRetryCount] = React.useState(0);
+
   const checkShizukuStatus = async (currentState: ShizukuState): Promise<ShizukuState> => {
     if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
       try {
-        const { granted, touchServiceAlive } = await TouchInjection.checkPermission();
+        const { granted, touchServiceAlive, isBound } = await TouchInjection.checkPermission();
         const { daemonRunning } = await TouchInjection.checkDaemonRunning();
         
+        let newState = 'INSTALLED';
+        if (granted && touchServiceAlive && daemonRunning) newState = 'DAEMON_ALIVE';
+        else if (granted && isBound) newState = 'BOUND';
+        else if (granted) newState = 'PERMISSION';
+        else newState = 'RUNNING';
+
         if (granted && (!touchServiceAlive || !daemonRunning)) {
-            // Auto re-bind if permission is fine but service died
             await bindAndStart();
         }
 
         return {
           ...currentState,
           daemonRunning: !!daemonRunning, 
-          status: granted ? 'CONNECTED_SHIZUKU' : 'DISCONNECTED'
+          status: granted ? 'CONNECTED_SHIZUKU' : 'DISCONNECTED',
+          recoveryState: newState as any
         };
       } catch (err) {
         console.error("Native check error", err);
+        return { ...currentState, recoveryState: 'INSTALLED' } as any;
       }
     }
     return currentState;

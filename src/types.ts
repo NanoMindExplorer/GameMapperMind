@@ -20,6 +20,11 @@ export interface VirtualButton {
   sensitivity?: number;
   swipeDirection?: 'UP' | 'DOWN' | 'LEFT' | 'RIGHT';
   swipeDuration?: number;
+  inputSource?: 'TOUCHSCREEN' | 'MOUSE' | 'STYLUS' | 'GAMEPAD';
+  toolType?: 'FINGER' | 'STYLUS';
+  player?: 1 | 2 | 3 | 4;
+  sensitivityCurve?: 'linear' | 'exponential' | 'parabolic' | 'custom';
+  curvePoints?: number[][];
 }
 
 export interface GamepadProfile {
@@ -37,6 +42,9 @@ export interface GamepadProfile {
   antiBanEnabled?: boolean; // Anti-ban humanized randomization
   screenshotMode?: string;
   customScreenshotUrl?: string;
+  orientation?: 'landscape' | 'portrait' | 'auto';
+  portraitButtons?: VirtualButton[];
+  hapticIntensity?: number;
 }
 
 export interface MacroAction {
@@ -71,5 +79,6 @@ export interface ShizukuState {
   daemonRunning: boolean;
   daemonVersion: string;
   logLines: string[];
+  recoveryState?: 'INSTALLED' | 'RUNNING' | 'PERMISSION' | 'BOUND' | 'DAEMON_ALIVE';
 }
 

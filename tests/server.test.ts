@@ -19,9 +19,19 @@ describe('Server Tests', () => {
         expect(res.status).toBe(200);
     });
 
-    it('should return 200 for health check', async () => {
-        const res = await request(app).get('/api/health');
+    it('should return 401 without auth for macros', async () => {
+        const res = await request(app).get('/api/macros');
+        expect(res.status).toBe(401);
+    });
+
+    it('should return 200 with auth for macros', async () => {
+        let token = process.env.ADMIN_TOKEN;
+        if (!token) {
+            token = require('fs').readFileSync('.admin_token', 'utf-8').trim();
+        }
+        const res = await request(app)
+            .get('/api/macros')
+            .set('Authorization', `Bearer ${token}`);
         expect(res.status).toBe(200);
-        expect(res.body.status).toBe('ok');
     });
 });

@@ -147,6 +147,39 @@ class TouchDaemonService : ITouchService.Stub {
         return 0 // fallback
     }
 
+    private var currentToolType = MotionEvent.TOOL_TYPE_FINGER
+    private var currentInputSource = 8194 // Default to InputDevice.SOURCE_MOUSE
+    private var isAntiBanEnabled = false
+
+    override fun updateConfig(json: String) {
+        try {
+            val obj = org.json.JSONObject(json)
+            val buttons = obj.optJSONArray("buttons")
+            val firstBtn = if (buttons != null && buttons.length() > 0) buttons.optJSONObject(0) else null
+            
+            val tt = obj.optString("toolType", firstBtn?.optString("toolType", "FINGER") ?: "FINGER")
+            currentToolType = if (tt == "STYLUS") MotionEvent.TOOL_TYPE_STYLUS else MotionEvent.TOOL_TYPE_FINGER
+            
+            val `is` = obj.optString("inputSource", firstBtn?.optString("inputSource", "MOUSE") ?: "MOUSE")
+            currentInputSource = when (`is`) {
+                "TOUCHSCREEN" -> InputDevice.SOURCE_TOUCHSCREEN
+                "STYLUS" -> InputDevice.SOURCE_STYLUS
+                "GAMEPAD" -> InputDevice.SOURCE_GAMEPAD
+                else -> 8194 // InputDevice.SOURCE_MOUSE
+            }
+            isAntiBanEnabled = obj.optBoolean("antiBanEnabled", false)
+        } catch (e: Exception) {
+            Log.e("GameMapper", "Failed to parse config", e)
+        }
+    }
+
+    private fun gaussianRandom(mean: Float, stdDev: Float): Float {
+        val u1 = Math.random()
+        val u2 = Math.random()
+        val z0 = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2)
+        return (z0 * stdDev + mean).toFloat()
+    }
+
     private fun injectMotionEvent(action: Int, actionIndex: Int): Boolean {
         val downTime = baseDownTime
         val eventTime = SystemClock.uptimeMillis()
@@ -170,12 +203,24 @@ class TouchDaemonService : ITouchService.Stub {
             
             if (state.isDown) {
                 pointerProperties[activeIndex].id = pointerId
-                pointerProperties[activeIndex].toolType = MotionEvent.TOOL_TYPE_FINGER
+                pointerProperties[activeIndex].toolType = currentToolType
                 
-                pointerCoords[activeIndex].x = state.x
-                pointerCoords[activeIndex].y = state.y
-                pointerCoords[activeIndex].pressure = 1.0f
-                pointerCoords[activeIndex].size = 1.0f
+                var nx = state.x
+                var ny = state.y
+                var press = 1.0f
+                var sz = 1.0f
+
+                if (isAntiBanEnabled) {
+                    nx += ((Math.random() * 2) - 1).toFloat() // +- 1px jitter
+                    ny += ((Math.random() * 2) - 1).toFloat() 
+                    press = gaussianRandom(0.92f, 0.04f).coerceIn(0.85f, 1.0f)
+                    sz = gaussianRandom(1.0f, 0.05f).coerceIn(0.9f, 1.1f)
+                }
+
+                pointerCoords[activeIndex].x = nx
+                pointerCoords[activeIndex].y = ny
+                pointerCoords[activeIndex].pressure = press
+                pointerCoords[activeIndex].size = sz
                 activeIndex++
             }
         }
@@ -193,7 +238,7 @@ class TouchDaemonService : ITouchService.Stub {
             1f,
             0,
             0,
-            InputDevice.SOURCE_TOUCHSCREEN,
+            currentInputSource,
             0
         )
 

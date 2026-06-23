@@ -18,7 +18,7 @@ import CreditsPanel from './components/CreditsPanel';
 
 import { 
   Terminal, Shield, Settings, Activity, Compass, Cpu, HelpCircle, 
-  ChevronRight, Sparkles, BookOpen, Layers, Bot, ShieldAlert, Heart
+  ChevronRight, Sparkles, BookOpen, Layers, Bot, ShieldAlert, Heart, AlertTriangle
 } from 'lucide-react';
 // Use public path directly for AppIcon instead of importing it
 
@@ -43,6 +43,12 @@ export default function App() {
   const [activeProfileId, setActiveProfileId] = React.useState('genshin');
   const [selectedMainView, setSelectedMainView] = React.useState<'shizuku' | 'overlay' | 'profile' | 'macro' | 'tester' | 'credits'>('shizuku');
   const [isKilling, setIsKilling] = React.useState(false);
+
+  // Recovery Engine for Shizuku
+  const [recoveryDialogOpen, setRecoveryDialogOpen] = React.useState(false);
+  const [recoveryFailedCount, setRecoveryFailedCount] = React.useState(0);
+  const nextRetryTimeRef = React.useRef(0);
+  const retryIntervals = [5000, 10000, 20000, 40000, 60000];
 
   // Settings state
   const [socketIpcName, setSocketIpcName] = React.useState('@gamepad_mapper_ipc');
@@ -241,12 +247,32 @@ export default function App() {
     shizukuStateRef.current = shizukuState;
   }, [shizukuState]);
 
+  const recoveryFailedCountRef = React.useRef(0);
+
   // Query real simulation logs and stats from server, override with Native plugin state if on device
   const fetchStatus = React.useCallback(async () => {
     try {
-      // Just re-check native dependencies directly
+      const now = Date.now();
+      if (now < nextRetryTimeRef.current) return; // Wait for backoff
+
       const nextState = await checkShizukuStatus(shizukuStateRef.current);
       setShizukuState(nextState);
+
+      if (nextState.recoveryState && nextState.recoveryState !== 'DAEMON_ALIVE') {
+        recoveryFailedCountRef.current += 1;
+        setRecoveryFailedCount(recoveryFailedCountRef.current);
+        const idx = Math.min(recoveryFailedCountRef.current - 1, retryIntervals.length - 1);
+        nextRetryTimeRef.current = Date.now() + retryIntervals[idx];
+
+        if (recoveryFailedCountRef.current >= 3) {
+          setRecoveryDialogOpen(true);
+        }
+      } else if (nextState.recoveryState === 'DAEMON_ALIVE') {
+        recoveryFailedCountRef.current = 0;
+        setRecoveryFailedCount(0);
+        nextRetryTimeRef.current = 0;
+        setRecoveryDialogOpen(false);
+      }
     } catch (err) {
       console.error('Failed to sync native state', err);
     }
@@ -646,6 +672,59 @@ export default function App() {
           </div>
         </div>
       </footer>
+
+      {recoveryDialogOpen && (
+        <div className="fixed inset-0 z-[10000] bg-slate-950/80 backdrop-blur flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-indigo-500/50 rounded-xl max-w-lg w-full p-6 shadow-2xl relative">
+            <h2 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
+              <AlertTriangle className="w-6 h-6 text-amber-500" />
+              Daemon Recovery Tutorial
+            </h2>
+            <p className="text-slate-300 text-sm mb-4">
+              It seems the background daemon has failed to stay alive multiple times (State: {shizukuState.recoveryState}). 
+              Follow these steps to recover functionality:
+            </p>
+            
+            <div className="space-y-4 mb-6">
+              <div className="bg-slate-800 p-3 rounded border border-slate-700">
+                <p className="font-bold text-indigo-300 text-sm mb-1">Step 1: Check Permissions</p>
+                <p className="text-xs text-slate-400">Ensure Shizuku is authorized in Developer Settings. Disable and re-enable USB Debugging if necessary.</p>
+                <div className="mt-2 text-[10px] bg-slate-950 p-2 rounded text-emerald-400 font-mono">Screenshot-Placeholder: USB_DEBUG.png</div>
+              </div>
+              <div className="bg-slate-800 p-3 rounded border border-slate-700">
+                <p className="font-bold text-indigo-300 text-sm mb-1">Step 2: Start Daemon</p>
+                <p className="text-xs text-slate-400">If the daemon crashed, open the Shizuku app and tap "Start". Then return back to Nexion.</p>
+                <div className="mt-2 text-[10px] bg-slate-950 p-2 rounded text-emerald-400 font-mono">Screenshot-Placeholder: START_DAEMON.png</div>
+              </div>
+              <div className="bg-slate-800 p-3 rounded border border-slate-700">
+                <p className="font-bold text-indigo-300 text-sm mb-1">Step 3: Force Re-bind</p>
+                <p className="text-xs text-slate-400">Click the button below to forcefully recreate the binder IPC channels.</p>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3">
+              <button 
+                onClick={() => setRecoveryDialogOpen(false)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded text-sm font-semibold transition"
+              >
+                Tutup
+              </button>
+              <button 
+                onClick={() => {
+                  setRecoveryDialogOpen(false);
+                  setRecoveryFailedCount(0);
+                  import('./plugins/TouchInjection').then(({ default: TouchInjection }) => {
+                    TouchInjection.bindService().catch(()=>{});
+                  });
+                }}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-sm font-semibold transition"
+              >
+                Force Recovery Re-Bind
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {toastMessage && (
         <div className="fixed bottom-10 left-1/2 transform -translate-x-1/2 z-50 animate-in fade-in slide-in-from-bottom-4 duration-300">

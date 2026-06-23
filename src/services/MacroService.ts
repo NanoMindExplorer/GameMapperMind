@@ -5,7 +5,11 @@ export class MacroService {
   
   public static async fetchMacros(): Promise<MacroProfile[]> {
     try {
-      const res = await fetch('/api/macros');
+      const token = localStorage.getItem('ADMIN_TOKEN');
+      if (!token) throw new Error('ADMIN_TOKEN not set in localStorage');
+      const res = await fetch('/api/macros', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       return await res.json();
     } catch (e) {
       console.error(e);

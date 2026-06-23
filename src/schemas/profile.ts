@@ -16,6 +16,11 @@ export const VirtualButtonSchema = z.object({
   sensitivity: z.number().optional(),
   swipeDirection: z.enum(['UP', 'DOWN', 'LEFT', 'RIGHT']).optional(),
   swipeDuration: z.number().optional(),
+  inputSource: z.enum(['TOUCHSCREEN', 'MOUSE', 'STYLUS', 'GAMEPAD']).optional(),
+  toolType: z.enum(['FINGER', 'STYLUS']).optional(),
+  player: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).optional(),
+  sensitivityCurve: z.enum(['linear', 'exponential', 'parabolic', 'custom']).optional(),
+  curvePoints: z.array(z.array(z.number())).optional(),
 });
 
 export const GamepadProfileSchema = z.object({
@@ -33,4 +38,7 @@ export const GamepadProfileSchema = z.object({
   antiBanEnabled: z.boolean().optional(),
   screenshotMode: z.string().optional(),
   customScreenshotUrl: z.string().optional(),
+  orientation: z.enum(['landscape', 'portrait', 'auto']).optional(),
+  portraitButtons: z.array(VirtualButtonSchema).optional(),
+  hapticIntensity: z.number().optional(),
 });

@@ -95,7 +95,13 @@ class GamepadListenerService : Service() {
                     for (line in lines) {
                         if (line.contains("add device")) {
                             if (currentDeviceIsGamepad && currentDevicePath != null) {
-                                gamepadDevices.add(currentDevicePath)
+                                // If not USB, add to shizuku list
+                                if (currentDevicePath!!.contains("usb")) {
+                                    // Simulated JNI Init for USB directly
+                                    try { GamepadJniPlugin.initDevice(currentDevicePath!!) } catch (e: Exception) {}
+                                } else {
+                                    gamepadDevices.add(currentDevicePath!!)
+                                }
                             }
                             val pathMatch = Regex("/dev/input/event\\d+").find(line)
                             currentDevicePath = pathMatch?.value

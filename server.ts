@@ -279,7 +279,7 @@ app.get("/api/logs", requireAuth, (req: Request, res: Response) => {
 });
 
 // MANDAT 15: MACRO PERSISTENCE ENDPOINTS
-app.get("/api/macros", (req: Request, res: Response) => {
+app.get("/api/macros", requireAuth, (req: Request, res: Response) => {
     res.json(StateStore.state.macros);
 });
 

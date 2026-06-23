@@ -12,5 +12,6 @@ interface ITouchService {
     String executeShellCommand(String command) = 7;
     void executeStreamCommand(String command, ICommandOutputListener listener) = 8;
     void stopStreamCommand() = 9;
+    void updateConfig(String json) = 10;
     void destroy() = 16777114;
 }

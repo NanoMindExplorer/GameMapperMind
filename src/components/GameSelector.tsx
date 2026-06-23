@@ -314,7 +314,7 @@ export default function GameSelector({ profiles, activeProfileId, onProfileSelec
                     <span className="block text-[8px] text-slate-500 mt-0.5 leading-normal">High frequency jitter attenuation performance. Higher keeps signals static.</span>
                   </div>
 
-                  <div className="flex flex-col">
+                    <div className="flex flex-col">
                     <div className="flex flex-col gap-1 text-[10px] text-slate-400 mb-1 uppercase font-semibold">
                       <div className="flex justify-between">
                         <span className="flex items-center gap-1"><ShieldAlert className="w-3.5 h-3.5 text-emerald-400"/> Anti-Ban Touch Randomizer</span>
@@ -328,6 +328,48 @@ export default function GameSelector({ profiles, activeProfileId, onProfileSelec
                     </div>
                     <span className="block text-[8px] text-slate-500 mt-1 leading-normal text-start">Humanizes synthetic touch events by slightly randomizing coordinate impacts across a ~4px radial radius. Strongly recommended for competitive shooters.</span>
                   </div>
+
+                  {activeProfile.antiBanEnabled && (
+                    <div className="space-y-3 mt-3 p-2 bg-slate-900 rounded border border-slate-700">
+                      <div>
+                        <div className="flex justify-between items-start text-[10px] text-slate-400 mb-1 uppercase font-semibold">
+                          <span>Input Source (Evades Check)</span>
+                        </div>
+                        <select
+                          className="w-full bg-slate-800 text-white text-[11px] p-1.5 rounded"
+                          value={activeProfile.buttons?.[0]?.inputSource || 'MOUSE'}
+                          onChange={(e) => {
+                            // Update first button as prototype or global
+                            const updated = [...activeProfile.buttons];
+                            updated.forEach(b => b.inputSource = e.target.value as any);
+                            updateProfileValue('buttons', updated);
+                          }}
+                        >
+                          <option value="TOUCHSCREEN">TOUCHSCREEN (High Risk)</option>
+                          <option value="MOUSE">MOUSE (Recommended)</option>
+                          <option value="STYLUS">STYLUS</option>
+                          <option value="GAMEPAD">GAMEPAD</option>
+                        </select>
+                      </div>
+                      <div>
+                        <div className="flex justify-between items-start text-[10px] text-slate-400 mb-1 uppercase font-semibold">
+                          <span>Tool Type</span>
+                        </div>
+                        <select
+                          className="w-full bg-slate-800 text-white text-[11px] p-1.5 rounded"
+                          value={activeProfile.buttons?.[0]?.toolType || 'FINGER'}
+                          onChange={(e) => {
+                            const updated = [...activeProfile.buttons];
+                            updated.forEach(b => b.toolType = e.target.value as any);
+                            updateProfileValue('buttons', updated);
+                          }}
+                        >
+                          <option value="FINGER">FINGER</option>
+                          <option value="STYLUS">STYLUS</option>
+                        </select>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             ) : (

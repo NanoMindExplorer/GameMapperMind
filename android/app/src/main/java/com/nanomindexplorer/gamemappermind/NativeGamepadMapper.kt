@@ -52,8 +52,17 @@ class NativeGamepadMapper(private val context: Context) {
         val dm = android.util.DisplayMetrics()
         windowManager.defaultDisplay.getRealMetrics(dm)
         val rotation = windowManager.defaultDisplay.rotation
-        val sw = dm.widthPixels
-        val sh = dm.heightPixels
+        
+        val (sw, sh) = when (rotation) {
+            android.view.Surface.ROTATION_0, android.view.Surface.ROTATION_180 -> {
+                Pair(dm.widthPixels, dm.heightPixels)
+            }
+            android.view.Surface.ROTATION_90, android.view.Surface.ROTATION_270 -> {
+                Pair(dm.heightPixels, dm.widthPixels)
+            }
+            else -> Pair(dm.widthPixels, dm.heightPixels)
+        }
+        
         return Pair(((pctX / 100.0) * sw).toFloat(), ((pctY / 100.0) * sh).toFloat())
     }
     

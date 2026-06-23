@@ -68,7 +68,7 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
       }
       
       // Read all raw buttons so the user can see if M1/M2 are detected at non-standard indices
-      let rawButtonsPressed: string[] = [];
+      const rawButtonsPressed: string[] = [];
       if (activeGP) {
         activeGP.buttons.forEach((btn, idx) => {
           if (btn.pressed) rawButtonsPressed.push(`B${idx}`);

@@ -34,8 +34,26 @@ export default function OverlayApp() {
     // Expose functions to Android Native Java
     window.injectConfig = (json: string) => {
       try {
-        setProfile(JSON.parse(json));
-      } catch(e) { console.error('Failed to parse config'); }
+        const parsed = JSON.parse(json);
+        const result = GamepadProfileSchema.safeParse(parsed);
+        if (result.success) {
+          setProfile(result.data as GamepadProfile);
+        } else {
+          console.error('Invalid profile received:', result.error);
+          // Fallback ke INITIAL_PROFILES[0] dan log error
+          setProfile(INITIAL_PROFILES[0]);
+          fetch('/api/log', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              message: `Invalid profile in injectConfig: ${result.error.message}` 
+            })
+          }).catch(() => { /* ignore */ });
+        }
+      } catch(e) {
+        console.error('Failed to parse config JSON', e);
+        setProfile(INITIAL_PROFILES[0]);
+      }
     };
 
     const handleMessage = (e: MessageEvent) => {
@@ -53,7 +71,7 @@ export default function OverlayApp() {
             console.warn('Invalid profile received', result.error);
           }
         }
-      } catch (err) {}
+      } catch(err) { /* ignore */ }
     };
     window.addEventListener('message', handleMessage);
 

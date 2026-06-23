@@ -93,7 +93,7 @@ export default function App() {
              const parsed = JSON.parse(res.value);
              if (parsed.socketIpcName) setSocketIpcName(parsed.socketIpcName);
              if (parsed.inputPolling) setInputPolling(parsed.inputPolling);
-           } catch(e){}
+           } catch(e) { /* ignore */ }
         }
       }).catch(e => console.warn('capacitor get settings error', e));
     }).catch(e => console.warn('capacitor preferences import error', e));
@@ -332,7 +332,7 @@ export default function App() {
          }
       }
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  
   }, []);
 
   const activeProfile = profiles.find(p => p.id === activeProfileId) || profiles[0];

@@ -132,11 +132,6 @@ app.use(cors({
 
 app.use(express.json({ limit: "5mb" }));
 
-function clampedRandom(min: number, max: number): number {
-  const val = min + Math.random() * (max - min);
-  return Math.min(1.0, Math.max(0.0, parseFloat(val.toFixed(4))));
-}
-
 function addLog(arr: string[], msg: string, max = 500): void {
   arr.push(msg);
   while (arr.length > max) {

@@ -44,6 +44,7 @@ class NativeGamepadMapper(private val context: Context) {
     }
 
     val lastState = mutableMapOf<String, Boolean>()
+    private val smoothedAxes = Array(4) { FloatArray(4) }
     var buttonMapCache = mutableMapOf<String, JSONObject>()
     
     fun buildMapCache() {
@@ -200,16 +201,29 @@ class NativeGamepadMapper(private val context: Context) {
             val lMap = findButtonMapping("L_STICK")
             val rMap = findButtonMapping("R_STICK")
             
+            val smoothing = lMap?.optDouble("smoothing", 0.0)?.toFloat() ?: 0f
+            val alpha = 1f - smoothing.coerceIn(0f, 0.95f)
+
+            smoothedAxes[gamepadIndex][0] = alpha * lx + (1 - alpha) * smoothedAxes[gamepadIndex][0]
+            smoothedAxes[gamepadIndex][1] = alpha * ly + (1 - alpha) * smoothedAxes[gamepadIndex][1]
+            smoothedAxes[gamepadIndex][2] = alpha * rx + (1 - alpha) * smoothedAxes[gamepadIndex][2]
+            smoothedAxes[gamepadIndex][3] = alpha * ry + (1 - alpha) * smoothedAxes[gamepadIndex][3]
+
+            val sLxRaw = smoothedAxes[gamepadIndex][0]
+            val sLyRaw = smoothedAxes[gamepadIndex][1]
+            val sRxRaw = smoothedAxes[gamepadIndex][2]
+            val sRyRaw = smoothedAxes[gamepadIndex][3]
+
             val lCurve = lMap?.optString("sensitivityCurve", "linear")
             val lPoints = lMap?.optJSONArray("curvePoints")
             
             val rCurve = rMap?.optString("sensitivityCurve", "linear")
             val rPoints = rMap?.optJSONArray("curvePoints")
 
-            val cLx = applyCurve(lx, lCurve, lPoints)
-            val cLy = applyCurve(ly, lCurve, lPoints)
-            val cRx = applyCurve(rx, rCurve, rPoints)
-            val cRy = applyCurve(ry, rCurve, rPoints)
+            val cLx = applyCurve(sLxRaw, lCurve, lPoints)
+            val cLy = applyCurve(sLyRaw, lCurve, lPoints)
+            val cRx = applyCurve(sRxRaw, rCurve, rPoints)
+            val cRy = applyCurve(sRyRaw, rCurve, rPoints)
             
             val sLx = cLx
             val sLy = cLy

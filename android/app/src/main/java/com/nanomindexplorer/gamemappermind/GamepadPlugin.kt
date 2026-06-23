@@ -52,6 +52,10 @@ class GamepadPlugin : Plugin() {
             val axisRZ = event.getAxisValue(MotionEvent.AXIS_RZ)
             val hatX = event.getAxisValue(MotionEvent.AXIS_HAT_X)
             val hatY = event.getAxisValue(MotionEvent.AXIS_HAT_Y)
+            
+            // Also read trigger values (L2 = AXIS_BRAKE, R2 = AXIS_GAS)
+            val l2Trigger = event.getAxisValue(MotionEvent.AXIS_BRAKE)
+            val r2Trigger = event.getAxisValue(MotionEvent.AXIS_GAS)
 
             // Emit legacy event
             val ret = JSObject()
@@ -65,11 +69,25 @@ class GamepadPlugin : Plugin() {
             ret.put("timestamp", event.eventTime)
             notifyListeners("gamepadEvent", ret)
 
-            // BUG FIX: Also emit on standard "onGamepadAxis" channel
-            // so useGamepadLoop and GamepadTester receive native Android joystick events
-            // even WITHOUT Shizuku.
-            val axes = floatArrayOf(axisX, axisY, axisZ, axisRZ, hatX, hatY)
+            // Emit on standard "onGamepadAxis" channel
+            // Array format: [lx, ly, rx, ry, l2, r2] — match what GamepadTester expects
+            // axisX/axisY = left stick, axisZ/axisRZ = right stick
+            // l2Trigger/r2Trigger = L2/R2 triggers (AXIS_BRAKE/GAS)
+            val axes = floatArrayOf(axisX, axisY, axisZ, axisRZ, l2Trigger, r2Trigger)
             TouchInjectionPlugin.emitGamepadAxis(axes)
+            
+            // Also emit D-pad as button events (HAT axis → button press)
+            // This fixes "D-pad detected as R2/L2" bug
+            if (hatY < -0.5f) {
+                TouchInjectionPlugin.emitGamepadButton("DPAD_UP", 1, 1.0f)
+            } else if (hatY > 0.5f) {
+                TouchInjectionPlugin.emitGamepadButton("DPAD_DOWN", 1, 1.0f)
+            }
+            if (hatX < -0.5f) {
+                TouchInjectionPlugin.emitGamepadButton("DPAD_LEFT", 1, 1.0f)
+            } else if (hatX > 0.5f) {
+                TouchInjectionPlugin.emitGamepadButton("DPAD_RIGHT", 1, 1.0f)
+            }
             return true
         }
         return false

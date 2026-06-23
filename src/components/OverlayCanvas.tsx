@@ -17,7 +17,9 @@ export default function OverlayCanvas({ h }: { h: OverlayWysiwygHook }) {
         onTouchMove={h.handleDragMove}
         onTouchEnd={h.handleDragEnd}
         style={{
-          background: h.getBackgroundUrl(),
+          backgroundImage: h.getBackgroundUrl(),
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
           backgroundColor: '#0f172a'
         }}
         id="canvas-container"

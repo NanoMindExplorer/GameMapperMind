@@ -132,9 +132,9 @@ public class FloatingOverlayService extends Service {
             currentConfigJson = intent.getStringExtra("config");
             if (webView != null) {
                 new Handler(Looper.getMainLooper()).post(() -> {
-                    // Update running webview
+                    // BUG-R9 FIX: Use injectConfig instead of MessageEvent (origin check fails in WebView)
                     webView.evaluateJavascript(
-                        "window.dispatchEvent(new MessageEvent('message', { data: " + currentConfigJson + " }))",
+                        "if(window.injectConfig) window.injectConfig(" + currentConfigJson + ");",
                         null
                     );
                 });
@@ -184,7 +184,7 @@ public class FloatingOverlayService extends Service {
                         super.onPageFinished(view, url);
                         if (currentConfigJson != null && !currentConfigJson.isEmpty()) {
                             view.evaluateJavascript(
-                                "window.dispatchEvent(new MessageEvent('message', { data: " + currentConfigJson + " }))",
+                                "if(window.injectConfig) window.injectConfig(" + currentConfigJson + ");",
                                 null
                             );
                         }
@@ -248,11 +248,19 @@ public class FloatingOverlayService extends Service {
             new Handler(Looper.getMainLooper()).post(() -> {
                 if (currentConfigJson != null && !currentConfigJson.isEmpty()) {
                     webView.evaluateJavascript(
-                        "window.dispatchEvent(new MessageEvent('message', { data: " + currentConfigJson + " }))",
+                        "if(window.injectConfig) window.injectConfig(" + currentConfigJson + ");",
                         null
                     );
                 }
             });
+        }
+
+        // BUG-R6 FIX: Add onCommand method for profile save from overlay
+        @JavascriptInterface
+        public void onCommand(String command) {
+            Log.d("GameMapper", "Overlay command: " + command);
+            // Handle commands from overlay (e.g., 'request_config_save {...}')
+            // Can be extended for other commands
         }
 
         @JavascriptInterface

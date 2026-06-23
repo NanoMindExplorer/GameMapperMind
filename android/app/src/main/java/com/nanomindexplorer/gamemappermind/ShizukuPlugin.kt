@@ -47,7 +47,7 @@ class ShizukuPlugin : Plugin() {
             return
         }
         
-        Shizuku.requestPermission(100)
+        Shizuku.requestPermission(1234)
         call.resolve()
     }
     

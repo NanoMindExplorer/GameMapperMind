@@ -9,6 +9,7 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, connected: boo
     let isCleanedUp = false;
     let btnListener: any = null;
     let axisListener: any = null;
+    let feedbackListener: any = null;
 
     const setupNative = async () => {
       try {
@@ -33,8 +34,8 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, connected: boo
           }
         });
         
-        // H13: Haptics listener
-        TouchInjection.addListener('onGamepadFeedback', async (data: any) => {
+        // H13: Haptics listener — save handle for cleanup
+        feedbackListener = await TouchInjection.addListener('onGamepadFeedback', async (data: any) => {
            if (!isCleanedUp && injectActive && mapProfile?.hapticIntensity) {
               const { Haptics, ImpactStyle } = await import('@capacitor/haptics');
               if (mapProfile.hapticIntensity > 0.5) {
@@ -55,6 +56,7 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, connected: boo
       isCleanedUp = true;
       if (btnListener && btnListener.remove) btnListener.remove();
       if (axisListener && axisListener.remove) axisListener.remove();
+      if (feedbackListener && feedbackListener.remove) feedbackListener.remove();
       TouchInjection.updateActiveProfile({ profileJson: "{}" }).catch(() => {});
     };
   }, [mapProfile, connected, injectActive]);

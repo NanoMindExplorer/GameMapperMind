@@ -24,6 +24,7 @@ import { ScreenOrientation } from '@capacitor/screen-orientation';
 import { useShizuku } from './hooks/useShizuku';
 import { useGamepadLoop } from './hooks/useGamepadLoop';
 import { useInputInjector } from './hooks/useInputInjector';
+import { useGamepad } from './hooks/useGamepad';
 import { GamepadStatusBadge } from './components/GamepadStatusBadge';
 
 export default function App() {
@@ -366,34 +367,12 @@ export default function App() {
     handleLogMessage('SYSTEM: Kill-switch engaged. All services and injections terminated.');
   };
 
-  const isNativeOverlayWindow = typeof window !== 'undefined' && window.location.search.includes('overlay=true');
+  // BUG-R5 FIX: Overlay detection is handled by main.tsx -> OverlayApp.tsx
+  // Do NOT duplicate overlay rendering in App.tsx — causes conflict.
+  // main.tsx checks window.location.search for 'overlay=true' and renders OverlayApp directly.
 
-  React.useEffect(() => {
-    if (isNativeOverlayWindow) {
-      document.documentElement.classList.add('is-overlay');
-      document.body.classList.add('is-overlay');
-    }
-  }, [isNativeOverlayWindow]);
-
-  if (isNativeOverlayWindow) {
-    return (
-      <div className="w-screen h-screen bg-transparent select-none overflow-hidden text-slate-100">
-        <OverlayWysiwyg
-          activeProfile={activeProfile}
-          onUpdateProfile={(updated) => {
-            handleUpdateProfile(updated);
-            if (typeof window !== 'undefined' && (window as any).AndroidOverlay) {
-               (window as any).AndroidOverlay.onCommand('request_config_save ' + JSON.stringify(updated));
-            }
-          }}
-          onLogMessage={handleLogMessage}
-          activeKeys={activeKeys}
-          activeAxes={activeAxes}
-          isNativeOverlay={true}
-        />
-      </div>
-    );
-  }
+  // BUG-R1 FIX: Call useGamepad for web-based gamepad detection fallback
+  const gamepadStates = useGamepad();
 
   return (
     <div className="min-h-screen bg-[#060608] text-slate-100 flex flex-col font-sans selection:bg-indigo-500 selection:text-white">

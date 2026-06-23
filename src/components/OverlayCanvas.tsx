@@ -12,7 +12,7 @@ export default function OverlayCanvas({ h }: { h: OverlayWysiwygHook }) {
       
       {/* Visual Canvas stage Area */}
       <div 
-        className="flex-1 w-full h-full relative"
+        className="flex-1 w-full h-full relative overflow-hidden"
         onClick={h.handleContainerClick}
         onMouseMove={h.handleDragMove}
         onMouseUp={h.handleDragEnd}
@@ -164,46 +164,46 @@ export default function OverlayCanvas({ h }: { h: OverlayWysiwygHook }) {
               })()}
 
               {isSelected(btn.id) && !h.showPalette && (
-                <div className="absolute top-full mt-2 flex gap-1 pointer-events-auto shadow-xl z-50">
+                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 flex gap-1 pointer-events-auto shadow-xl z-50 bg-slate-900/95 backdrop-blur p-1.5 rounded-lg border border-slate-700">
                   <button 
                     onClick={(e) => { e.stopPropagation(); h.relocateButtonOffset(btn.id, 0, -1); }}
-                    className="w-6 h-6 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center justify-center text-[10px]"
+                    className="w-7 h-7 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center justify-center text-[11px] touch-none"
                     title="Geser Atas"
                   >
                     ↑
                   </button>
                   <button 
                     onClick={(e) => { e.stopPropagation(); h.relocateButtonOffset(btn.id, 0, 1); }}
-                    className="w-6 h-6 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center justify-center text-[10px]"
+                    className="w-7 h-7 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center justify-center text-[11px] touch-none"
                     title="Geser Bawah"
                   >
                     ↓
                   </button>
                   <button 
                     onClick={(e) => { e.stopPropagation(); h.relocateButtonOffset(btn.id, -1, 0); }}
-                    className="w-6 h-6 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center justify-center text-[10px]"
+                    className="w-7 h-7 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center justify-center text-[11px] touch-none"
                     title="Geser Kiri"
                   >
                     ←
                   </button>
                   <button 
                     onClick={(e) => { e.stopPropagation(); h.relocateButtonOffset(btn.id, 1, 0); }}
-                    className="w-6 h-6 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center justify-center text-[10px]"
+                    className="w-7 h-7 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center justify-center text-[11px] touch-none"
                     title="Geser Kanan"
                   >
                     →
                   </button>
-                  <div className="w-px h-6 bg-slate-800 mx-1"></div>
+                  <div className="w-px h-7 bg-slate-700 mx-0.5"></div>
                   <button 
                     onClick={(e) => { e.stopPropagation(); h.handleUpdateBtnProperty('width', (btn.width || 56) - 5); h.handleUpdateBtnProperty('height', (btn.height || 56) - 5); }}
-                    className="w-6 h-6 rounded bg-slate-800 hover:bg-indigo-900 border border-slate-700 flex items-center justify-center text-[10px]"
+                    className="w-7 h-7 rounded bg-slate-800 hover:bg-rose-900 border border-slate-700 flex items-center justify-center text-[11px] touch-none"
                     title="Perkecil Tombol"
                   >
-                    -
+                    −
                   </button>
                   <button 
                     onClick={(e) => { e.stopPropagation(); h.handleUpdateBtnProperty('width', (btn.width || 56) + 5); h.handleUpdateBtnProperty('height', (btn.height || 56) + 5); }}
-                    className="w-6 h-6 rounded bg-slate-800 hover:bg-indigo-900 border border-slate-700 flex items-center justify-center text-[10px]"
+                    className="w-7 h-7 rounded bg-slate-800 hover:bg-indigo-900 border border-slate-700 flex items-center justify-center text-[11px] touch-none"
                     title="Perbesar Tombol"
                   >
                     +

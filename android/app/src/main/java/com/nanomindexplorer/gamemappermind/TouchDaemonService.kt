@@ -147,7 +147,7 @@ class TouchDaemonService : ITouchService.Stub {
     }
 
     private var currentToolType = MotionEvent.TOOL_TYPE_FINGER
-    private var currentInputSource = 8194
+    private var currentInputSource = InputDevice.SOURCE_TOUCHSCREEN  // Default: TOUCHSCREEN for game compatibility
     private var isAntiBanEnabled = false
 
     override fun updateConfig(json: String) {
@@ -159,12 +159,12 @@ class TouchDaemonService : ITouchService.Stub {
             val tt = obj.optString("toolType", firstBtn?.optString("toolType", "FINGER") ?: "FINGER")
             currentToolType = if (tt == "STYLUS") MotionEvent.TOOL_TYPE_STYLUS else MotionEvent.TOOL_TYPE_FINGER
             
-            val `is` = obj.optString("inputSource", firstBtn?.optString("inputSource", "MOUSE") ?: "MOUSE")
+            val `is` = obj.optString("inputSource", firstBtn?.optString("inputSource", "TOUCHSCREEN") ?: "TOUCHSCREEN")
             currentInputSource = when (`is`) {
-                "TOUCHSCREEN" -> InputDevice.SOURCE_TOUCHSCREEN
+                "MOUSE" -> 8194
                 "STYLUS" -> InputDevice.SOURCE_STYLUS
                 "GAMEPAD" -> InputDevice.SOURCE_GAMEPAD
-                else -> 8194
+                else -> InputDevice.SOURCE_TOUCHSCREEN  // Default for game compatibility
             }
             isAntiBanEnabled = obj.optBoolean("antiBanEnabled", false)
         } catch (e: Exception) {

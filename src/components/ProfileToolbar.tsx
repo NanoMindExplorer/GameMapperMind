@@ -1,9 +1,19 @@
 import React from 'react';
-import { Settings, Save, Trash2, Eye, EyeOff } from 'lucide-react';
+import { Settings, Save, Trash2, Eye, EyeOff, Check } from 'lucide-react';
 import { OverlayWysiwygHook } from './OverlayTypes';
 
 export default function ProfileToolbar({ h }: { h: OverlayWysiwygHook }) {
+  const [saved, setSaved] = React.useState(false);
+  
   if (h.isNativeOverlay) return null;
+  
+  const handleSave = () => {
+    h.onUpdateProfile(h.activeProfile);
+    h.onLogMessage('Profile saved successfully to storage.');
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
+  
   return (
     <div className="flex flex-wrap justify-between items-center gap-3 mb-4">
       <div className="flex items-center gap-3 bg-slate-900 border border-slate-800 p-1.5 rounded-lg">
@@ -41,14 +51,11 @@ export default function ProfileToolbar({ h }: { h: OverlayWysiwygHook }) {
         </button>
 
         <button 
-          onClick={() => {
-            h.onUpdateProfile(h.activeProfile);
-            h.onLogMessage('Profile saved successfully.');
-          }}
-          className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-2 text-xs font-bold rounded-md shadow transition-colors"
+          onClick={handleSave}
+          className={`px-4 py-1.5 ${saved ? 'bg-emerald-500' : 'bg-emerald-600 hover:bg-emerald-500'} text-white flex items-center gap-2 text-xs font-bold rounded-md shadow transition-all`}
         >
-          <Save className="w-3.5 h-3.5" />
-          Save
+          {saved ? <Check className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
+          {saved ? 'Saved!' : 'Save'}
         </button>
       </div>
     </div>

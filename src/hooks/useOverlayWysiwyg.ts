@@ -101,27 +101,35 @@ export function useOverlayWysiwyg({
 
   const handleUpdateBtnProperty = (key: keyof VirtualButton, value: any) => {
     if (!selectedButtonId) return;
-    const updatedButtons = activeProfile.buttons.map(b => {
-      if (b.id === selectedButtonId) {
-        return { ...b, [key]: value };
-      }
-      return b;
+    // BUG FIX: Use functional update to avoid stale state
+    onUpdateProfile(prev => {
+      if (!prev) return prev;
+      const updatedButtons = prev.buttons.map(b => {
+        if (b.id === selectedButtonId) {
+          return { ...b, [key]: value };
+        }
+        return b;
+      });
+      return { ...prev, buttons: updatedButtons };
     });
-    onUpdateProfile({ ...activeProfile, buttons: updatedButtons });
   };
 
   const relocateButtonOffset = (id: string, dx: number, dy: number) => {
-    const updatedButtons = activeProfile.buttons.map(b => {
-      if (b.id === id) {
-        return { 
-          ...b, 
-          x: Math.max(0, Math.min(100, b.x + dx)), 
-          y: Math.max(0, Math.min(100, b.y + dy)) 
-        };
-      }
-      return b;
+    // BUG FIX: Use functional update to avoid stale state
+    onUpdateProfile(prev => {
+      if (!prev) return prev;
+      const updatedButtons = prev.buttons.map(b => {
+        if (b.id === id) {
+          return { 
+            ...b, 
+            x: Math.max(0, Math.min(100, b.x + dx)), 
+            y: Math.max(0, Math.min(100, b.y + dy)) 
+          };
+        }
+        return b;
+      });
+      return { ...prev, buttons: updatedButtons };
     });
-    onUpdateProfile({ ...activeProfile, buttons: updatedButtons });
   };
 
   const handleAddSpecificButton = (label: string, mappedKey: string, androidEventCode: number, defaultSize: number = 56, type: VirtualButton['type'] = 'button') => {
@@ -143,22 +151,25 @@ export function useOverlayWysiwyg({
       sensitivity: type === 'analog_stick' ? 1.0 : undefined,
       tapDuration: type === 'swipe' ? 30 : undefined
     };
-    onUpdateProfile({
-      ...activeProfile,
-      buttons: [...activeProfile.buttons, newBtn]
+    // BUG FIX: Use functional update
+    onUpdateProfile(prev => {
+      if (!prev) return prev;
+      return { ...prev, buttons: [...prev.buttons, newBtn] };
     });
     setSelectedButtonId(freshId);
     setShowPalette(false);
   };
 
   const handleAddNewButton = (type: VirtualButton['type'] = 'button', defaultLabel: string = 'New', eventCode: number = 0) => {
-    handleAddSpecificButton(defaultLabel, 'BUTTON_A', eventCode, type === 'swipe' ? 80 : 56, type);
+    // BUG FIX: Use 'A' instead of 'BUTTON_A'
+    handleAddSpecificButton(defaultLabel, 'A', eventCode, type === 'swipe' ? 80 : 56, type);
   };
 
   const handleRemoveButton = (id: string) => {
-    onUpdateProfile({
-      ...activeProfile,
-      buttons: activeProfile.buttons.filter(b => b.id !== id)
+    // BUG FIX: Use functional update
+    onUpdateProfile(prev => {
+      if (!prev) return prev;
+      return { ...prev, buttons: prev.buttons.filter(b => b.id !== id) };
     });
     setSelectedButtonId(null);
   };

@@ -66,25 +66,25 @@ export default function ButtonPropertyPanel({ h }: { h: OverlayWysiwygHook }) {
                           h.handleUpdateBtnProperty('type', 'swipe');
                           h.handleUpdateBtnProperty('androidEventCode', 204);
                           h.handleUpdateBtnProperty('label', 'Swipe Kanan (RIGHT)');
-                        } else if (val === 'BUTTON_A') {
+                        } else if (val === 'A') {
                           h.handleUpdateBtnProperty('androidEventCode', 96);
-                        } else if (val === 'BUTTON_B') {
+                        } else if (val === 'B') {
                           h.handleUpdateBtnProperty('androidEventCode', 97);
-                        } else if (val === 'BUTTON_X') {
+                        } else if (val === 'X') {
                           h.handleUpdateBtnProperty('androidEventCode', 99);
-                        } else if (val === 'BUTTON_Y') {
+                        } else if (val === 'Y') {
                           h.handleUpdateBtnProperty('androidEventCode', 100);
-                        } else if (val === 'BUTTON_L1') {
+                        } else if (val === 'LB') {
                           h.handleUpdateBtnProperty('androidEventCode', 101);
-                        } else if (val === 'BUTTON_R1') {
+                        } else if (val === 'RB') {
                           h.handleUpdateBtnProperty('androidEventCode', 102);
-                        } else if (val === 'BUTTON_L2') {
+                        } else if (val === 'LT') {
                           h.handleUpdateBtnProperty('androidEventCode', 104);
-                        } else if (val === 'BUTTON_R2') {
+                        } else if (val === 'RT') {
                           h.handleUpdateBtnProperty('androidEventCode', 105);
-                        } else if (val === 'BUTTON_L3') {
+                        } else if (val === 'L3') {
                           h.handleUpdateBtnProperty('androidEventCode', 103);
-                        } else if (val === 'BUTTON_R3') {
+                        } else if (val === 'R3') {
                           h.handleUpdateBtnProperty('androidEventCode', 106);
                         } else if (val === 'DPAD_UP') {
                           h.handleUpdateBtnProperty('androidEventCode', 106);

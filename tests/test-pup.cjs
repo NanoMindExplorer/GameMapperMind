@@ -1,3 +1,4 @@
+// Purpose: Puppeteer test script for testing the frontend loads successfully over HTTP
 const puppeteer = require('puppeteer');
 
 (async () => {

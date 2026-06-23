@@ -1,4 +1,5 @@
 import { Capacitor } from '@capacitor/core';
+import { PointerIdRange } from '../types/pointer';
 import TouchInjection from '../plugins/TouchInjection';
 import { ShizukuState } from '../types';
 
@@ -74,7 +75,7 @@ export const useShizuku = () => {
     return true;
   };
 
-  const injectInput = async (action: 'down' | 'move' | 'up' | 'tap', x?: number, y?: number, pointerId: number = 99) => {
+  const injectInput = async (action: 'down' | 'move' | 'up' | 'tap', x?: number, y?: number, pointerId: number = PointerIdRange.TAP) => {
     if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
       try {
         if (action === 'down') {

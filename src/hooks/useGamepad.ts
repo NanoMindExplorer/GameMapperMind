@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { DEFAULT_DEADZONE, radialDeadzone } from "../constants/gamepad";
+
 
 export type ButtonActionState = 'IDLE' | 'PRESSED' | 'HELD' | 'RELEASED';
 
@@ -11,16 +12,8 @@ export interface GamepadState {
   timestamp: number;
 }
 
-// Radial deadzone formula (lebih akurat dari linear)
-function radialDeadzone(x: number, y: number, dz: number) {
-  const magnitude = Math.sqrt(x*x + y*y);
-  if (magnitude < dz) return { x: 0, y: 0 };
-  const scale = (magnitude - dz) / (1 - dz);
-  return {
-    x: (x / magnitude) * scale,
-    y: (y / magnitude) * scale,
-  };
-}
+// Radial deadzone moved to constants
+
 
 export function useGamepad(onButtonPress?: (index: number) => void) {
   const [state, setState] = useState<GamepadState | null>(null);
@@ -80,8 +73,8 @@ export function useGamepad(onButtonPress?: (index: number) => void) {
           prevButtonsRef.current = currentButtons;
           buttonStatesRef.current = currentStates;
           
-          const leftStick = radialDeadzone(getAxis(0), getAxis(1), 0.12);
-          const rightStick = radialDeadzone(getAxis(2), getAxis(3), 0.12);
+          const leftStick = radialDeadzone(getAxis(0), getAxis(1), DEFAULT_DEADZONE);
+          const rightStick = radialDeadzone(getAxis(2), getAxis(3), DEFAULT_DEADZONE);
           
           // Normalized axes to -1.0 to 1.0 (after deadzone)
           const axes = [leftStick.x, leftStick.y, rightStick.x, rightStick.y];

@@ -1,3 +1,4 @@
+// Purpose: Updates the GamepadTester component file with interactive test handlers
 import fs from 'fs';
 
 let content = fs.readFileSync('src/components/GamepadTester.tsx', 'utf-8');

@@ -9,7 +9,28 @@ import { SimAction, MacroProfile, SafeAiTunnelState } from "./src/types/simulati
 
 // Port config via env var
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
-const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "NX-DEFAULT-DEV-TOKEN"; // Or generate locally if none
+
+const ADMIN_TOKEN_FILE = path.join(process.cwd(), ".admin_token");
+let ADMIN_TOKEN = process.env.ADMIN_TOKEN as string;
+
+if (!ADMIN_TOKEN) {
+    if (fs.existsSync(ADMIN_TOKEN_FILE)) {
+        ADMIN_TOKEN = fs.readFileSync(ADMIN_TOKEN_FILE, "utf-8").trim();
+    } else {
+        // Fallback: generate and save
+        ADMIN_TOKEN = crypto.randomBytes(32).toString("hex");
+        fs.writeFileSync(ADMIN_TOKEN_FILE, ADMIN_TOKEN, { mode: 0o600 });
+        console.log("[SECURITY] Generated new ADMIN_TOKEN, saved to .admin_token (mode 0600)");
+    }
+} else {
+    console.log("[SECURITY] ADMIN_TOKEN loaded from environment");
+}
+
+if (!ADMIN_TOKEN || ADMIN_TOKEN.length < 32) {
+    console.error("ADMIN_TOKEN required and must be at least 32 characters.");
+    process.exit(1);
+}
+
 const DATA_FILE = path.join(process.cwd(), "app_data.json");
 
 interface PersistedState {
@@ -24,13 +45,33 @@ const defaultState: PersistedState = {
     apiToken: null
 };
 
+// C03: AES-256-GCM Encryption
+const ALGORITHM = 'aes-256-gcm';
+// Create a 32-byte key from ADMIN_TOKEN
+const ENCRYPTION_KEY = crypto.createHash('sha256').update(ADMIN_TOKEN).digest();
+
 class StateStore {
     public static state: PersistedState = { ...defaultState };
 
     public static async load(): Promise<void> {
         try {
             if (fs.existsSync(DATA_FILE)) {
-                const data = await fs.promises.readFile(DATA_FILE, 'utf-8');
+                let data = await fs.promises.readFile(DATA_FILE, 'utf-8');
+                try {
+                    // Try to decrypt if it looks like a JSON with iv and authTag
+                    const parsedData = JSON.parse(data);
+                    if (parsedData.iv && parsedData.authTag && parsedData.encryptedData) {
+                        const iv = Buffer.from(parsedData.iv, 'hex');
+                        const authTag = Buffer.from(parsedData.authTag, 'hex');
+                        const decipher = crypto.createDecipheriv(ALGORITHM, ENCRYPTION_KEY, iv);
+                        decipher.setAuthTag(authTag);
+                        let decrypted = decipher.update(parsedData.encryptedData, 'hex', 'utf-8');
+                        decrypted += decipher.final('utf-8');
+                        data = decrypted;
+                    }
+                } catch(e) {
+                    // fall back to plain JSON for backwards compatibility
+                }
                 this.state = JSON.parse(data, (key, value) => value);
             } else {
               this.state.apiToken = crypto.randomBytes(32).toString("hex");
@@ -44,7 +85,20 @@ class StateStore {
 
     public static async save(): Promise<void> {
         try {
-            await fs.promises.writeFile(DATA_FILE, JSON.stringify(this.state, null, 2), 'utf-8');
+            const rawJson = JSON.stringify(this.state, null, 2);
+            const iv = crypto.randomBytes(12);
+            const cipher = crypto.createCipheriv(ALGORITHM, ENCRYPTION_KEY, iv);
+            let encrypted = cipher.update(rawJson, 'utf-8', 'hex');
+            encrypted += cipher.final('hex');
+            const authTag = cipher.getAuthTag();
+            
+            const encryptedPayload = {
+                iv: iv.toString('hex'),
+                authTag: authTag.toString('hex'),
+                encryptedData: encrypted
+            };
+            
+            await fs.promises.writeFile(DATA_FILE, JSON.stringify(encryptedPayload, null, 2), 'utf-8');
         } catch (error) {
             console.error("Failed to save state to JSON:", error);
         }
@@ -74,7 +128,7 @@ function clampedRandom(min: number, max: number): number {
 }
 
 // BUG-05: Fungsi helper yang aman untuk addLog() (Refactor Log System)
-function addLog(arr: string[], msg: string, max = 50): void {
+function addLog(arr: string[], msg: string, max = 500): void {
   arr.push(msg);
   while (arr.length > max) {
     arr.shift();
@@ -179,7 +233,22 @@ const LogSchema = z.object({
   instruksi: z.string().optional() // BUG-10: typo "insturksi" -> "instruksi" diperbaiki
 });
 
-app.post("/api/log", (req: Request, res: Response) => {
+const logLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  message: { error: "Terlalu banyak log request. Coba lagi nanti." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+app.use("/api/log", logLimiter);
+
+// Health check endpoint
+app.get("/api/health", (req: Request, res: Response) => {
+  res.json({ status: "ok", timestamp: Date.now() });
+});
+
+app.post("/api/log", requireAuth, (req: Request, res: Response) => {
   try {
     const parsed = LogSchema.parse(req.body);
     const clientIp = req.ip || "";
@@ -193,7 +262,7 @@ app.post("/api/log", (req: Request, res: Response) => {
   }
 });
 
-app.get("/api/logs", (req: Request, res: Response) => {
+app.get("/api/logs", requireAuth, (req: Request, res: Response) => {
     res.json({ logs: StateStore.state.logs });
 });
 
@@ -297,8 +366,12 @@ process.on("unhandledRejection", (reason) => {
   // Log but do not crash unless strictly required, we want to stay alive
 });
 
-startServer().catch((err) => {
-  console.error('[FATAL] Server failed to start:', err);
-  process.exit(1);
-});
+if (process.env.NODE_ENV !== 'test') {
+  startServer().catch((err) => {
+    console.error('[FATAL] Server failed to start:', err);
+    process.exit(1);
+  });
+}
+
+export default app;
 

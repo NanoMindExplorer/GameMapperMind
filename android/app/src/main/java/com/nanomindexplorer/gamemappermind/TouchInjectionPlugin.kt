@@ -47,9 +47,10 @@ class TouchInjectionPlugin : Plugin() {
     }
 
     private var isBound = false
+    // BUG FIX: Add tag for ProGuard/R8 stability (per Shizuku API docs)
     private val USER_SERVICE_ARGS = Shizuku.UserServiceArgs(
         ComponentName("com.nanomindexplorer.gamemappermind", TouchDaemonService::class.java.name)
-    ).daemon(false).processNameSuffix("touch_daemon").version(1)
+    ).tag("touch_daemon_v1").daemon(false).processNameSuffix("touch_daemon").version(1)
 
     private var pendingBindCalls = mutableListOf<PluginCall>()
 
@@ -99,6 +100,15 @@ class TouchInjectionPlugin : Plugin() {
     @PluginMethod
     fun bindService(call: PluginCall) {
         try {
+            // BUG FIX: Check isPreV11 per Shizuku API docs
+            if (Shizuku.isPreV11()) {
+                call.reject("Shizuku is not running or version is too old (pre-v11)")
+                return
+            }
+            if (!Shizuku.pingBinder()) {
+                call.reject("Shizuku binder is not active. Please start Shizuku first.")
+                return
+            }
             if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
                 val serviceAlive = touchService != null && touchService!!.asBinder().isBinderAlive
                 if (!isBound || !serviceAlive) {
@@ -196,6 +206,11 @@ class TouchInjectionPlugin : Plugin() {
     @PluginMethod
     fun requestPermission(call: PluginCall) {
         try {
+            // BUG FIX: Check isPreV11 per Shizuku API docs
+            if (Shizuku.isPreV11()) {
+                call.reject("Shizuku is not running or version is too old (pre-v11)")
+                return
+            }
             val granted = Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
             if (granted) {
                 val data = JSObject()

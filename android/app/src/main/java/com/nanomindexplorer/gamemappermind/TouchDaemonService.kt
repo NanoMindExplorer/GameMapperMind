@@ -15,10 +15,7 @@ class TouchDaemonService : ITouchService.Stub {
 
     constructor() : super()
 
-    // Optionally accept Context for Shizuku v13+
-    constructor(context: android.content.Context?) : super() {
-        // we can store context if needed
-    }
+    constructor(context: android.content.Context?) : super()
 
     override fun executeShellCommand(command: String): String {
         return try {
@@ -26,34 +23,18 @@ class TouchDaemonService : ITouchService.Stub {
             val reader = java.io.BufferedReader(java.io.InputStreamReader(process.inputStream))
             val errorReader = java.io.BufferedReader(java.io.InputStreamReader(process.errorStream))
             
-            val output = java.lang.StringBuilder()
-            val errorOutput = java.lang.StringBuilder()
-            
-            val timeoutMs = 5000L
-            val startTime = System.currentTimeMillis()
+            val output = StringBuilder()
+            val errorOutput = StringBuilder()
             
             var line: String?
             while (reader.readLine().also { line = it } != null) {
-                if (output.length < 65536) output.append(line).append("\n")
-                if (System.currentTimeMillis() - startTime > timeoutMs) break
+                output.append(line).append("\n")
             }
             while (errorReader.readLine().also { line = it } != null) {
-                if (errorOutput.length < 65536) errorOutput.append(line).append("\n")
-                if (System.currentTimeMillis() - startTime > timeoutMs) break
+                errorOutput.append(line).append("\n")
             }
             
-            // Timeout support via modern Android API using generic wait/interrupt
-            var exitCode = -1
-            val thread = Thread {
-                try { exitCode = process.waitFor() } catch (ignored: Exception) {}
-            }
-            thread.start()
-            thread.join(timeoutMs)
-            if (thread.isAlive) {
-                process.destroy()
-                thread.interrupt()
-            }
-            
+            val exitCode = process.waitFor()
             val json = org.json.JSONObject()
             json.put("output", output.toString())
             json.put("error", errorOutput.toString())
@@ -75,7 +56,6 @@ class TouchDaemonService : ITouchService.Stub {
         stopStreamCommand()
         streamThread = Thread {
             try {
-                // If it's a getevent command, execute it directly avoiding 'sh -c' pipe buffering
                 val cmdArray = if (command.startsWith("getevent")) {
                     command.split(" ").toTypedArray()
                 } else {
@@ -119,9 +99,13 @@ class TouchDaemonService : ITouchService.Stub {
     override fun destroy() {
         releaseAllPointers()
         stopStreamCommand()
-        // DO NOT call System.exit(0) — it kills the entire Shizuku user service process,
-        // causing the app to disappear from Shizuku management and gamepad detection to fail.
-        // The service will be cleaned up properly by Shizuku when unbound.
+        // Per Shizuku API documentation:
+        // "The transaction code for that method is 16777115 (use 16777114 in aidl).
+        //  In this method, you can do some cleanup jobs and call System.exit() in the end."
+        // System.exit(0) is REQUIRED by Shizuku to properly terminate the user service process.
+        // The issue was NOT this method — it was handleOnDestroy() calling destroy() at the wrong time.
+        // handleOnDestroy() is now fixed to NOT call destroy(). Only explicit unbindService() calls destroy().
+        System.exit(0)
     }
 
     private val inputManager: InputManager? by lazy {
@@ -135,7 +119,6 @@ class TouchDaemonService : ITouchService.Stub {
 
     private val injectInputEventMethod by lazy {
         try {
-            // mode 0 is INJECT_INPUT_EVENT_MODE_ASYNC
             InputManager::class.java.getMethod("injectInputEvent", android.view.InputEvent::class.java, Int::class.javaPrimitiveType)
         } catch (e: Exception) {
             Log.e("GameMapper", "Failed to get injectInputEvent method", e)
@@ -160,11 +143,11 @@ class TouchDaemonService : ITouchService.Stub {
                 compactedIdx++
             }
         }
-        return 0 // fallback
+        return 0
     }
 
     private var currentToolType = MotionEvent.TOOL_TYPE_FINGER
-    private var currentInputSource = 8194 // Default to InputDevice.SOURCE_MOUSE
+    private var currentInputSource = 8194
     private var isAntiBanEnabled = false
 
     override fun updateConfig(json: String) {
@@ -181,7 +164,7 @@ class TouchDaemonService : ITouchService.Stub {
                 "TOUCHSCREEN" -> InputDevice.SOURCE_TOUCHSCREEN
                 "STYLUS" -> InputDevice.SOURCE_STYLUS
                 "GAMEPAD" -> InputDevice.SOURCE_GAMEPAD
-                else -> 8194 // InputDevice.SOURCE_MOUSE
+                else -> 8194
             }
             isAntiBanEnabled = obj.optBoolean("antiBanEnabled", false)
         } catch (e: Exception) {
@@ -227,8 +210,8 @@ class TouchDaemonService : ITouchService.Stub {
                 var sz = 1.0f
 
                 if (isAntiBanEnabled) {
-                    nx += ((Math.random() * 2) - 1).toFloat() // +- 1px jitter
-                    ny += ((Math.random() * 2) - 1).toFloat() 
+                    nx += ((Math.random() * 2) - 1).toFloat()
+                    ny += ((Math.random() * 2) - 1).toFloat()
                     press = gaussianRandom(0.92f, 0.04f).coerceIn(0.85f, 1.0f)
                     sz = gaussianRandom(1.0f, 0.05f).coerceIn(0.9f, 1.1f)
                 }
@@ -242,20 +225,9 @@ class TouchDaemonService : ITouchService.Stub {
         }
 
         val event = MotionEvent.obtain(
-            downTime,
-            eventTime,
-            action,
-            activeIndex,
-            pointerProperties,
-            pointerCoords,
-            0,
-            0,
-            1f,
-            1f,
-            0,
-            0,
-            currentInputSource,
-            0
+            downTime, eventTime, action, activeIndex,
+            pointerProperties, pointerCoords,
+            0, 0, 1f, 1f, 0, 0, currentInputSource, 0
         )
 
         return try {

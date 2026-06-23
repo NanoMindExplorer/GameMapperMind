@@ -4,10 +4,10 @@ import { OverlayWysiwygHook } from './OverlayTypes';
 
 export default function ScreenshotBackground({ h, children }: { h: OverlayWysiwygHook, children?: React.ReactNode }) {
   return (
-    <div className={`${h.isNativeOverlay ? "w-screen h-screen overflow-hidden" : "bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xl flex flex-col lg:flex-row"}`}>
+    <div className={`${h.isNativeOverlay ? "w-screen h-screen overflow-hidden" : "bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xl flex flex-col lg:flex-row h-full"}`}>
       {/* Canvas Header / Config (Col 3 or Topbar) */}
       {!h.isNativeOverlay && h.showConfig && (
-        <div className="lg:w-1/4 bg-slate-950 border-r border-slate-800 p-5 flex flex-col gap-5 overflow-y-auto max-h-[600px] custom-scrollbar z-10 shrink-0">
+        <div className="lg:w-1/4 bg-slate-950 border-r border-slate-800 p-5 flex flex-col gap-5 overflow-y-auto custom-scrollbar z-10 shrink-0 lg:h-full" style={{ maxHeight: '100%' }}>
           <div>
             <h3 className="text-sm font-bold font-sans tracking-tight text-white flex items-center gap-2 mb-2">
               <Settings className="w-4 h-4 text-indigo-400" /> Layout Settings

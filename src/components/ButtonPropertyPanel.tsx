@@ -8,7 +8,7 @@ export default function ButtonPropertyPanel({ h }: { h: OverlayWysiwygHook }) {
   const { selectedButton } = h;
   
   return (
-    <div className="lg:col-span-4 p-6 bg-slate-950/40 flex flex-col justify-between">
+    <div className="w-full lg:w-80 p-6 bg-slate-950/40 flex flex-col justify-between shrink-0 overflow-y-auto custom-scrollbar" style={{ maxHeight: '100%' }}>
       <div className="space-y-6">
         <div>
           <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Overlay Node Inspector</h4>

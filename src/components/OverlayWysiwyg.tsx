@@ -20,10 +20,10 @@ export default function OverlayWysiwyg(props: OverlayWysiwygProps) {
   const h = useOverlayWysiwyg(props);
 
   return (
-    <div className="flex flex-col h-full bg-slate-950 font-sans text-slate-200">
+    <div className="flex flex-col h-full bg-slate-950 font-sans text-slate-200 overflow-hidden">
       <ProfileToolbar h={h} />
       
-      <div className="flex-1 relative min-h-0 container mx-auto px-4 max-w-7xl">
+      <div className="flex-1 relative min-h-0 container mx-auto px-4 max-w-7xl overflow-hidden">
         <ScreenshotBackground h={h}>
           <OverlayCanvas h={h} />
           <ButtonPropertyPanel h={h} />

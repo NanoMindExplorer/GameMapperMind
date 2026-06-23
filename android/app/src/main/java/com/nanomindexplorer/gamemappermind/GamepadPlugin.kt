@@ -22,7 +22,12 @@ class GamepadPlugin : Plugin() {
 
     fun handleKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         if (isGamepadButton(keyCode)) {
+            // BUG FIX: Emit on BOTH "gamepadEvent" (legacy) AND "onGamepadButton" (standard)
+            // so that useGamepadLoop and GamepadTester receive native Android gamepad events
+            // even WITHOUT Shizuku (Android native input works without Shizuku).
             emitButtonEvent(keyCode, "PRESSED", event)
+            val buttonName = mapKeyCodeToButtonName(keyCode)
+            TouchInjectionPlugin.emitGamepadButton(buttonName, 1, 1.0f)
             return true
         }
         return false
@@ -31,6 +36,8 @@ class GamepadPlugin : Plugin() {
     fun handleKeyUp(keyCode: Int, event: KeyEvent?): Boolean {
         if (isGamepadButton(keyCode)) {
             emitButtonEvent(keyCode, "RELEASED", event)
+            val buttonName = mapKeyCodeToButtonName(keyCode)
+            TouchInjectionPlugin.emitGamepadButton(buttonName, 0, 0.0f)
             return true
         }
         return false
@@ -46,6 +53,7 @@ class GamepadPlugin : Plugin() {
             val hatX = event.getAxisValue(MotionEvent.AXIS_HAT_X)
             val hatY = event.getAxisValue(MotionEvent.AXIS_HAT_Y)
 
+            // Emit legacy event
             val ret = JSObject()
             ret.put("type", "AXIS")
             ret.put("axisX", axisX)
@@ -56,6 +64,12 @@ class GamepadPlugin : Plugin() {
             ret.put("hatY", hatY)
             ret.put("timestamp", event.eventTime)
             notifyListeners("gamepadEvent", ret)
+
+            // BUG FIX: Also emit on standard "onGamepadAxis" channel
+            // so useGamepadLoop and GamepadTester receive native Android joystick events
+            // even WITHOUT Shizuku.
+            val axes = floatArrayOf(axisX, axisY, axisZ, axisRZ, hatX, hatY)
+            TouchInjectionPlugin.emitGamepadAxis(axes)
             return true
         }
         return false
@@ -67,6 +81,29 @@ class GamepadPlugin : Plugin() {
                 keyCode == KeyEvent.KEYCODE_DPAD_DOWN ||
                 keyCode == KeyEvent.KEYCODE_DPAD_LEFT ||
                 keyCode == KeyEvent.KEYCODE_DPAD_RIGHT
+    }
+
+    private fun mapKeyCodeToButtonName(keyCode: Int): String {
+        return when (keyCode) {
+            KeyEvent.KEYCODE_BUTTON_A -> "A"
+            KeyEvent.KEYCODE_BUTTON_B -> "B"
+            KeyEvent.KEYCODE_BUTTON_X -> "X"
+            KeyEvent.KEYCODE_BUTTON_Y -> "Y"
+            KeyEvent.KEYCODE_BUTTON_L1 -> "LB"
+            KeyEvent.KEYCODE_BUTTON_R1 -> "RB"
+            KeyEvent.KEYCODE_BUTTON_L2 -> "LT"
+            KeyEvent.KEYCODE_BUTTON_R2 -> "RT"
+            KeyEvent.KEYCODE_BUTTON_THUMBL -> "L3"
+            KeyEvent.KEYCODE_BUTTON_THUMBR -> "R3"
+            KeyEvent.KEYCODE_BUTTON_START -> "START"
+            KeyEvent.KEYCODE_BUTTON_SELECT -> "SELECT"
+            KeyEvent.KEYCODE_BUTTON_MODE -> "HOME"
+            KeyEvent.KEYCODE_DPAD_UP -> "DPAD_UP"
+            KeyEvent.KEYCODE_DPAD_DOWN -> "DPAD_DOWN"
+            KeyEvent.KEYCODE_DPAD_LEFT -> "DPAD_LEFT"
+            KeyEvent.KEYCODE_DPAD_RIGHT -> "DPAD_RIGHT"
+            else -> "BTN_${keyCode}"
+        }
     }
 
     private fun emitButtonEvent(keyCode: Int, action: String, event: KeyEvent?) {

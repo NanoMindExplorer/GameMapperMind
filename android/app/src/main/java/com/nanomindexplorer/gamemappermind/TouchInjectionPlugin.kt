@@ -105,7 +105,10 @@ class TouchInjectionPlugin : Plugin() {
                     pendingBindCalls.add(call)
                     try {
                         if (isBound) {
-                            Shizuku.unbindUserService(USER_SERVICE_ARGS, serviceConnection, true)
+                            // BUG FIX: Use false (don't remove) instead of true (remove).
+                            // unbindUserService with true KILLS the service process,
+                            // causing app to disappear from Shizuku management.
+                            Shizuku.unbindUserService(USER_SERVICE_ARGS, serviceConnection, false)
                         }
                     } catch (e: Exception) {}
                     Shizuku.bindUserService(USER_SERVICE_ARGS, serviceConnection)

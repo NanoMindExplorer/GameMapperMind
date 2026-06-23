@@ -4,24 +4,18 @@ import { GamepadProfile } from '../types';
 
 export function useGamepadLoop(mapProfile: GamepadProfile | null, connected: boolean, injectActive: boolean) {
   useEffect(() => {
-    if (!connected || !mapProfile) return;
-
+    // BUG FIX: ALWAYS set up listeners — they receive events from BOTH:
+    // 1. Shizuku getevent (via GamepadListenerService) when connected
+    // 2. Android native input (via GamepadPlugin.dispatchKeyEvent) — works WITHOUT Shizuku
+    // Previously, listeners were only set up when connected=true, causing gamepad
+    // to be invisible in GamepadTester when Shizuku was not running.
     let isCleanedUp = false;
     let btnListener: any = null;
     let axisListener: any = null;
     let feedbackListener: any = null;
 
-    const setupNative = async () => {
+    const setupListeners = async () => {
       try {
-        await TouchInjection.bindService().catch(() => {});
-        if (isCleanedUp) return;
-        await TouchInjection.startGamepadListener().catch(() => {});
-        if (isCleanedUp) return;
-        
-        const profileStr = injectActive ? JSON.stringify(mapProfile) : "{}";
-        await TouchInjection.updateActiveProfile({ profileJson: profileStr });
-        if (isCleanedUp) return;
-
         btnListener = await TouchInjection.addListener('onGamepadButton', (data: any) => {
           if (!isCleanedUp) {
             window.dispatchEvent(new CustomEvent('native-gamepad-button', { detail: data }));
@@ -34,7 +28,7 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, connected: boo
           }
         });
         
-        // H13: Haptics listener — save handle for cleanup
+        // H13: Haptics listener
         feedbackListener = await TouchInjection.addListener('onGamepadFeedback', async (data: any) => {
            if (!isCleanedUp && injectActive && mapProfile?.hapticIntensity) {
               const { Haptics, ImpactStyle } = await import('@capacitor/haptics');
@@ -46,18 +40,39 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, connected: boo
            }
         });
       } catch (err) {
-        console.error("Failed to setup native gamepad listener", err);
+        console.error("Failed to setup gamepad listeners", err);
       }
     };
 
-    setupNative();
+    const setupShizuku = async () => {
+      // Only bind Shizuku service when connected
+      if (!connected || !mapProfile) return;
+      try {
+        await TouchInjection.bindService().catch(() => {});
+        if (isCleanedUp) return;
+        await TouchInjection.startGamepadListener().catch(() => {});
+        if (isCleanedUp) return;
+        
+        const profileStr = injectActive ? JSON.stringify(mapProfile) : "{}";
+        await TouchInjection.updateActiveProfile({ profileJson: profileStr });
+      } catch (err) {
+        console.error("Failed to setup Shizuku gamepad listener", err);
+      }
+    };
+
+    // Always set up listeners first (for native Android gamepad input)
+    setupListeners();
+    // Then set up Shizuku if connected (for getevent-based input + touch injection)
+    setupShizuku();
 
     return () => {
       isCleanedUp = true;
       if (btnListener && btnListener.remove) btnListener.remove();
       if (axisListener && axisListener.remove) axisListener.remove();
       if (feedbackListener && feedbackListener.remove) feedbackListener.remove();
-      TouchInjection.updateActiveProfile({ profileJson: "{}" }).catch(() => {});
+      if (connected) {
+        TouchInjection.updateActiveProfile({ profileJson: "{}" }).catch(() => {});
+      }
     };
   }, [mapProfile, connected, injectActive]);
 }

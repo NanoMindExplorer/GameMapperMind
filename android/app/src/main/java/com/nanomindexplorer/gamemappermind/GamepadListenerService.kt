@@ -185,6 +185,7 @@ class GamepadListenerService : Service() {
                             if (parts.size >= 3) {
                                 val isPrefixed = parts[0].startsWith("/dev/input/")
                                 val evIdx = if (isPrefixed) 1 else 0
+                                val gpIdx = if (isPrefixed) Math.max(0, gamepadDevices.indexOf(parts[0])) else 0
                                 if (parts.size > evIdx + 2) {
                                     val axisType = parts[evIdx + 1]
                                     val valueHex = parts[evIdx + 2]

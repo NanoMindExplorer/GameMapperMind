@@ -7,7 +7,7 @@ import rateLimit from "express-rate-limit";
 import db, { saveProfileDB, loadAllProfilesDB } from "./data/db";
 
 const app = express();
-const PORT: number = parseInt(process.env.PORT || "3000", 10);
+const PORT = 3000;
 
 const ALLOWED_ORIGINS = [
   "capacitor://localhost",

@@ -15,3 +15,6 @@ data/
 *.db-shm
 *.db-wal
 android/app/release/
+.admin_token
+app_data.json
+.data_key

@@ -45,10 +45,22 @@ const defaultState: PersistedState = {
     apiToken: null
 };
 
+// Generate separate DATA_ENCRYPTION_KEY on first run, save to .data_key (gitignored)
+const DATA_KEY_FILE = path.join(process.cwd(), ".data_key");
+let DATA_ENCRYPTION_KEY: Buffer;
+
+if (process.env.DATA_ENCRYPTION_KEY) {
+  DATA_ENCRYPTION_KEY = Buffer.from(process.env.DATA_ENCRYPTION_KEY, 'hex');
+} else if (fs.existsSync(DATA_KEY_FILE)) {
+  DATA_ENCRYPTION_KEY = fs.readFileSync(DATA_KEY_FILE);
+} else {
+  DATA_ENCRYPTION_KEY = crypto.randomBytes(32);
+  fs.writeFileSync(DATA_KEY_FILE, DATA_ENCRYPTION_KEY, { mode: 0o600 });
+}
+
 // C03: AES-256-GCM Encryption
 const ALGORITHM = 'aes-256-gcm';
-// Create a 32-byte key from ADMIN_TOKEN
-const ENCRYPTION_KEY = crypto.createHash('sha256').update(ADMIN_TOKEN).digest();
+const ENCRYPTION_KEY = DATA_ENCRYPTION_KEY;
 
 class StateStore {
     public static state: PersistedState = { ...defaultState };
@@ -366,7 +378,7 @@ process.on("unhandledRejection", (reason) => {
   // Log but do not crash unless strictly required, we want to stay alive
 });
 
-if (process.env.NODE_ENV !== 'test') {
+if (!process.env.VITEST) {
   startServer().catch((err) => {
     console.error('[FATAL] Server failed to start:', err);
     process.exit(1);

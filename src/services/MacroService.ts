@@ -17,9 +17,11 @@ export class MacroService {
     const method = macro.id ? 'PUT' : 'POST';
     const url = macro.id ? `/api/macros/${macro.id}` : '/api/macros';
     try {
+      const token = localStorage.getItem('ADMIN_TOKEN');
+      if (!token) throw new Error('ADMIN_TOKEN not set in localStorage');
       const res = await fetch(url, {
         method,
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('ADMIN_TOKEN') || 'NX-DEFAULT-DEV-TOKEN'}` },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify(macro)
       });
       return res.ok;

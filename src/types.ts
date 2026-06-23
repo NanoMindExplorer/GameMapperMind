@@ -67,6 +67,7 @@ export interface GyroCalibrationState {
 
 export interface ShizukuState {
   status: 'DISCONNECTED' | 'CHECKING' | 'CONNECTED_SHIZUKU' | 'CONNECTED_ADB';
+  mode?: 'shizuku' | 'desktop' | 'adb';
   daemonRunning: boolean;
   daemonVersion: string;
   logLines: string[];

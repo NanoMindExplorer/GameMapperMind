@@ -51,8 +51,9 @@ class NativeGamepadMapper(private val context: Context) {
     private fun getScreenCoords(pctX: Double, pctY: Double): Pair<Float, Float> {
         val dm = android.util.DisplayMetrics()
         windowManager.defaultDisplay.getRealMetrics(dm)
-        val sw = Math.max(dm.widthPixels, dm.heightPixels)
-        val sh = Math.min(dm.widthPixels, dm.heightPixels)
+        val rotation = windowManager.defaultDisplay.rotation
+        val sw = dm.widthPixels
+        val sh = dm.heightPixels
         return Pair(((pctX / 100.0) * sw).toFloat(), ((pctY / 100.0) * sh).toFloat())
     }
     

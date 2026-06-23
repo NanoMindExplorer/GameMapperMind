@@ -11,6 +11,15 @@ import com.getcapacitor.annotation.CapacitorPlugin
 @CapacitorPlugin(name = "GamepadPlugin")
 class GamepadPlugin : Plugin() {
 
+    companion object {
+        var instance: GamepadPlugin? = null
+    }
+
+    override fun load() {
+        super.load()
+        instance = this
+    }
+
     fun handleKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         if (isGamepadButton(keyCode)) {
             emitButtonEvent(keyCode, "PRESSED", event)

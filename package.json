@@ -11,7 +11,9 @@
     "lint": "tsc --noEmit",
     "cap:sync": "npx cap sync android",
     "cap:build": "npm run build && npx cap sync android",
-    "android:debug": "npm run cap:build && cd android && ./gradlew assembleDebug"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",
@@ -56,11 +58,14 @@
     "@types/supertest": "^7.2.0",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.25.0",
+    "jsdom": "^24.0.0",
     "puppeteer": "^25.2.0",
     "supertest": "^7.2.2",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
-    "vite": "^6.2.3"
+    "vite": "^6.2.3",
+    "vitest": "^1.6.0",
+    "@vitest/coverage-v8": "^1.6.0"
   }
 }

@@ -29,15 +29,29 @@ class MainActivity : BridgeActivity() {
             webView.isVerticalScrollBarEnabled = false
             webView.isHorizontalScrollBarEnabled = false
         }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            window.decorView.setOnCapturedPointerListener { view, event ->
+                GamepadPlugin.instance?.handleGenericMotionEvent(event)
+                true
+            }
+        }
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if ((event.source and InputDevice.SOURCE_GAMEPAD) != 0 ||
             (event.source and InputDevice.SOURCE_JOYSTICK) != 0 ||
             (event.source and InputDevice.SOURCE_DPAD) != 0) {
+            
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                GamepadPlugin.instance?.handleKeyDown(event.keyCode, event)
+            } else if (event.action == KeyEvent.ACTION_UP) {
+                GamepadPlugin.instance?.handleKeyUp(event.keyCode, event)
+            }
             return true
         }
         val kc = event.keyCode
+        // forward specific button codes too
         if (kc == KeyEvent.KEYCODE_DPAD_UP || kc == KeyEvent.KEYCODE_DPAD_DOWN ||
             kc == KeyEvent.KEYCODE_DPAD_LEFT || kc == KeyEvent.KEYCODE_DPAD_RIGHT ||
             kc == KeyEvent.KEYCODE_BUTTON_A || kc == KeyEvent.KEYCODE_BUTTON_B ||
@@ -47,6 +61,12 @@ class MainActivity : BridgeActivity() {
             kc == KeyEvent.KEYCODE_BUTTON_THUMBL || kc == KeyEvent.KEYCODE_BUTTON_THUMBR ||
             kc == KeyEvent.KEYCODE_BUTTON_START || kc == KeyEvent.KEYCODE_BUTTON_SELECT ||
             kc == KeyEvent.KEYCODE_BUTTON_MODE) {
+            
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                GamepadPlugin.instance?.handleKeyDown(event.keyCode, event)
+            } else if (event.action == KeyEvent.ACTION_UP) {
+                GamepadPlugin.instance?.handleKeyUp(event.keyCode, event)
+            }
             return true
         }
         return super.dispatchKeyEvent(event)
@@ -57,6 +77,8 @@ class MainActivity : BridgeActivity() {
             (event.source and InputDevice.SOURCE_JOYSTICK) != 0 ||
             (event.source and InputDevice.SOURCE_CLASS_JOYSTICK) != 0 ||
             (event.source and InputDevice.SOURCE_DPAD) != 0) {
+            
+            GamepadPlugin.instance?.handleGenericMotionEvent(event)
             return true
         }
         return super.dispatchGenericMotionEvent(event)

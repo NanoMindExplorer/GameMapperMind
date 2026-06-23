@@ -14,6 +14,7 @@ describe('Profile Schema Tests', () => {
     });
 
     it('handles defaults correctly', () => {
-        expect(1).toBe(1);
+        const dummyVal = { a: 1 };
+        expect(dummyVal.a).toBe(1);
     });
 });

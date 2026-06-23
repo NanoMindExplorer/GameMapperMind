@@ -5,7 +5,7 @@ export default function OverlayCanvas({ h }: { h: OverlayWysiwygHook }) {
   const isSelected = (id: string) => h.selectedButtonId === id;
 
   return (
-    <div className={`${h.isNativeOverlay ? "w-screen h-screen" : "lg:col-span-9 xl:col-span-12 2xl:col-span-9"} relative overflow-hidden bg-slate-950 flex flex-col group select-none`}>
+    <div className={`${h.isNativeOverlay ? "w-screen h-screen" : "flex-1 min-h-[400px]"} relative overflow-hidden bg-slate-950 flex flex-col group select-none`}>
       
       {/* Visual Canvas stage Area */}
       <div 
@@ -17,9 +17,7 @@ export default function OverlayCanvas({ h }: { h: OverlayWysiwygHook }) {
         onTouchMove={h.handleDragMove}
         onTouchEnd={h.handleDragEnd}
         style={{
-          backgroundImage: h.getBackgroundUrl(),
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
+          background: h.getBackgroundUrl(),
           backgroundColor: '#0f172a'
         }}
         id="canvas-container"

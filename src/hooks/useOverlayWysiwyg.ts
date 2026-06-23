@@ -157,11 +157,12 @@ export function useOverlayWysiwyg({
 
   const getBackgroundUrl = () => {
     if (screenshotMode === 'custom' && customScreenshotUrl) return customScreenshotUrl;
-    if (screenshotMode === 'genshin') return 'https://images.unsplash.com/photo-1542751371-adc38448a05e?auto=format&fit=crop&q=80&w=1200';
-    if (screenshotMode === 'pubg') return 'https://images.unsplash.com/photo-1534423861386-85a16f5d13fd?auto=format&fit=crop&q=80&w=1200';
-    if (screenshotMode === 'codm') return 'https://images.unsplash.com/photo-1511512578047-dfb367046420?auto=format&fit=crop&q=80&w=1200';
-    if (screenshotMode === 'efootball') return 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?auto=format&fit=crop&q=80&w=1200'; 
-    return 'https://images.unsplash.com/photo-1511512578047-dfb367046420?auto=format&fit=crop&q=80&w=1200';
+    // Use CSS gradient as placeholder — no external network needed (Capacitor WebView CSP safe)
+    if (screenshotMode === 'genshin') return 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)';
+    if (screenshotMode === 'pubg') return 'linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 50%, #1a1a1a 100%)';
+    if (screenshotMode === 'codm') return 'linear-gradient(135deg, #0d1b2a 0%, #1b263b 50%, #0d1b2a 100%)';
+    if (screenshotMode === 'efootball') return 'linear-gradient(135deg, #144552 0%, #0d2d3a 50%, #144552 100%)'; 
+    return 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)';
   };
 
   React.useEffect(() => {

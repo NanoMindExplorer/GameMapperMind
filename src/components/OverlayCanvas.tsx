@@ -3,6 +3,9 @@ import { OverlayWysiwygHook } from './OverlayTypes';
 
 export default function OverlayCanvas({ h }: { h: OverlayWysiwygHook }) {
   const isSelected = (id: string) => h.selectedButtonId === id;
+  const bgUrl = h.getBackgroundUrl();
+  const isDataUrl = bgUrl && (bgUrl.startsWith('data:') || bgUrl.startsWith('blob:'));
+  const isGradient = bgUrl && bgUrl.startsWith('linear-gradient');
 
   return (
     <div className={`${h.isNativeOverlay ? "w-screen h-screen" : "flex-1 min-h-[400px]"} relative overflow-hidden bg-slate-950 flex flex-col group select-none`}>
@@ -16,14 +19,24 @@ export default function OverlayCanvas({ h }: { h: OverlayWysiwygHook }) {
         onMouseLeave={h.handleDragEnd}
         onTouchMove={h.handleDragMove}
         onTouchEnd={h.handleDragEnd}
-        style={{
-          backgroundImage: h.getBackgroundUrl(),
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
+        style={isGradient ? {
+          backgroundImage: bgUrl,
+          backgroundColor: '#0f172a'
+        } : {
           backgroundColor: '#0f172a'
         }}
         id="canvas-container"
       >
+        {/* Render screenshot as <img> tag — more reliable than CSS backgroundImage in Capacitor WebView */}
+        {isDataUrl && (
+          <img 
+            src={bgUrl} 
+            alt="Screenshot background" 
+            className="absolute inset-0 w-full h-full object-cover"
+            style={{ pointerEvents: 'none' }}
+            onError={(e) => console.error('Screenshot image failed to load', e)}
+          />
+        )}
         <div className="absolute inset-0 bg-black pointer-events-none transition-opacity" style={{ opacity: h.bgDimLevel / 100 }}></div>
         
         {!h.hideGrid && (

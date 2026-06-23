@@ -118,7 +118,10 @@ class TouchDaemonService : ITouchService.Stub {
 
     override fun destroy() {
         releaseAllPointers()
-        System.exit(0)
+        stopStreamCommand()
+        // DO NOT call System.exit(0) — it kills the entire Shizuku user service process,
+        // causing the app to disappear from Shizuku management and gamepad detection to fail.
+        // The service will be cleaned up properly by Shizuku when unbound.
     }
 
     private val inputManager: InputManager? by lazy {

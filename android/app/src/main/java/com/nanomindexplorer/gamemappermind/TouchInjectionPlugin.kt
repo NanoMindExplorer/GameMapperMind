@@ -84,16 +84,15 @@ class TouchInjectionPlugin : Plugin() {
 
     override fun handleOnDestroy() {
         Shizuku.removeRequestPermissionResultListener(permissionListener)
-        if (isBound) {
-            try {
-                touchService?.destroy()
-            } catch (e: Exception) {
-                // ignore
-            }
-            Shizuku.unbindUserService(USER_SERVICE_ARGS, serviceConnection, true)
-            touchService = null
-            isBound = false
-        }
+        // Do NOT destroy or unbind service on handleOnDestroy.
+        // handleOnDestroy is called when the Activity is destroyed (e.g., app backgrounded,
+        // orientation change, or swipe-away). If we destroy/unbind here, the Shizuku
+        // user service process dies and the app disappears from Shizuku management.
+        // The service should persist across Activity lifecycle changes.
+        // Service will be properly cleaned up when:
+        // 1. User explicitly clicks "Stop Daemon" (calls unbindService)
+        // 2. App is fully terminated (process death)
+        // 3. Shizuku itself is stopped
         super.handleOnDestroy()
     }
 

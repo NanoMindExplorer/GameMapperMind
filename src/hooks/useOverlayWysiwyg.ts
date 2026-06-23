@@ -33,6 +33,10 @@ export function useOverlayWysiwyg({
   const [globalNodeOpacity, setGlobalNodeOpacity] = React.useState(80);
 
   const selectedButton = activeProfile.buttons.find(b => b.id === selectedButtonId);
+  
+  // BUG FIX: Keep a ref to latest profile to avoid stale state in callbacks
+  const profileRef = React.useRef(activeProfile);
+  React.useEffect(() => { profileRef.current = activeProfile; }, [activeProfile]);
 
   const handleContainerClick = (e: React.MouseEvent) => {
     if (isDragging) return;
@@ -81,17 +85,16 @@ export function useOverlayWysiwyg({
     x = Math.max(0, Math.min(100, x));
     y = Math.max(0, Math.min(100, y));
 
-    // BUG FIX: Use functional update to avoid stale state + reduce re-renders
-    onUpdateProfile(prev => {
-      if (!prev) return prev;
-      const updatedButtons = prev.buttons.map(b => {
-        if (b.id === selectedButtonId) {
-          return { ...b, x, y };
-        }
-        return b;
-      });
-      return { ...prev, buttons: updatedButtons };
+    // BUG FIX: Use ref to avoid stale state, pass GamepadProfile (not function)
+    const current = profileRef.current;
+    if (!current) return;
+    const updatedButtons = current.buttons.map(b => {
+      if (b.id === selectedButtonId) {
+        return { ...b, x, y };
+      }
+      return b;
     });
+    onUpdateProfile({ ...current, buttons: updatedButtons });
   };
 
   const handleDragEnd = () => {
@@ -101,35 +104,29 @@ export function useOverlayWysiwyg({
 
   const handleUpdateBtnProperty = (key: keyof VirtualButton, value: any) => {
     if (!selectedButtonId) return;
-    // BUG FIX: Use functional update to avoid stale state
-    onUpdateProfile(prev => {
-      if (!prev) return prev;
-      const updatedButtons = prev.buttons.map(b => {
-        if (b.id === selectedButtonId) {
-          return { ...b, [key]: value };
-        }
-        return b;
-      });
-      return { ...prev, buttons: updatedButtons };
+    const current = profileRef.current;
+    const updatedButtons = current.buttons.map(b => {
+      if (b.id === selectedButtonId) {
+        return { ...b, [key]: value };
+      }
+      return b;
     });
+    onUpdateProfile({ ...current, buttons: updatedButtons });
   };
 
   const relocateButtonOffset = (id: string, dx: number, dy: number) => {
-    // BUG FIX: Use functional update to avoid stale state
-    onUpdateProfile(prev => {
-      if (!prev) return prev;
-      const updatedButtons = prev.buttons.map(b => {
-        if (b.id === id) {
-          return { 
-            ...b, 
-            x: Math.max(0, Math.min(100, b.x + dx)), 
-            y: Math.max(0, Math.min(100, b.y + dy)) 
-          };
-        }
-        return b;
-      });
-      return { ...prev, buttons: updatedButtons };
+    const current = profileRef.current;
+    const updatedButtons = current.buttons.map(b => {
+      if (b.id === id) {
+        return { 
+          ...b, 
+          x: Math.max(0, Math.min(100, b.x + dx)), 
+          y: Math.max(0, Math.min(100, b.y + dy)) 
+        };
+      }
+      return b;
     });
+    onUpdateProfile({ ...current, buttons: updatedButtons });
   };
 
   const handleAddSpecificButton = (label: string, mappedKey: string, androidEventCode: number, defaultSize: number = 56, type: VirtualButton['type'] = 'button') => {
@@ -151,26 +148,19 @@ export function useOverlayWysiwyg({
       sensitivity: type === 'analog_stick' ? 1.0 : undefined,
       tapDuration: type === 'swipe' ? 30 : undefined
     };
-    // BUG FIX: Use functional update
-    onUpdateProfile(prev => {
-      if (!prev) return prev;
-      return { ...prev, buttons: [...prev.buttons, newBtn] };
-    });
+    const current = profileRef.current;
+    onUpdateProfile({ ...current, buttons: [...current.buttons, newBtn] });
     setSelectedButtonId(freshId);
     setShowPalette(false);
   };
 
   const handleAddNewButton = (type: VirtualButton['type'] = 'button', defaultLabel: string = 'New', eventCode: number = 0) => {
-    // BUG FIX: Use 'A' instead of 'BUTTON_A'
     handleAddSpecificButton(defaultLabel, 'A', eventCode, type === 'swipe' ? 80 : 56, type);
   };
 
   const handleRemoveButton = (id: string) => {
-    // BUG FIX: Use functional update
-    onUpdateProfile(prev => {
-      if (!prev) return prev;
-      return { ...prev, buttons: prev.buttons.filter(b => b.id !== id) };
-    });
+    const current = profileRef.current;
+    onUpdateProfile({ ...current, buttons: current.buttons.filter(b => b.id !== id) });
     setSelectedButtonId(null);
   };
 

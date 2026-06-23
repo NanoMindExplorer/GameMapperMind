@@ -1,0 +1,22 @@
+# Auto-detect text files
+* text=auto
+
+# Binary files - never normalize line endings
+*.jar binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.eot binary
+*.so binary
+*.dex binary
+*.apk binary
+*.aab binary
+*.keystore binary
+*.jks binary

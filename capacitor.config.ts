@@ -5,12 +5,13 @@ const config: CapacitorConfig = {
   appName: 'GameMapperMind',
   webDir: 'dist/client',
   server: {
-    androidScheme: 'https',
-    url: process.env.NODE_ENV === "development" ? "http://10.0.2.2:3000" : undefined,
-    cleartext: true
-  },
-  android: {
-    webContentsDebuggingEnabled: false
+    androidScheme: 'capacitor',
+    cleartext: true,
+    allowNavigation: [
+      "localhost",
+      "127.0.0.1",
+      "appassets.androidplatform.net"
+    ]
   }
 };
 

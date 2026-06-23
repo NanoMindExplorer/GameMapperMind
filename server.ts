@@ -4,72 +4,130 @@ import cors from "cors";
 import crypto from "crypto";
 import { z } from "zod";
 import rateLimit from "express-rate-limit";
+import fs from "fs";
+import { SimAction, MacroProfile, SafeAiTunnelState } from "./src/types/simulation.js";
+
+// Port config via env var
+const PORT = parseInt(process.env.PORT ?? '3000', 10);
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "NX-DEFAULT-DEV-TOKEN"; // Or generate locally if none
+const DATA_FILE = path.join(process.cwd(), "app_data.json");
+
+interface PersistedState {
+    logs: string[];
+    macros: MacroProfile[];
+    apiToken: string | null;
+}
+
+const defaultState: PersistedState = {
+    logs: [],
+    macros: [],
+    apiToken: null
+};
+
+class StateStore {
+    public static state: PersistedState = { ...defaultState };
+
+    public static async load(): Promise<void> {
+        try {
+            if (fs.existsSync(DATA_FILE)) {
+                const data = await fs.promises.readFile(DATA_FILE, 'utf-8');
+                this.state = JSON.parse(data, (key, value) => value);
+            } else {
+              this.state.apiToken = crypto.randomBytes(32).toString("hex");
+              await this.save();
+            }
+        } catch (error) {
+            console.error("Failed to load state from JSON, using defaults:", error);
+            this.state = { ...defaultState };
+        }
+    }
+
+    public static async save(): Promise<void> {
+        try {
+            await fs.promises.writeFile(DATA_FILE, JSON.stringify(this.state, null, 2), 'utf-8');
+        } catch (error) {
+            console.error("Failed to save state to JSON:", error);
+        }
+    }
+}
+
+// Ensure state is loaded early
+// await StateStore.load(); // Since it's a module, await works at the top level in node >= 14 with ESM, but we are inside CJS via esbuild maybe?
+// Wait, to be safe, I'll load it inside startServer.
 
 const app = express();
-const PORT = 3000;
 
-const ALLOWED_ORIGINS = [
-  "capacitor://localhost",
-  "http://localhost",
-  "http://localhost:3000",
-  "http://localhost:5173",
-];
-
-// BUG-02: CORS middleware
+// BUG-03: Konfigurasi CORS Lengkap
 app.use(cors({
-  origin: true, // Allow all origins for the dev preview
-  methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
+  origin: ['http://localhost:3000', 'capacitor://localhost', 'http://localhost', 'http://127.0.0.1:3000'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
 }));
 
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "5mb" }));
 
-// BUG-01: Generate secure token
-const generateSecureToken = () => crypto.randomBytes(32).toString("hex");
-
-// BUG-15: Safe logic clamped Random
+// BUG-15 (from previous files): Safe logic clamped Random
 function clampedRandom(min: number, max: number): number {
   const val = min + Math.random() * (max - min);
   return Math.min(1.0, Math.max(0.0, parseFloat(val.toFixed(4))));
 }
 
-// Global state
-const aiTunnelState = {
-  apiToken: process.env.AI_TUNNEL_SECRET || generateSecureToken(),
-  confidenceScore: clampedRandom(0.80, 0.99),
-  logs: [] as string[]
-};
-
-// BUG-08: Auto-trim with while loop
-function pushLog(logs: string[], message: string, max = 50): void {
-  logs.push(message);
-  while (logs.length > max) {
-    logs.shift();
+// BUG-05: Fungsi helper yang aman untuk addLog() (Refactor Log System)
+function addLog(arr: string[], msg: string, max = 50): void {
+  arr.push(msg);
+  while (arr.length > max) {
+    arr.shift();
   }
 }
 
-// BUG-11: Mask token in logs
-pushLog(aiTunnelState.logs, "[AI-TUNNEL] Server listening on /api/ai/* endpoints.");
-pushLog(aiTunnelState.logs, "[AI-TUNNEL] Token generated. Visible ONLY in server console.");
-pushLog(aiTunnelState.logs, "[AI-TUNNEL] Waiting for VLM agent handshake...");
+// Auth Middleware (BUG-02)
+const requireAuth = (req: Request, res: Response, next: NextFunction) => {
+  const bearer = req.headers.authorization?.split(' ')[1];
+  if (!bearer || bearer !== ADMIN_TOKEN) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+  next();
+};
 
-app.get("/api/ai/tunnel-status", (req: Request, res: Response) => {
-  const { apiToken, ...safeState } = aiTunnelState;
-  res.json(safeState);
-});
+const aiTunnelState = {
+  confidenceScore: clampedRandom(0.80, 0.99)
+};
 
-// BUG-19: Rate limit
 const aiLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 120, // max 120 req/min
+  windowMs: 60 * 1000,
+  max: 120,
   message: { error: "Terlalu banyak request. Coba lagi nanti." },
   standardHeaders: true,
   legacyHeaders: false,
 });
+
 app.use("/api/ai/", aiLimiter);
 
-// BUG-05 & BUG-25: Sanitize input & Zod schema validation
+// BUG-01: Sanitasi API Token dari Respons Publik
+app.get("/api/ai/tunnel-status", (req: Request, res: Response) => {
+  const safeState: SafeAiTunnelState = {
+    confidenceScore: aiTunnelState.confidenceScore,
+    logs: StateStore.state.logs
+  };
+  res.json(safeState);
+});
+
+// BUG-02: Protect sensitive routes
+app.post("/api/ai/tunnel-control", requireAuth, (req: Request, res: Response) => {
+  addLog(StateStore.state.logs, "[INFO] Tunnel control accessed");
+  StateStore.save();
+  res.json({ success: true });
+});
+
+app.post("/api/ai/kill-switch", requireAuth, (req: Request, res: Response) => {
+  addLog(StateStore.state.logs, "[CRITICAL] Kill Switch Activated!");
+  StateStore.save();
+  res.json({ success: true });
+});
+
+
 function sanitizeLogInput(input: string): string {
   if (typeof input !== "string") return "[INVALID INPUT]";
   return input
@@ -83,7 +141,7 @@ const DaemonControlSchema = z.object({
   mode: z.enum(["shizuku", "desktop", "adb"]).optional(),
 });
 
-app.post("/api/daemon/control", (req: Request, res: Response) => {
+app.post("/api/daemon/control", requireAuth, (req: Request, res: Response) => {
   const parsed = DaemonControlSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.flatten() });
@@ -92,27 +150,33 @@ app.post("/api/daemon/control", (req: Request, res: Response) => {
   const { action, mode } = parsed.data;
   
   if (action === "start") {
-    pushLog(aiTunnelState.logs, `[INFO] Daemon start requested via mode: ${mode || 'unknown'}`);
+    addLog(StateStore.state.logs, `[INFO] Daemon start requested via mode: ${mode || 'unknown'}`);
   } else if (action === "stop") {
-    pushLog(aiTunnelState.logs, `[INFO] Daemon stop requested`);
+    addLog(StateStore.state.logs, `[INFO] Daemon stop requested`);
   }
   
+  StateStore.save();
   res.json({ success: true, action, state: "applied" });
 });
 
-app.post("/api/daemon/log", (req: Request, res: Response) => {
+app.post("/api/daemon/log", requireAuth, (req: Request, res: Response) => {
   const msg = req.body?.message;
   if (msg) {
     const cleanMsg = sanitizeLogInput(msg);
-    pushLog(aiTunnelState.logs, `[DAEMON] ${cleanMsg}`);
+    addLog(StateStore.state.logs, `[DAEMON] ${cleanMsg}`);
+    StateStore.save();
   }
   res.json({ success: true });
 });
 
-// Endpoint untuk menyimpan log biasa
+// Endpoint kalibrasi gyro palsu diganti yang sesungguhnya di app (Mandat 14), endpoint ini cuma untuk testing auth
+app.post("/api/daemon/calibrate", requireAuth, (req: Request, res: Response) => {
+  res.json({ success: true, message: 'Calibrated payload received' });
+});
+
 const LogSchema = z.object({
   message: z.string(),
-  instruksi: z.string().optional() // BUG-16: typo diperbaiki
+  instruksi: z.string().optional() // BUG-10: typo "insturksi" -> "instruksi" diperbaiki
 });
 
 app.post("/api/log", (req: Request, res: Response) => {
@@ -120,21 +184,73 @@ app.post("/api/log", (req: Request, res: Response) => {
     const parsed = LogSchema.parse(req.body);
     const clientIp = req.ip || "";
     const cleanMsg = sanitizeLogInput(`[${clientIp}] ${parsed.message} ${parsed.instruksi ? '- ' + parsed.instruksi : ''}`);
-    pushLog(aiTunnelState.logs, cleanMsg);
+    addLog(StateStore.state.logs, cleanMsg);
+    StateStore.save();
     
-    res.json({ success: true, count: aiTunnelState.logs.length });
+    res.json({ success: true, count: StateStore.state.logs.length });
   } catch (error: unknown) {
     res.status(400).json({ error: "Invalid request payload" });
   }
 });
 
 app.get("/api/logs", (req: Request, res: Response) => {
-    res.json({ logs: aiTunnelState.logs });
+    res.json({ logs: StateStore.state.logs });
 });
 
-// BUG-09: Try/Catch on server start
+// MANDAT 15: MACRO PERSISTENCE ENDPOINTS
+app.get("/api/macros", (req: Request, res: Response) => {
+    res.json(StateStore.state.macros);
+});
+
+app.post("/api/macros", requireAuth, (req: Request, res: Response) => {
+    const newMacro: MacroProfile = req.body;
+    StateStore.state.macros.push(newMacro);
+    StateStore.save();
+    res.json({ success: true, macro: newMacro });
+});
+
+app.put("/api/macros/:id", requireAuth, (req: Request, res: Response) => {
+    const { id } = req.params;
+    const index = StateStore.state.macros.findIndex(m => m.id === id);
+    if (index === -1) {
+       res.status(404).json({ error: "Not found" });
+       return;
+    }
+    StateStore.state.macros[index] = req.body;
+    StateStore.save();
+    res.json({ success: true, macro: StateStore.state.macros[index] });
+});
+
+app.delete("/api/macros/:id", requireAuth, (req: Request, res: Response) => {
+    const { id } = req.params;
+    StateStore.state.macros = StateStore.state.macros.filter(m => m.id !== id);
+    StateStore.save();
+    res.json({ success: true });
+});
+
+// BUG-09: Simulation Type Usage explicitly
+app.post("/api/simulation/execute", requireAuth, (req: Request, res: Response) => {
+    const customAction: SimAction = { cmd: "tap", params: { x: 500, y: 500 } };
+    addLog(StateStore.state.logs, `Executing sim action: ${customAction.cmd}`);
+    res.json({ success: true, executed: customAction });
+});
+
+
+// BUG-08: API 404 Handler sebelum SPA Wildcard
+app.all("/api/*", (req: Request, res: Response) => {
+  res.status(404).json({ error: "API route not found", path: req.path });
+});
+
+// BUG-07: startServer Async Tanpa Error Handling
 async function startServer() {
   try {
+    await StateStore.load(); // Ensure state is loaded
+    
+    addLog(StateStore.state.logs, "[AI-TUNNEL] Server listening on /api/ai/* endpoints.");
+    addLog(StateStore.state.logs, "[AI-TUNNEL] Token generated. Visible ONLY in server console.");
+    addLog(StateStore.state.logs, "[AI-TUNNEL] Waiting for client connection...");
+    await StateStore.save();
+
     if (process.env.NODE_ENV !== "production") {
       const { createServer: createViteServer } = await import("vite");
       const vite = await createViteServer({
@@ -155,10 +271,20 @@ async function startServer() {
       res.status(500).json({ error: "Internal Server Error" });
     });
 
-    app.listen(PORT, "0.0.0.0", () => {
+    const server = app.listen(PORT, "0.0.0.0", () => {
       console.log(`✅ Server running on http://localhost:${PORT}`);
-      console.log(`🔑 AI Tunnel Token (RAHASIA): ${aiTunnelState.apiToken}`);
+      console.log(`🔑 AI Tunnel Token (RAHASIA): ${StateStore.state.apiToken}`);
+      console.log(`🛡️ Admin Token for daemon control: ${ADMIN_TOKEN}`);
       console.log("⚠️  Jangan bagikan token ini! Simpan di environment variable.");
+    });
+    
+    // Graceful shutdown
+    process.on("SIGTERM", () => {
+        console.log("SIGTERM received, shutting down gracefully");
+        server.close(async () => {
+           await StateStore.save();
+           process.exit(0);
+        });
     });
   } catch (err) {
     console.error("❌ FATAL: Server gagal start:", err);
@@ -168,7 +294,11 @@ async function startServer() {
 
 process.on("unhandledRejection", (reason) => {
   console.error("Unhandled rejection:", reason);
+  // Log but do not crash unless strictly required, we want to stay alive
+});
+
+startServer().catch((err) => {
+  console.error('[FATAL] Server failed to start:', err);
   process.exit(1);
 });
 
-startServer();

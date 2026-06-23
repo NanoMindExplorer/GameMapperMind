@@ -33,8 +33,8 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, connected: boo
 
     return () => {
       isCleanedUp = true;
-      btnListener.then(l => l.remove());
-      axisListener.then(l => l.remove());
+      Promise.resolve(btnListener).then(l => l && l.remove && l.remove());
+      Promise.resolve(axisListener).then(l => l && l.remove && l.remove());
       TouchInjection.updateActiveProfile({ profileJson: "{}" }).catch(() => {});
     };
   }, [mapProfile, connected, injectActive]);

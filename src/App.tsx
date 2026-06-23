@@ -272,12 +272,16 @@ export default function App() {
            });
         }
       });
-    });
+    }).catch(console.warn);
 
     return () => {
       clearInterval(interval);
       if (appListener) {
-         appListener.then((l: any) => l.remove());
+         if (typeof appListener.then === 'function') {
+             appListener.then((l: any) => l && l.remove && l.remove());
+         } else if (appListener.remove) {
+             appListener.remove();
+         }
       }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps

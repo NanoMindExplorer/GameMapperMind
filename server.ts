@@ -4,7 +4,6 @@ import cors from "cors";
 import crypto from "crypto";
 import { z } from "zod";
 import rateLimit from "express-rate-limit";
-import db, { saveProfileDB, loadAllProfilesDB } from "./data/db";
 
 const app = express();
 const PORT = 3000;
@@ -122,10 +121,6 @@ app.post("/api/log", (req: Request, res: Response) => {
     const clientIp = req.ip || "";
     const cleanMsg = sanitizeLogInput(`[${clientIp}] ${parsed.message} ${parsed.instruksi ? '- ' + parsed.instruksi : ''}`);
     pushLog(aiTunnelState.logs, cleanMsg);
-    
-    // SQLite persist settings as example (BUG-06)
-    const storeLog = db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
-    storeLog.run("last_log", cleanMsg);
     
     res.json({ success: true, count: aiTunnelState.logs.length });
   } catch (error: unknown) {

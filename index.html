@@ -9,6 +9,53 @@
     <meta name="theme-color" content="#0f172a" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
+    <style>
+      #nexion-error-container {
+        display: none;
+        position: fixed;
+        top: 0; left: 0; width: 100vw; height: 100vh;
+        background: #900; color: #fff; z-index: 99999;
+        font-family: monospace; padding: 20px; box-sizing: border-box;
+      }
+    </style>
+    <script>
+      window.onerror = function(msg, src, lineno, colno, error) {
+        var el = document.getElementById('nexion-error-container');
+        if (!el) {
+           el = document.createElement('div');
+           el.id = 'nexion-error-container';
+           document.body.appendChild(el);
+        }
+        el.style.display = 'block';
+        var errorStack = (error && error.stack ? error.stack : (src + ':' + lineno + ':' + colno));
+        el.innerHTML += '<p><strong>Global Error:</strong><br/>' + msg + '<br/>' + errorStack + '</p>';
+        try {
+          fetch('/api/log', {
+             method: 'POST',
+             headers: {'Content-Type': 'application/json'},
+             body: JSON.stringify({message: "CLIENT_ERROR: " + msg + " \n" + errorStack})
+          });
+        } catch(e) {}
+      };
+      window.addEventListener('unhandledrejection', function(e) {
+        var el = document.getElementById('nexion-error-container');
+        if (!el) {
+           el = document.createElement('div');
+           el.id = 'nexion-error-container';
+           document.body.appendChild(el);
+        }
+        el.style.display = 'block';
+        var reason = (e.reason && e.reason.stack ? e.reason.stack : String(e.reason));
+        el.innerHTML += '<p><strong>Unhandled Rejection:</strong><br/>' + reason + '</p>';
+        try {
+          fetch('/api/log', {
+             method: 'POST',
+             headers: {'Content-Type': 'application/json'},
+             body: JSON.stringify({message: "CLIENT_REJECTION: " + reason})
+          });
+        } catch(err) {}
+      });
+    </script>
   </head>
   <body>
     <div id="root"></div>

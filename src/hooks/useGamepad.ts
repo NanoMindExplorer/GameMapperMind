@@ -26,52 +26,56 @@ export function useGamepad() {
   const onButtonPressRef = useRef<(index: number) => void>(() => {});
 
   const poll = useCallback(() => {
-    if (!navigator.getGamepads) return;
-    let gamepads: (Gamepad | null)[] = [];
     try {
-      gamepads = navigator.getGamepads();
-    } catch (e) {
-      console.warn("Gamepad access disabled or not supported", e);
-      return;
-    }
-    let gp: Gamepad | null = null;
-    for (let i = 0; i < gamepads.length; i++) {
-        if (gamepads[i]) {
-            gp = gamepads[i];
-            break;
+        if (!navigator.getGamepads) return;
+        let gamepads: (Gamepad | null)[] = [];
+        try {
+          gamepads = navigator.getGamepads();
+        } catch (e) {
+          console.warn("Gamepad access disabled or not supported", e);
+          return;
         }
-    }
-
-    if (gp) {
-      const axesArray = gp.axes || [];
-      const getAxis = (idx: number) => axesArray.length > idx ? axesArray[idx] : 0;
-      
-      const buttonsList = Array.from(gp.buttons || []);
-      buttonsList.forEach((btn, i) => {
-        const wasPressed = prevButtonsRef.current[i] || false;
-        const isPressed = (typeof btn === "object" && btn !== null) ? btn.pressed : btn === 1.0;
-        if (isPressed && !wasPressed) {
-            onButtonPressRef.current(i);
+        let gp: Gamepad | null = null;
+        for (let i = 0; i < gamepads.length; i++) {
+            if (gamepads[i]) {
+                gp = gamepads[i];
+                break;
+            }
         }
-      });
-      prevButtonsRef.current = buttonsList.map(b => (typeof b === "object" && b !== null) ? b.pressed : b === 1.0);
 
-      const buttons = buttonsList.map(b => (typeof b === "object" && b !== null) ? b.pressed : b === 1.0);
-      
-      const leftStick = radialDeadzone(getAxis(0), getAxis(1), 0.12);
-      const rightStick = radialDeadzone(getAxis(2), getAxis(3), 0.12);
-      
-      const axes = [leftStick.x, leftStick.y, rightStick.x, rightStick.y];
-      
-      setState({
-        connected: true,
-        id: gp.id,
-        buttons,
-        axes,
-        timestamp: gp.timestamp,
-      });
+        if (gp) {
+          const axesArray = gp.axes || [];
+          const getAxis = (idx: number) => axesArray.length > idx ? axesArray[idx] : 0;
+          
+          const buttonsList = Array.from(gp.buttons || []);
+          buttonsList.forEach((btn, i) => {
+            const wasPressed = prevButtonsRef.current[i] || false;
+            const isPressed = (typeof btn === "object" && btn !== null) ? btn.pressed : (btn as any) === 1.0;
+            if (isPressed && !wasPressed) {
+                onButtonPressRef.current(i);
+            }
+          });
+          prevButtonsRef.current = buttonsList.map((b: any) => (typeof b === "object" && b !== null) ? b.pressed : b === 1.0);
+
+          const buttons = buttonsList.map((b: any) => (typeof b === "object" && b !== null) ? b.pressed : b === 1.0);
+          
+          const leftStick = radialDeadzone(getAxis(0), getAxis(1), 0.12);
+          const rightStick = radialDeadzone(getAxis(2), getAxis(3), 0.12);
+          
+          const axes = [leftStick.x, leftStick.y, rightStick.x, rightStick.y];
+          
+          setState({
+            connected: true,
+            id: gp.id,
+            buttons,
+            axes,
+            timestamp: gp.timestamp,
+          });
+        }
+        rafRef.current = requestAnimationFrame(poll);
+    } catch(err) {
+        console.error("Gamepad poll error", err);
     }
-    rafRef.current = requestAnimationFrame(poll);
   }, []);
 
   useEffect(() => {

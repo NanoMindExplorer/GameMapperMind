@@ -9,6 +9,22 @@
     <meta name="theme-color" content="#0f172a" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
+    <script>
+      window.onerror = function(message, source, lineno, colno, error) {
+        console.error("Global Error Detected:", message, source, lineno, colno, error);
+        const errDiv = document.createElement('div');
+        errDiv.style = "position:fixed;top:0;left:0;z-index:9999;background:red;color:white;padding:10px;font-size:12px;width:100%;";
+        errDiv.innerHTML = "Error: " + message + "<br>" + source + ":" + lineno;
+        document.body.appendChild(errDiv);
+      };
+      window.addEventListener('unhandledrejection', function(event) {
+        console.error("Unhandled Promise Rejection:", event.reason);
+        const errDiv = document.createElement('div');
+        errDiv.style = "position:fixed;bottom:0;left:0;z-index:9999;background:orange;color:black;padding:10px;font-size:12px;width:100%;";
+        errDiv.innerHTML = "Unhandled Rejection: " + (event.reason && event.reason.stack || event.reason);
+        document.body.appendChild(errDiv);
+      });
+    </script>
   </head>
   <body>
     <div id="root"></div>

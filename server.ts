@@ -18,13 +18,7 @@ const ALLOWED_ORIGINS = [
 
 // BUG-02: CORS middleware
 app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin || ALLOWED_ORIGINS.includes(origin) || origin.endsWith('.run.app')) {
-      callback(null, true);
-    } else {
-      callback(new Error("CORS: Origin tidak diizinkan"));
-    }
-  },
+  origin: true, // Allow all origins for the dev preview
   methods: ["GET", "POST", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
   credentials: true,

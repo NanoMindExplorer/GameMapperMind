@@ -72,6 +72,30 @@ class MainActivity : BridgeActivity() {
         return super.dispatchKeyEvent(event)
     }
 
+    // BUG FIX: Also override onKeyDown/onKeyUp as fallback
+    // Capacitor WebView may intercept key events before dispatchKeyEvent.
+    // onKeyDown/onKeyUp are called by the system if dispatchKeyEvent returns false
+    // or if the WebView doesn't consume the event.
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (KeyEvent.isGamepadButton(keyCode) || keyCode == KeyEvent.KEYCODE_DPAD_UP ||
+            keyCode == KeyEvent.KEYCODE_DPAD_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_LEFT ||
+            keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+            GamepadPlugin.instance?.handleKeyDown(keyCode, event)
+            return true
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent?): Boolean {
+        if (KeyEvent.isGamepadButton(keyCode) || keyCode == KeyEvent.KEYCODE_DPAD_UP ||
+            keyCode == KeyEvent.KEYCODE_DPAD_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_LEFT ||
+            keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+            GamepadPlugin.instance?.handleKeyUp(keyCode, event)
+            return true
+        }
+        return super.onKeyUp(keyCode, event)
+    }
+
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
         if ((event.source and InputDevice.SOURCE_GAMEPAD) != 0 ||
             (event.source and InputDevice.SOURCE_JOYSTICK) != 0 ||

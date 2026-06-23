@@ -44,8 +44,13 @@ export default function ScreenshotBackground({ h, children }: { h: OverlayWysiwy
                   onChange={(e) => {
                     const file = e.target.files?.[0];
                     if (file) {
-                      const url = URL.createObjectURL(file);
-                      h.setCustomScreenshotUrl(url);
+                      // BUG FIX: Convert to data: URL (base64) instead of blob: URL
+                      // blob: URLs don't work with CSS backgroundImage in Capacitor WebView
+                      const reader = new FileReader();
+                      reader.onload = () => {
+                        h.setCustomScreenshotUrl(reader.result as string);
+                      };
+                      reader.readAsDataURL(file);
                     }
                   }}
                 />

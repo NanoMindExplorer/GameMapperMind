@@ -53,11 +53,9 @@ class GamepadPlugin : Plugin() {
             val hatX = event.getAxisValue(MotionEvent.AXIS_HAT_X)
             val hatY = event.getAxisValue(MotionEvent.AXIS_HAT_Y)
             
-            // Also read trigger values (L2 = AXIS_BRAKE, R2 = AXIS_GAS)
             val l2Trigger = event.getAxisValue(MotionEvent.AXIS_BRAKE)
             val r2Trigger = event.getAxisValue(MotionEvent.AXIS_GAS)
 
-            // Emit legacy event
             val ret = JSObject()
             ret.put("type", "AXIS")
             ret.put("axisX", axisX)
@@ -69,24 +67,33 @@ class GamepadPlugin : Plugin() {
             ret.put("timestamp", event.eventTime)
             notifyListeners("gamepadEvent", ret)
 
-            // Emit on standard "onGamepadAxis" channel
-            // Array format: [lx, ly, rx, ry, l2, r2] — match what GamepadTester expects
-            // axisX/axisY = left stick, axisZ/axisRZ = right stick
-            // l2Trigger/r2Trigger = L2/R2 triggers (AXIS_BRAKE/GAS)
             val axes = floatArrayOf(axisX, axisY, axisZ, axisRZ, l2Trigger, r2Trigger)
             TouchInjectionPlugin.emitGamepadAxis(axes)
             
-            // Also emit D-pad as button events (HAT axis → button press)
-            // This fixes "D-pad detected as R2/L2" bug
+            // D-pad: emit press AND release
+            // HAT axis: -1.0 = up/left, 0 = centered, 1.0 = down/right
             if (hatY < -0.5f) {
                 TouchInjectionPlugin.emitGamepadButton("DPAD_UP", 1, 1.0f)
+                TouchInjectionPlugin.emitGamepadButton("DPAD_DOWN", 0, 0.0f)
             } else if (hatY > 0.5f) {
                 TouchInjectionPlugin.emitGamepadButton("DPAD_DOWN", 1, 1.0f)
+                TouchInjectionPlugin.emitGamepadButton("DPAD_UP", 0, 0.0f)
+            } else {
+                // HAT centered — release all D-pad buttons
+                TouchInjectionPlugin.emitGamepadButton("DPAD_UP", 0, 0.0f)
+                TouchInjectionPlugin.emitGamepadButton("DPAD_DOWN", 0, 0.0f)
             }
+            
             if (hatX < -0.5f) {
                 TouchInjectionPlugin.emitGamepadButton("DPAD_LEFT", 1, 1.0f)
+                TouchInjectionPlugin.emitGamepadButton("DPAD_RIGHT", 0, 0.0f)
             } else if (hatX > 0.5f) {
                 TouchInjectionPlugin.emitGamepadButton("DPAD_RIGHT", 1, 1.0f)
+                TouchInjectionPlugin.emitGamepadButton("DPAD_LEFT", 0, 0.0f)
+            } else {
+                // HAT centered — release all D-pad buttons
+                TouchInjectionPlugin.emitGamepadButton("DPAD_LEFT", 0, 0.0f)
+                TouchInjectionPlugin.emitGamepadButton("DPAD_RIGHT", 0, 0.0f)
             }
             return true
         }

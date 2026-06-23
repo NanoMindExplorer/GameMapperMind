@@ -21,8 +21,7 @@ export default defineConfig(() => {
             'vendor-react': ['react', 'react-dom'],
             'vendor-recharts': ['recharts'],
             'vendor-icons': ['lucide-react'],
-            'vendor-capacitor': ['@capacitor/core'],
-            'vendor-motion': ['motion']
+            'vendor-capacitor': ['@capacitor/core']
           }
         }
       }

@@ -19,7 +19,7 @@ export interface TouchInjectionPluginType {
   touchDown(options: { pointerId: number; x: number; y: number }): Promise<void>;
   touchMove(options: { pointerId: number; x: number; y: number }): Promise<void>;
   touchUp(options: { pointerId: number }): Promise<void>;
-  injectTap(options: { x: number; y: number }): Promise<void>;
+  injectTap(options: { x: number; y: number; duration?: number }): Promise<void>;
 
   addListener(
     eventName: 'onGamepadButton', 
@@ -33,7 +33,7 @@ export interface TouchInjectionPluginType {
 
   addListener(
     eventName: 'onGamepadFeedback', 
-    listenerFunc: (data: { type: string }) => void
+    listenerFunc: (data: { type: string, intensity: number, duration: number }) => void
   ): Promise<PluginListenerHandle>;
 }
 

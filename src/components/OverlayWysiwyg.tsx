@@ -31,6 +31,7 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
   const [isDraggingNexion, setIsDraggingNexion] = React.useState(false);
   const nexionDragHasMoved = React.useRef(false);
   const [showPalette, setShowPalette] = React.useState(false);
+  const [activePlayer, setActivePlayer] = React.useState<1|2|3|4>(1);
 
     // Sync opacity local state with profile if provided on load
     React.useEffect(() => {
@@ -118,6 +119,7 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
   const handleAddSpecificButton = (label: string, mappedKey: string, androidEventCode: number, defaultSize: number = 56, type: VirtualButton['type'] = 'button') => {
     const freshId = `btn_${Date.now().toString().slice(-4)}`;
     let newBtn: VirtualButton = {
+      player: activePlayer,
       id: freshId,
       label,
       type,
@@ -176,6 +178,7 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
     }
 
     let newBtn: VirtualButton = {
+      player: activePlayer,
       id: freshId,
       label,
       type,
@@ -379,9 +382,26 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
         </div>
 
         {/* Dynamic Display Optimizer / Graphics Preservation Ribbon */}
-        <div className="bg-slate-900/95 border border-slate-800 rounded-lg p-3.5 mb-4 flex justify-between items-center">
-          <div className="text-[10px] uppercase font-bold text-slate-500">
-            Tampilan Layar
+        <div className="bg-slate-900/95 border border-slate-800 rounded-lg p-3.5 mb-4 flex justify-between items-center flex-wrap gap-2">
+          <div className="text-[10px] uppercase font-bold text-slate-500 flex items-center gap-4">
+            <span>Tampilan Layar</span>
+            <label className="flex items-center gap-2">
+              Smoothing (EMA): 
+              <input type="range" min="0" max="0.95" step="0.05" value={activeProfile.smoothing || 0} onChange={(e) => onUpdateProfile({...activeProfile, smoothing: parseFloat(e.target.value)})} className="w-20" />
+            </label>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] uppercase font-bold text-slate-500 mr-2">Player:</span>
+            {[1, 2, 3, 4].map(p => (
+              <button 
+                key={p} 
+                onClick={() => setActivePlayer(p as any)}
+                className={`w-6 h-6 rounded text-xs font-bold ${p === activePlayer ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-500'}`}
+              >
+                {p}
+              </button>
+            ))}
           </div>
 
           {/* Right Block: Screen obstruction / Visibility Toggles */}
@@ -705,13 +725,36 @@ export default function OverlayWysiwyg({ activeProfile, onUpdateProfile, onLogMe
                       </select>
                     </div>
                   </div>
+
+                  {selectedButton.type === 'button' && (
+                    <div className="mt-3">
+                      <label className="flex justify-between text-[10px] uppercase font-bold text-slate-400 mb-1 font-sans">
+                        <span>Tap Duration</span>
+                        <span className="text-indigo-400 font-mono">{selectedButton.tapDuration || 60}ms</span>
+                      </label>
+                      <input
+                        type="range"
+                        min="20"
+                        max="500"
+                        step="10"
+                        className="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                        value={selectedButton.tapDuration || 60}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value);
+                          const updated = activeProfile.buttons.map(b => b.id === selectedButton.id ? { ...b, tapDuration: val } : b);
+                          onUpdateProfile({ ...activeProfile, buttons: updated });
+                        }}
+                      />
+                    </div>
+                  )}
+
                 </div>
               )}
             </div>
           )}
 
           {/* Real simulated active mapping nodes mapped across bounds */}
-          {activeProfile.buttons.map((btn) => {
+          {activeProfile.buttons.filter(b => (b.player || 1) === activePlayer).map((btn) => {
             const isSelected = btn.id === selectedButtonId;
             const isSwipe = btn.type === 'swipe' || (btn.androidEventCode >= 201 && btn.androidEventCode <= 204);
             const isButtonActive = btn.mappedKey ? activeKeys.includes(btn.mappedKey) : false;

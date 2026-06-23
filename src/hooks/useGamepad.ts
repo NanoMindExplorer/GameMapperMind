@@ -16,12 +16,12 @@ export interface GamepadState {
 // Radial deadzone moved to constants
 
 
-export function useGamepad(onButtonPress?: (index: number) => void) {
-  const [state, setState] = useState<GamepadState | null>(null);
+export function useGamepad(onButtonPress?: (gamepadIndex: number, buttonIndex: number) => void) {
+  const [states, setStates] = useState<GamepadState[]>([]);
   const rafRef = useRef<number>(0);
-  const prevButtonsRef = useRef<boolean[]>([]);
-  const buttonStatesRef = useRef<ButtonActionState[]>([]);
-  const onButtonPressRef = useRef<(index: number) => void>(onButtonPress || (() => {}));
+  const prevButtonsRef = useRef<boolean[][]>([]);
+  const buttonStatesRef = useRef<ButtonActionState[][]>([]);
+  const onButtonPressRef = useRef<(gamepadIndex: number, buttonIndex: number) => void>(onButtonPress || (() => {}));
 
   useEffect(() => {
     onButtonPressRef.current = onButtonPress || (() => {});
@@ -37,80 +37,91 @@ export function useGamepad(onButtonPress?: (index: number) => void) {
           console.warn("Gamepad access disabled or not supported", e);
           return;
         }
-        let gp: Gamepad | null = null;
-        for (let i = 0; i < gamepads.length; i++) {
-            if (gamepads[i] && gamepads[i]!.connected) {
-                gp = gamepads[i];
-                break;
-            }
-        }
 
-        if (gp) {
-          const axesArray = gp.axes || [];
-          const getAxis = (idx: number) => axesArray.length > idx ? axesArray[idx] : 0;
-          
-          const buttonsList = Array.from(gp.buttons || []);
-          const currentButtons = buttonsList.map((b: any) => (typeof b === "object" && b !== null) ? b.pressed : b === 1.0);
-          const currentStates: ButtonActionState[] = [];
+        const newStates: GamepadState[] = [];
+        const maxGamepads = 4;
+        
+        for (let gpIdx = 0; gpIdx < Math.min(gamepads.length, maxGamepads); gpIdx++) {
+            const gp = gamepads[gpIdx];
+            if (!gp || !gp.connected) continue;
 
-          currentButtons.forEach((isPressed, i) => {
-            const wasPressed = prevButtonsRef.current[i] || false;
-            const prevState = buttonStatesRef.current[i] || 'IDLE';
-            let nextState: ButtonActionState = 'IDLE';
+            if (!prevButtonsRef.current[gpIdx]) prevButtonsRef.current[gpIdx] = [];
+            if (!buttonStatesRef.current[gpIdx]) buttonStatesRef.current[gpIdx] = [];
 
-            if (isPressed && !wasPressed) {
-                nextState = 'PRESSED';
-                onButtonPressRef.current(i);
-            } else if (isPressed && wasPressed) {
-                nextState = 'HELD';
-            } else if (!isPressed && wasPressed) {
-                nextState = 'RELEASED';
-            } else {
-                nextState = 'IDLE';
-            }
-            currentStates[i] = nextState;
-          });
+            const axesArray = gp.axes || [];
+            const getAxis = (idx: number) => axesArray.length > idx ? axesArray[idx] : 0;
+            
+            const buttonsList = Array.from(gp.buttons || []);
+            const currentButtons = buttonsList.map((b: any) => (typeof b === "object" && b !== null) ? b.pressed : b === 1.0);
+            const currentStates: ButtonActionState[] = [];
 
-          prevButtonsRef.current = currentButtons;
-          buttonStatesRef.current = currentStates;
-          
-          const leftStick = radialDeadzone(getAxis(0), getAxis(1), DEFAULT_DEADZONE);
-          const rightStick = radialDeadzone(getAxis(2), getAxis(3), DEFAULT_DEADZONE);
-          
-          // Normalized axes to -1.0 to 1.0 (after deadzone)
-          const axes = [leftStick.x, leftStick.y, rightStick.x, rightStick.y];
-          
-          const newState = {
-            connected: true,
-            id: gp.id,
-            buttons: currentButtons,
-            buttonStates: currentStates,
-            axes,
-            timestamp: gp.timestamp,
-          };
-          
-          setState(prev => {
-            // Check structural equality to prevent re-renders
-            if (!prev) return newState;
-            if (prev.id !== newState.id || prev.connected !== newState.connected) return newState;
-            // compare buttons and axes values
-            let changed = false;
-            if (prev.buttons.length !== newState.buttons.length) return newState;
-            if (prev.axes.length !== newState.axes.length) return newState;
-            for (let i = 0; i < prev.buttons.length; i++) {
-                if (prev.buttons[i] !== newState.buttons[i]) { changed = true; break; }
-            }
-            if (!changed) {
-                for (let i = 0; i < prev.axes.length; i++) {
-                    if (prev.axes[i] !== newState.axes[i]) { changed = true; break; }
+            if (prevButtonsRef.current[gpIdx].length === 0 && currentButtons.length > 0) {
+              prevButtonsRef.current[gpIdx] = new Array(currentButtons.length).fill(false);
+              currentButtons.forEach((isPressed, i) => {
+                if (isPressed) {
+                  onButtonPressRef.current(gpIdx, i);
                 }
+              });
             }
-            if (changed) return newState;
-            return prev;
-          });
-        } else {
-          setState(prev => prev === null ? null : null);
+
+            currentButtons.forEach((isPressed, i) => {
+              const wasPressed = prevButtonsRef.current[gpIdx][i] || false;
+              const prevState = buttonStatesRef.current[gpIdx][i] || 'IDLE';
+              let nextState: ButtonActionState = 'IDLE';
+
+              if (isPressed && !wasPressed) {
+                nextState = 'PRESSED';
+                if (prevState !== 'PRESSED' && prevState !== 'HELD') {
+                  onButtonPressRef.current(gpIdx, i);
+                }
+              } else if (isPressed && wasPressed) {
+                nextState = 'HELD';
+              } else if (!isPressed && wasPressed) {
+                nextState = 'RELEASED';
+              } else {
+                nextState = 'IDLE';
+              }
+              currentStates[i] = nextState;
+            });
+            prevButtonsRef.current[gpIdx] = currentButtons;
+            buttonStatesRef.current[gpIdx] = currentStates;
+
+            const leftStick = radialDeadzone(getAxis(0), getAxis(1), DEFAULT_DEADZONE);
+            const rightStick = radialDeadzone(getAxis(2), getAxis(3), DEFAULT_DEADZONE);
+            const axes = [leftStick.x, leftStick.y, rightStick.x, rightStick.y];
+            
+            newStates.push({
+              connected: true,
+              id: gp.id,
+              buttons: currentButtons,
+              buttonStates: currentStates,
+              axes,
+              timestamp: gp.timestamp,
+            });
         }
+        
+        setStates(prev => {
+            if (prev.length !== newStates.length) return newStates;
+            let changed = false;
+            for (let i = 0; i < prev.length; i++) {
+                const p = prev[i];
+                const n = newStates[i];
+                if (p.id !== n.id || p.connected !== n.connected) { changed = true; break; }
+                if (p.buttons.length !== n.buttons.length) { changed = true; break; }
+                if (p.axes.length !== n.axes.length) { changed = true; break; }
+                for (let j = 0; j < p.buttons.length; j++) {
+                    if (p.buttons[j] !== n.buttons[j]) { changed = true; break; }
+                }
+                if (!changed) {
+                    for (let j = 0; j < p.axes.length; j++) {
+                        if (p.axes[j] !== n.axes[j]) { changed = true; break; }
+                    }
+                }
+                if (changed) break;
+            }
+            if (changed) return newStates;
+            return prev;
+        });
     } catch(err) {
         console.error("Gamepad poll error", err);
     }
@@ -125,7 +136,7 @@ export function useGamepad(onButtonPress?: (index: number) => void) {
     };
     const onDisconnect = () => {
       console.log("Gamepad disconnected");
-      setState(null);
+      // Poll will naturally handle the removal
     };
     window.addEventListener("gamepadconnected", onConnect);
     window.addEventListener("gamepaddisconnected", onDisconnect);
@@ -136,5 +147,5 @@ export function useGamepad(onButtonPress?: (index: number) => void) {
     };
   }, [poll]);
 
-  return state;
+  return states;
 }

@@ -33,11 +33,14 @@ class NativeGamepadMapper(private val context: Context) {
 
     class PointerState(val id: Int, var isActive: Boolean, val type: String, var virtualKey: String? = null)
     
-    val pointers = mutableListOf(
-        PointerState(0, false, "analog"),
-        PointerState(1, false, "analog")
-    ).apply {
-        for (i in 2..15) add(PointerState(i, false, "button"))
+    // Support up to 4 gamepads, with 16 pointers each: P1=0-15, P2=16-31, P3=32-47, P4=48-63
+    val pointers = mutableListOf<PointerState>().apply {
+        for (gp in 0..3) {
+            val offset = gp * 16
+            add(PointerState(offset + 0, false, "analog"))
+            add(PointerState(offset + 1, false, "analog"))
+            for (i in 2..15) add(PointerState(offset + i, false, "button"))
+        }
     }
 
     val lastState = mutableMapOf<String, Boolean>()
@@ -96,37 +99,53 @@ class NativeGamepadMapper(private val context: Context) {
         return Pair((radius * cos(angle)).toFloat(), (radius * sin(angle)).toFloat())
     }
 
-    fun handleButton(buttonName: String, isDown: Boolean) {
+    fun handleButton(gamepadIndex: Int, buttonName: String, isDown: Boolean) {
         synchronized(syncLock) {
+            val offset = (gamepadIndex % 4) * 16
+            
             val mapping = findButtonMapping(buttonName)
+            // check player filter
+            if (mapping != null && mapping.has("player")) {
+                 val player = mapping.optInt("player", 1)
+                 if (player != gamepadIndex + 1) return
+            }
+
             if (mapping == null || !mapping.has("x") || !mapping.has("y")) {
-                val wasDown = lastState[buttonName] ?: false
+                val wasDown = lastState[buttonName + gamepadIndex] ?: false
                 // Complete pending touchUp if it was mapped previously
                 if (!isDown && wasDown) {
-                    val p = pointers.find { it.isActive && it.virtualKey == buttonName }
+                    val p = pointers.find { it.id in offset..offset+15 && it.isActive && it.virtualKey == buttonName }
                     if (p != null) {
                         p.isActive = false
                         p.virtualKey = null
                         try { TouchInjectionPlugin.touchService?.touchUp(p.id) } catch(e:Exception){}
                     }
                 }
-                lastState[buttonName] = isDown
+                lastState[buttonName + gamepadIndex] = isDown
                 return
             }
             
             val antiBanEnabled = mapping.optBoolean("antiBanEnabled", false)
             val type = mapping.optString("type", "button")
             
-            val wasDown = lastState[buttonName] ?: false
+            val wasDown = lastState[buttonName + gamepadIndex] ?: false
             if (isDown && !wasDown) {
-                val p = pointers.find { !it.isActive && it.type == "button" }
+                val tapDuration = mapping.optLong("tapDuration", 0L)
+                var (x, y) = getScreenCoords(mapping.getDouble("x"), mapping.getDouble("y"))
+                val (ox, oy) = getAntiBanOffset(antiBanEnabled)
+                x += ox
+                y += oy
+                
+                if (tapDuration > 0L) {
+                    TouchInjectionPlugin.touchService?.injectTap(x, y, tapDuration)
+                    lastState[buttonName + gamepadIndex] = true
+                    return
+                }
+
+                val p = pointers.find { it.id in offset..offset+15 && !it.isActive && it.type == "button" }
                 if (p != null) {
                     p.isActive = true
                     p.virtualKey = buttonName
-                    var (x, y) = getScreenCoords(mapping.getDouble("x"), mapping.getDouble("y"))
-                    val (ox, oy) = getAntiBanOffset(antiBanEnabled)
-                    x += ox
-                    y += oy
                     TouchInjectionPlugin.touchService?.touchDown(p.id, x, y)
                     
                     if (type == "swipe" && mapping.has("swipeEndX") && mapping.has("swipeEndY")) {
@@ -141,14 +160,14 @@ class NativeGamepadMapper(private val context: Context) {
                     }
                 }
             } else if (!isDown && wasDown) {
-                val p = pointers.find { it.isActive && it.virtualKey == buttonName }
+                val p = pointers.find { it.id in offset..offset+15 && it.isActive && it.virtualKey == buttonName }
                 if (p != null) {
                     p.isActive = false
                     p.virtualKey = null
                     TouchInjectionPlugin.touchService?.touchUp(p.id)
                 }
             }
-            lastState[buttonName] = isDown
+            lastState[buttonName + gamepadIndex] = isDown
         }
     }
 
@@ -174,8 +193,10 @@ class NativeGamepadMapper(private val context: Context) {
         }
     }
 
-    fun handleAxes(lx: Float, ly: Float, rx: Float, ry: Float, l2: Float, r2: Float) {
+    fun handleAxes(gamepadIndex: Int, lx: Float, ly: Float, rx: Float, ry: Float, l2: Float, r2: Float) {
         synchronized(syncLock) {
+            val offset = (gamepadIndex % 4) * 16
+
             val lMap = findButtonMapping("L_STICK")
             val rMap = findButtonMapping("R_STICK")
             
@@ -196,7 +217,7 @@ class NativeGamepadMapper(private val context: Context) {
             val sRy = cRy
         
             val lMag = sqrt(sLx*sLx + sLy*sLy)
-            val lp = pointers[0]
+            val lp = pointers.find { it.id == offset + 0 } ?: pointers[0]
             if (lMap != null && lMap.has("x") && lMap.has("y")) {
                 val deadzone = lMap.optDouble("deadzone", 0.15).toFloat()
                 val maxRadius = lMap.optDouble("radius", 100.0).toFloat()
@@ -220,7 +241,7 @@ class NativeGamepadMapper(private val context: Context) {
             }
             
             val rMag = sqrt(sRx*sRx + sRy*sRy)
-            val rp = pointers[1]
+            val rp = pointers.find { it.id == offset + 1 } ?: pointers[1]
             if (rMap != null && rMap.has("x") && rMap.has("y")) {
                 val deadzone = rMap.optDouble("deadzone", 0.15).toFloat()
                 val maxRadius = rMap.optDouble("radius", 150.0).toFloat()
@@ -244,15 +265,15 @@ class NativeGamepadMapper(private val context: Context) {
             }
             
             if (l2 > 0.05f) {
-                handleButton("LT", true)
+                handleButton(gamepadIndex, "LT", true)
             } else {
-                handleButton("LT", false)
+                handleButton(gamepadIndex, "LT", false)
             }
             
             if (r2 > 0.05f) {
-                handleButton("RT", true)
+                handleButton(gamepadIndex, "RT", true)
             } else {
-                handleButton("RT", false)
+                handleButton(gamepadIndex, "RT", false)
             }
         }
     }

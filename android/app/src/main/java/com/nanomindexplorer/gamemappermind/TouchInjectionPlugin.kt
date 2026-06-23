@@ -37,9 +37,11 @@ class TouchInjectionPlugin : Plugin() {
             instance?.get()?.notifyListeners("onGamepadAxis", data)
         }
 
-        fun emitGamepadFeedback(type: String) {
+        fun emitGamepadFeedback(type: String, intensity: Float, duration: Long) {
             val data = JSObject()
             data.put("type", type)
+            data.put("intensity", intensity)
+            data.put("duration", duration)
             instance?.get()?.notifyListeners("onGamepadFeedback", data)
         }
     }
@@ -369,12 +371,13 @@ class TouchInjectionPlugin : Plugin() {
     fun injectTap(call: PluginCall) {
         val x = call.getFloat("x")
         val y = call.getFloat("y")
+        val duration = call.getLong("duration") ?: 60L
         if (x == null || y == null) {
             call.reject("x and y must be provided")
             return
         }
         try {
-            val success = touchService?.injectTap(x, y) ?: false
+            val success = touchService?.injectTap(x, y, duration) ?: false
             if (success) {
                 call.resolve()
             } else {

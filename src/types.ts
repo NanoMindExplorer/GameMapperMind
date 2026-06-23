@@ -22,6 +22,7 @@ export interface VirtualButton {
   swipeDuration?: number;
   inputSource?: 'TOUCHSCREEN' | 'MOUSE' | 'STYLUS' | 'GAMEPAD';
   toolType?: 'FINGER' | 'STYLUS';
+  tapDuration?: number;
   player?: 1 | 2 | 3 | 4;
   sensitivityCurve?: 'linear' | 'exponential' | 'parabolic' | 'custom';
   curvePoints?: number[][];

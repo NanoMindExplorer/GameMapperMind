@@ -153,7 +153,8 @@ class GamepadListenerService : Service() {
                         if (it.contains("EV_SYN")) {
                             if (it.contains("SYN_REPORT")) {
                                 if (hasAxisChange) {
-                                    GamepadJniPlugin.handleAxisBatched(lStickX, lStickY, rStickX, rStickY, l2Trigger, r2Trigger)
+                                    val gpIdx = if (it.trim().startsWith("/dev/input/")) Math.max(0, gamepadDevices.indexOf(it.trim().split(Regex("\\s+"))[0])) else 0
+                                    GamepadJniPlugin.handleAxisBatched(gpIdx, lStickX, lStickY, rStickX, rStickY, l2Trigger, r2Trigger)
                                     TouchInjectionPlugin.emitGamepadAxis(floatArrayOf(lStickX, lStickY, rStickX, rStickY, l2Trigger, r2Trigger))
                                     hasAxisChange = false
                                 }
@@ -163,6 +164,7 @@ class GamepadListenerService : Service() {
                             if (parts.size >= 3) {
                                 val isPrefixed = parts[0].startsWith("/dev/input/")
                                 val evIdx = if (isPrefixed) 1 else 0
+                                val gpIdx = if (isPrefixed) Math.max(0, gamepadDevices.indexOf(parts[0])) else 0
                                 if (parts.size > evIdx + 2) {
                                     val btnRaw = parts[evIdx + 1]
                                     val stateStr = parts[evIdx + 2]
@@ -170,14 +172,14 @@ class GamepadListenerService : Service() {
                                     
                                     val btnMap = mapEvdevToButton(btnRaw)
                                     if (btnMap != "UNKNOWN") {
-                                        GamepadJniPlugin.handleButtonBatched(btnMap, isDown == 1)
+                                        GamepadJniPlugin.handleButtonBatched(gpIdx, , )
                                         TouchInjectionPlugin.emitGamepadButton(btnMap, isDown, 1.0f)
                                     }
                                 }
                             }
                         } else if (it.contains("EV_FF")) {
                             // Force Feedback event detected
-                            TouchInjectionPlugin.emitGamepadFeedback("RUMBLE")
+                            TouchInjectionPlugin.emitGamepadFeedback("RUMBLE", 1.0f, 200L)
                         } else if (it.contains("EV_ABS")) {
                             val parts = it.trim().split(Regex("\\s+"))
                             if (parts.size >= 3) {
@@ -193,20 +195,20 @@ class GamepadListenerService : Service() {
                                         "ABS_HAT0Y" -> {
                                             when (rawVal) {
                                                 -1 -> { 
-                                                    GamepadJniPlugin.handleButtonBatched("DPAD_UP", true)
-                                                    GamepadJniPlugin.handleButtonBatched("DPAD_DOWN", false)
+                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, , )
+                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, , )
                                                     TouchInjectionPlugin.emitGamepadButton("DPAD_UP", 1, 1f)
                                                     TouchInjectionPlugin.emitGamepadButton("DPAD_DOWN", 0, 0f) 
                                                 }
                                                 1  -> { 
-                                                    GamepadJniPlugin.handleButtonBatched("DPAD_DOWN", true)
-                                                    GamepadJniPlugin.handleButtonBatched("DPAD_UP", false)
+                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, , )
+                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, , )
                                                     TouchInjectionPlugin.emitGamepadButton("DPAD_DOWN", 1, 1f)
                                                     TouchInjectionPlugin.emitGamepadButton("DPAD_UP", 0, 0f) 
                                                 }
                                                 0  -> { 
-                                                    GamepadJniPlugin.handleButtonBatched("DPAD_UP", false)
-                                                    GamepadJniPlugin.handleButtonBatched("DPAD_DOWN", false)
+                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, , )
+                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, , )
                                                     TouchInjectionPlugin.emitGamepadButton("DPAD_UP", 0, 0f)
                                                     TouchInjectionPlugin.emitGamepadButton("DPAD_DOWN", 0, 0f) 
                                                 }
@@ -215,20 +217,20 @@ class GamepadListenerService : Service() {
                                         "ABS_HAT0X" -> {
                                             when (rawVal) {
                                                 -1 -> { 
-                                                    GamepadJniPlugin.handleButtonBatched("DPAD_LEFT", true)
-                                                    GamepadJniPlugin.handleButtonBatched("DPAD_RIGHT", false)
+                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, , )
+                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, , )
                                                     TouchInjectionPlugin.emitGamepadButton("DPAD_LEFT", 1, 1f)
                                                     TouchInjectionPlugin.emitGamepadButton("DPAD_RIGHT", 0, 0f) 
                                                 }
                                                 1  -> { 
-                                                    GamepadJniPlugin.handleButtonBatched("DPAD_RIGHT", true)
-                                                    GamepadJniPlugin.handleButtonBatched("DPAD_LEFT", false)
+                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, , )
+                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, , )
                                                     TouchInjectionPlugin.emitGamepadButton("DPAD_RIGHT", 1, 1f)
                                                     TouchInjectionPlugin.emitGamepadButton("DPAD_LEFT", 0, 0f) 
                                                 }
                                                 0  -> { 
-                                                    GamepadJniPlugin.handleButtonBatched("DPAD_LEFT", false)
-                                                    GamepadJniPlugin.handleButtonBatched("DPAD_RIGHT", false)
+                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, , )
+                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, , )
                                                     TouchInjectionPlugin.emitGamepadButton("DPAD_LEFT", 0, 0f)
                                                     TouchInjectionPlugin.emitGamepadButton("DPAD_RIGHT", 0, 0f) 
                                                 }

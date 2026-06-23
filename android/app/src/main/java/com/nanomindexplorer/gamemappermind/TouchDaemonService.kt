@@ -362,14 +362,14 @@ class TouchDaemonService : ITouchService.Stub {
     }
 
     private var nextTapId = 90
-    override fun injectTap(x: Float, y: Float): Boolean {
+    override fun injectTap(x: Float, y: Float, duration: Long): Boolean {
         val id = nextTapId
         nextTapId++
         if (nextTapId > 99) nextTapId = 90
         val downRes = touchDown(id, x, y)
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
             touchUp(id)
-        }, 60L)
+        }, duration)
         return downRes
     }
 

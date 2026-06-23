@@ -31,15 +31,15 @@ object GamepadJniPlugin {
         }
     }
 
-    fun handleAxisBatched(lx: Float, ly: Float, rx: Float, ry: Float, l2: Float, r2: Float) {
+    fun handleAxisBatched(gamepadIndex: Int, lx: Float, ly: Float, rx: Float, ry: Float, l2: Float, r2: Float) {
         queueEvent {
-            NativeGamepadMapper.instance?.handleAxes(lx, ly, rx, ry, l2, r2)
+            NativeGamepadMapper.instance?.handleAxes(gamepadIndex, lx, ly, rx, ry, l2, r2)
         }
     }
 
-    fun handleButtonBatched(buttonName: String, isDown: Boolean) {
+    fun handleButtonBatched(gamepadIndex: Int, buttonName: String, isDown: Boolean) {
         queueEvent {
-            NativeGamepadMapper.instance?.handleButton(buttonName, isDown)
+            NativeGamepadMapper.instance?.handleButton(gamepadIndex, buttonName, isDown)
         }
     }
 }

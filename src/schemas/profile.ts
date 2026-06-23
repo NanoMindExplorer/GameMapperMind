@@ -18,6 +18,7 @@ export const VirtualButtonSchema = z.object({
   swipeDuration: z.number().optional(),
   inputSource: z.enum(['TOUCHSCREEN', 'MOUSE', 'STYLUS', 'GAMEPAD']).optional(),
   toolType: z.enum(['FINGER', 'STYLUS']).optional(),
+  tapDuration: z.number().optional(),
   player: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).optional(),
   sensitivityCurve: z.enum(['linear', 'exponential', 'parabolic', 'custom']).optional(),
   curvePoints: z.array(z.array(z.number())).optional(),

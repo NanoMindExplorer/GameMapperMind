@@ -14,6 +14,9 @@ import com.getcapacitor.BridgeActivity
 class MainActivity : BridgeActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         registerPlugin(TouchInjectionPlugin::class.java)
+        registerPlugin(GamepadPlugin::class.java)
+        registerPlugin(GyroPlugin::class.java)
+        registerPlugin(ShizukuPlugin::class.java)
         super.onCreate(savedInstanceState)
         
         bridge?.webView?.let { webView ->

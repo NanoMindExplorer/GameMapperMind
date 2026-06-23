@@ -1,0 +1,2 @@
+const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/web-D93ea_2N.js","assets/vendor-capacitor-Dzn3_rKv.js"])))=>i.map(i=>d[i]);
+import{_ as r}from"./index-CAn2C09S.js";import{r as o}from"./vendor-capacitor-Dzn3_rKv.js";import"./vendor-icons-CKU_qNMh.js";import"./vendor-react-Bbycalre.js";const n=o("Preferences",{web:()=>r(()=>import("./web-D93ea_2N.js"),__vite__mapDeps([0,1])).then(e=>new e.PreferencesWeb)});export{n as Preferences};

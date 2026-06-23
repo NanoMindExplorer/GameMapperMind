@@ -3,9 +3,12 @@
 	"appName": "GameMapperMind",
 	"webDir": "dist/client",
 	"server": {
-		"androidScheme": "https"
-	},
-	"android": {
-		"webContentsDebuggingEnabled": false
+		"androidScheme": "capacitor",
+		"cleartext": true,
+		"allowNavigation": [
+			"localhost",
+			"127.0.0.1",
+			"appassets.androidplatform.net"
+		]
 	}
 }

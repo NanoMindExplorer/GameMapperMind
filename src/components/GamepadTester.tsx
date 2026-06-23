@@ -183,11 +183,16 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
       const data = (e as CustomEvent).detail;
       setPressedButtons(prev => {
          const next = { ...prev };
+         // BUG FIX: Map ALL button names that GamepadPlugin emits
+         // GamepadPlugin emits: A, B, X, Y, LB, RB, LT, RT, L3, R3, START, SELECT, HOME, DPAD_*
          const kMap: Record<string, string> = {
-            'BUTTON_A': 'a', 'BUTTON_B': 'b', 'BUTTON_X': 'x', 'BUTTON_Y': 'y',
-            'DPAD_UP': 'd_up', 'DPAD_DOWN': 'd_down', 'DPAD_LEFT': 'd_left', 'DPAD_RIGHT': 'd_right',
-            'L1': 'l_shoulder', 'R1': 'r_shoulder',
-            'SELECT': 'select', 'START': 'start', 'L3': 'l3', 'R3': 'r3'
+            'A': 'a', 'B': 'b', 'X': 'x', 'Y': 'y',
+            'LB': 'l_shoulder', 'RB': 'r_shoulder',
+            'LT': 'lt_trigger', 'RT': 'rt_trigger',
+            'L3': 'l3', 'R3': 'r3',
+            'START': 'start', 'SELECT': 'select', 'HOME': 'home',
+            'DPAD_UP': 'd_up', 'DPAD_DOWN': 'd_down',
+            'DPAD_LEFT': 'd_left', 'DPAD_RIGHT': 'd_right'
          };
          const mapped = kMap[data.buttonName];
          if (mapped) {

@@ -736,19 +736,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Simulated Web Native Overlay rendering */}
-      {overlayActive && (
-        <div className="fixed inset-0 z-[9999] pointer-events-none">
-          <OverlayWysiwyg
-            activeProfile={activeProfile}
-            onUpdateProfile={handleUpdateProfile}
-            onLogMessage={handleLogMessage}
-            activeKeys={activeKeys}
-            activeAxes={activeAxes}
-            isNativeOverlay={true}
-          />
-        </div>
-      )}
     </div>
   );
 }

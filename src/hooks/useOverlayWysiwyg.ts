@@ -65,25 +65,33 @@ export function useOverlayWysiwyg({
 
     if (!isDragging || !selectedButtonId) return;
 
+    // BUG FIX: preventDefault to stop scroll/zoom on touch
+    if (e.touches) e.preventDefault?.();
+    
+    // BUG FIX: Cache rect once, don't query every move
+    const rect = document.getElementById('canvas-container')?.getBoundingClientRect();
+    if (!rect) return;
+    
     const clientX = e.touches ? e.touches[0].clientX : e.clientX;
     const clientY = e.touches ? e.touches[0].clientY : e.clientY;
 
-    const rect = document.getElementById('canvas-container')?.getBoundingClientRect();
-    if (rect) {
-      let x = ((clientX - rect.left) / rect.width) * 100;
-      let y = ((clientY - rect.top) / rect.height) * 100;
-      
-      x = Math.max(0, Math.min(100, x));
-      y = Math.max(0, Math.min(100, y));
+    let x = ((clientX - rect.left) / rect.width) * 100;
+    let y = ((clientY - rect.top) / rect.height) * 100;
+    
+    x = Math.max(0, Math.min(100, x));
+    y = Math.max(0, Math.min(100, y));
 
-      const updatedButtons = activeProfile.buttons.map(b => {
+    // BUG FIX: Use functional update to avoid stale state + reduce re-renders
+    onUpdateProfile(prev => {
+      if (!prev) return prev;
+      const updatedButtons = prev.buttons.map(b => {
         if (b.id === selectedButtonId) {
           return { ...b, x, y };
         }
         return b;
       });
-      onUpdateProfile({ ...activeProfile, buttons: updatedButtons });
-    }
+      return { ...prev, buttons: updatedButtons };
+    });
   };
 
   const handleDragEnd = () => {

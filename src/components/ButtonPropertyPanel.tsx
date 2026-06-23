@@ -98,18 +98,18 @@ export default function ButtonPropertyPanel({ h }: { h: OverlayWysiwygHook }) {
                       }}
                     >
                       <optgroup label="Buttons">
-                        <option value="BUTTON_A">A (Cross)</option>
-                        <option value="BUTTON_B">B (Circle)</option>
-                        <option value="BUTTON_X">X (Square)</option>
-                        <option value="BUTTON_Y">Y (Triangle)</option>
-                        <option value="BUTTON_L1">L1 / LB</option>
-                        <option value="BUTTON_R1">R1 / RB</option>
-                        <option value="BUTTON_L2">L2 / LT</option>
-                        <option value="BUTTON_R2">R2 / RT</option>
-                        <option value="BUTTON_SELECT">Select / Share</option>
-                        <option value="BUTTON_START">Start / Options</option>
-                        <option value="BUTTON_L3">L3 (Left Stick Click)</option>
-                        <option value="BUTTON_R3">R3 (Right Stick Click)</option>
+                        <option value="A">A (Cross)</option>
+                        <option value="B">B (Circle)</option>
+                        <option value="X">X (Square)</option>
+                        <option value="Y">Y (Triangle)</option>
+                        <option value="LB">L1 / LB</option>
+                        <option value="RB">R1 / RB</option>
+                        <option value="LT">L2 / LT</option>
+                        <option value="RT">R2 / RT</option>
+                        <option value="SELECT">Select / Share</option>
+                        <option value="START">Start / Options</option>
+                        <option value="L3">L3 (Left Stick Click)</option>
+                        <option value="R3">R3 (Right Stick Click)</option>
                       </optgroup>
                       <optgroup label="Virtual Swipes & Motions">
                         <option value="SWIPE_UP">Swipe Up</option>

@@ -8,11 +8,11 @@ export default function OverlayCanvas({ h }: { h: OverlayWysiwygHook }) {
   const isGradient = bgUrl && bgUrl.startsWith('linear-gradient');
 
   return (
-    <div className={`${h.isNativeOverlay ? "w-screen h-screen" : "flex-1"} relative overflow-hidden bg-slate-950 flex flex-col group select-none`} style={{ minHeight: 0 }}>
+    <div className={`${h.isNativeOverlay ? "w-screen h-screen" : "flex-1"} relative overflow-hidden bg-slate-950 select-none`} style={{ minHeight: 0 }}>
       
-      {/* Visual Canvas stage Area — fixed dimensions to prevent resize during drag */}
+      {/* Visual Canvas stage Area — absolute positioned to prevent ANY resize */}
       <div 
-        className="absolute inset-0 w-full h-full overflow-hidden"
+        className="absolute inset-0 overflow-hidden touch-none"
         onClick={h.handleContainerClick}
         onMouseMove={h.handleDragMove}
         onMouseUp={h.handleDragEnd}

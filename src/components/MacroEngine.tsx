@@ -31,7 +31,7 @@ export default function MacroEngineComponent({ macros, onUpdateMacros, onLogMess
   const [recY, setRecY] = React.useState(500);
   const [recPointer, setRecPointer] = React.useState(1);
 
-  const playbackIntervalRef = React.useRef<NodeJS.Timeout | null>(null);
+  const playbackIntervalRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const macrosRef = React.useRef(macros);
   const onUpdateMacrosRef = React.useRef(onUpdateMacros);

@@ -16,10 +16,9 @@ import GamepadTester from './components/GamepadTester';
 import GameSelector from './components/GameSelector';
 import CreditsPanel from './components/CreditsPanel';
 
-import { 
-  Terminal, Shield, Settings, Activity, Compass, Cpu, HelpCircle, 
-  ChevronRight, Sparkles, BookOpen, Layers, Bot, ShieldAlert, Heart, AlertTriangle
-} from 'lucide-react';
+import { Terminal, Shield, Settings, Activity, Compass, Cpu, HelpCircle, ChevronRight, Sparkles, BookOpen, Layers, Bot, ShieldAlert, Heart, AlertTriangle } from 'lucide-react';
+import { KeepAwake } from '@capacitor-community/keep-awake';
+import { ScreenOrientation } from '@capacitor/screen-orientation';
 // Use public path directly for AppIcon instead of importing it
 
 import { useShizuku } from './hooks/useShizuku';
@@ -199,6 +198,29 @@ export default function App() {
     setTimeout(() => setToastMessage(null), 3000);
   };
   
+  // Handle Keep-Awake and Screen Orientation based on overlay status
+  React.useEffect(() => {
+    if (overlayActive) {
+      KeepAwake.keepAwake().catch(console.warn);
+      
+      const currentProfile = profiles.find(p => p.id === activeProfileId) || profiles[0];
+      if (currentProfile?.orientation === 'landscape') {
+        ScreenOrientation.lock({ orientation: 'landscape' }).catch(console.warn);
+      } else if (currentProfile?.orientation === 'portrait') {
+        ScreenOrientation.lock({ orientation: 'portrait' }).catch(console.warn);
+      }
+    } else {
+      KeepAwake.allowSleep().catch(console.warn);
+      ScreenOrientation.unlock().catch(console.warn);
+    }
+    
+    // Cleanup if unmounted while active
+    return () => {
+      KeepAwake.allowSleep().catch(console.warn);
+      ScreenOrientation.unlock().catch(console.warn);
+    };
+  }, [overlayActive, profiles, activeProfileId]);
+
   const handleToggleOverlay = async () => {
     try {
       if (overlayActive) {

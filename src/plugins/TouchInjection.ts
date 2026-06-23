@@ -30,6 +30,11 @@ export interface TouchInjectionPluginType {
     eventName: 'onGamepadAxis', 
     listenerFunc: (data: { axes: number[] }) => void
   ): Promise<PluginListenerHandle>;
+
+  addListener(
+    eventName: 'onGamepadFeedback', 
+    listenerFunc: (data: { type: string }) => void
+  ): Promise<PluginListenerHandle>;
 }
 
 const TouchInjection = registerPlugin<TouchInjectionPluginType>('TouchInjection');

@@ -80,16 +80,36 @@ export function useGamepad(onButtonPress?: (index: number) => void) {
           // Normalized axes to -1.0 to 1.0 (after deadzone)
           const axes = [leftStick.x, leftStick.y, rightStick.x, rightStick.y];
           
-          setState({
+          const newState = {
             connected: true,
             id: gp.id,
             buttons: currentButtons,
             buttonStates: currentStates,
             axes,
             timestamp: gp.timestamp,
+          };
+          
+          setState(prev => {
+            // Check structural equality to prevent re-renders
+            if (!prev) return newState;
+            if (prev.id !== newState.id || prev.connected !== newState.connected) return newState;
+            // compare buttons and axes values
+            let changed = false;
+            if (prev.buttons.length !== newState.buttons.length) return newState;
+            if (prev.axes.length !== newState.axes.length) return newState;
+            for (let i = 0; i < prev.buttons.length; i++) {
+                if (prev.buttons[i] !== newState.buttons[i]) { changed = true; break; }
+            }
+            if (!changed) {
+                for (let i = 0; i < prev.axes.length; i++) {
+                    if (prev.axes[i] !== newState.axes[i]) { changed = true; break; }
+                }
+            }
+            if (changed) return newState;
+            return prev;
           });
         } else {
-            setState(null);
+          setState(prev => prev === null ? null : null);
         }
     } catch(err) {
         console.error("Gamepad poll error", err);

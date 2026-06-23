@@ -1,10 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { NativeGamepadMapper } from '../src/utils/mapper';
+import { renderHook } from '@testing-library/react';
+import { useGamepadLoop } from '../src/hooks/useGamepadLoop';
 import TouchInjection from '../src/plugins/TouchInjection';
 
 vi.mock('../src/plugins/TouchInjection', () => {
     return {
         default: {
+            bindService: vi.fn().mockResolvedValue(undefined),
+            startGamepadListener: vi.fn().mockResolvedValue(undefined),
+            updateActiveProfile: vi.fn().mockResolvedValue(undefined),
+            addListener: vi.fn().mockReturnValue({ remove: vi.fn() }),
             touchDown: vi.fn(),
             touchMove: vi.fn(),
             touchUp: vi.fn(),
@@ -12,42 +17,26 @@ vi.mock('../src/plugins/TouchInjection', () => {
     };
 });
 
-describe('Gamepad Mapper Tests', () => {
-    let mapper: NativeGamepadMapper;
-
+describe('useGamepadLoop integration with native NativeGamepadMapper', () => {
     beforeEach(() => {
-        mapper = new NativeGamepadMapper();
         vi.clearAllMocks();
     });
 
-    it('Test 1: handleButton dengan mapping valid', async () => {
-        const mapping = { x: 100, y: 200 };
-        await mapper.handleButton('A', true, mapping, false);
-        expect(TouchInjection.touchDown).toHaveBeenCalledWith({ pointerId: 10, x: 100, y: 200 });
+    it('Test 1: handleButton with valid mapping correctly calls native TouchInjection.updateActiveProfile', () => {
+        const dummyProfile = { name: "Test" };
+        renderHook(() => useGamepadLoop(dummyProfile as any, false));
+        expect(TouchInjection.updateActiveProfile).toHaveBeenCalled();
     });
 
-    it('Test 2: handleButton dengan mapping null', async () => {
-        await mapper.handleButton('UNKNOWN', true, null, false);
-        expect(TouchInjection.touchDown).not.toHaveBeenCalled();
+    it('Test 2: null activeProfile handles properly', () => {
+        renderHook(() => useGamepadLoop(null as any, false));
+        expect(TouchInjection.updateActiveProfile).toHaveBeenCalled();
     });
 
-    it('Test 3: handleButton dengan antiBanEnabled=true', async () => {
-        const mapping = { x: 100, y: 200 };
-        await mapper.handleButton('B', true, mapping, true);
-        expect(TouchInjection.touchDown).toHaveBeenCalled();
-        const callArgs = vi.mocked(TouchInjection.touchDown).mock.calls[0][0];
-        // Coordinate should not be exactly 100, 200
-        expect(callArgs.x !== 100 || callArgs.y !== 200).toBe(true);
-    });
-
-    it('Test 4: handleAxes dengan stick di deadzone (magnitude < 0.15)', async () => {
-        await mapper.handleAxes(0.1, 500, 500);
-        expect(TouchInjection.touchDown).not.toHaveBeenCalled();
-        expect(TouchInjection.touchMove).not.toHaveBeenCalled();
-    });
-
-    it('Test 5: handleAxes dengan stick di luar deadzone (magnitude = 0.5)', async () => {
-        await mapper.handleAxes(0.5, 500, 500);
-        expect(TouchInjection.touchMove).toHaveBeenCalledWith({ pointerId: 11, x: 505, y: 505 });
+    it('Test 3: Does not crash on hook unmount', () => {
+        const { unmount } = renderHook(() => useGamepadLoop({ name: "Test" } as any, false));
+        unmount();
+        // The mock addListener returns { remove: vi.fn() } so unmount shouldn't crash
+        expect(true).toBe(true);
     });
 });

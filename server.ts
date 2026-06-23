@@ -123,9 +123,8 @@ class StateStore {
 
 const app = express();
 
-// BUG-03: Konfigurasi CORS Lengkap
 app.use(cors({
-  origin: ['http://localhost:3000', 'capacitor://localhost', 'http://localhost', 'http://127.0.0.1:3000'],
+  origin: ['http://localhost:5173', 'http://localhost:3000', 'capacitor://localhost', 'http://127.0.0.1:3000', 'http://127.0.0.1:5173'],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
@@ -133,13 +132,11 @@ app.use(cors({
 
 app.use(express.json({ limit: "5mb" }));
 
-// BUG-15 (from previous files): Safe logic clamped Random
 function clampedRandom(min: number, max: number): number {
   const val = min + Math.random() * (max - min);
   return Math.min(1.0, Math.max(0.0, parseFloat(val.toFixed(4))));
 }
 
-// BUG-05: Fungsi helper yang aman untuk addLog() (Refactor Log System)
 function addLog(arr: string[], msg: string, max = 500): void {
   arr.push(msg);
   while (arr.length > max) {
@@ -147,7 +144,6 @@ function addLog(arr: string[], msg: string, max = 500): void {
   }
 }
 
-// Auth Middleware (BUG-02)
 const requireAuth = (req: Request, res: Response, next: NextFunction) => {
   const bearer = req.headers.authorization?.split(' ')[1];
   if (!bearer || bearer !== ADMIN_TOKEN) {
@@ -155,10 +151,6 @@ const requireAuth = (req: Request, res: Response, next: NextFunction) => {
     return;
   }
   next();
-};
-
-const aiTunnelState = {
-  confidenceScore: clampedRandom(0.80, 0.99)
 };
 
 const aiLimiter = rateLimit({
@@ -171,16 +163,13 @@ const aiLimiter = rateLimit({
 
 app.use("/api/ai/", aiLimiter);
 
-// BUG-01: Sanitasi API Token dari Respons Publik
 app.get("/api/ai/tunnel-status", (req: Request, res: Response) => {
   const safeState: SafeAiTunnelState = {
-    confidenceScore: aiTunnelState.confidenceScore,
     logs: StateStore.state.logs
   };
   res.json(safeState);
 });
 
-// BUG-02: Protect sensitive routes
 app.post("/api/ai/tunnel-control", requireAuth, (req: Request, res: Response) => {
   addLog(StateStore.state.logs, "[INFO] Tunnel control accessed");
   StateStore.save();
@@ -242,8 +231,7 @@ app.post("/api/daemon/calibrate", requireAuth, (req: Request, res: Response) => 
 
 const LogSchema = z.object({
   message: z.string(),
-  instruksi: z.string().optional() // BUG-10: typo "insturksi" -> "instruksi" diperbaiki
-});
+  instruksi: z.string().optional() });
 
 const logLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -309,7 +297,6 @@ app.delete("/api/macros/:id", requireAuth, (req: Request, res: Response) => {
     res.json({ success: true });
 });
 
-// BUG-09: Simulation Type Usage explicitly
 app.post("/api/simulation/execute", requireAuth, (req: Request, res: Response) => {
     const customAction: SimAction = { cmd: "tap", params: { x: 500, y: 500 } };
     addLog(StateStore.state.logs, `Executing sim action: ${customAction.cmd}`);
@@ -317,12 +304,10 @@ app.post("/api/simulation/execute", requireAuth, (req: Request, res: Response) =
 });
 
 
-// BUG-08: API 404 Handler sebelum SPA Wildcard
 app.all("/api/*", (req: Request, res: Response) => {
   res.status(404).json({ error: "API route not found", path: req.path });
 });
 
-// BUG-07: startServer Async Tanpa Error Handling
 async function startServer() {
   try {
     await StateStore.load(); // Ensure state is loaded

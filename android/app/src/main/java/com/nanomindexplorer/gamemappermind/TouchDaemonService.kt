@@ -26,21 +26,34 @@ class TouchDaemonService : ITouchService.Stub {
             val reader = java.io.BufferedReader(java.io.InputStreamReader(process.inputStream))
             val errorReader = java.io.BufferedReader(java.io.InputStreamReader(process.errorStream))
             
-            val output = StringBuilder()
-            val errorOutput = StringBuilder()
+            val output = java.lang.StringBuilder()
+            val errorOutput = java.lang.StringBuilder()
+            
+            val timeoutMs = 5000L
+            val startTime = System.currentTimeMillis()
             
             var line: String?
             while (reader.readLine().also { line = it } != null) {
-                output.append(line).append("\n")
+                if (output.length < 65536) output.append(line).append("\n")
+                if (System.currentTimeMillis() - startTime > timeoutMs) break
             }
             while (errorReader.readLine().also { line = it } != null) {
-                errorOutput.append(line).append("\n")
+                if (errorOutput.length < 65536) errorOutput.append(line).append("\n")
+                if (System.currentTimeMillis() - startTime > timeoutMs) break
             }
             
-            val exitCode = process.waitFor()
-            // We can serialize as JSON or just return output since right now TouchInjectionPlugin parses this?
-            // Actually, wait, TouchInjectionPlugin expects exitCode and everything. Let's return a JSON string manually or just return the output if exitCode==0
-            // Since it's a string, we can return JSON string.
+            // Timeout support via modern Android API using generic wait/interrupt
+            var exitCode = -1
+            val thread = Thread {
+                try { exitCode = process.waitFor() } catch (ignored: Exception) {}
+            }
+            thread.start()
+            thread.join(timeoutMs)
+            if (thread.isAlive) {
+                process.destroy()
+                thread.interrupt()
+            }
+            
             val json = org.json.JSONObject()
             json.put("output", output.toString())
             json.put("error", errorOutput.toString())
@@ -356,7 +369,7 @@ class TouchDaemonService : ITouchService.Stub {
         val downRes = touchDown(id, x, y)
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
             touchUp(id)
-        }, 20L)
+        }, 60L)
         return downRes
     }
 

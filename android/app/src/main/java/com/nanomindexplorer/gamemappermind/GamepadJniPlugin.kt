@@ -6,11 +6,6 @@ import android.os.Looper
 
 object GamepadJniPlugin {
     
-    // Simulating JNI interface if needed in the future
-    @JvmStatic external fun initDevice(path: String): Int
-    @JvmStatic external fun readNextEvent(fd: Int): ByteArray
-    @JvmStatic external fun closeDevice(fd: Int)
-
     private val batchedEvents = mutableListOf<() -> Unit>()
     private var isFramePending = false
 

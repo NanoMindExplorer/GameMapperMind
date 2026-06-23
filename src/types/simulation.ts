@@ -21,6 +21,5 @@ export interface MacroProfile {
 }
 
 export interface SafeAiTunnelState {
-  confidenceScore: number;
   logs: string[];
 }

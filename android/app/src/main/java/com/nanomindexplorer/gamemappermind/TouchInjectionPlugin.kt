@@ -36,6 +36,12 @@ class TouchInjectionPlugin : Plugin() {
             data.put("axes", jsArray)
             instance?.get()?.notifyListeners("onGamepadAxis", data)
         }
+
+        fun emitGamepadFeedback(type: String) {
+            val data = JSObject()
+            data.put("type", type)
+            instance?.get()?.notifyListeners("onGamepadFeedback", data)
+        }
     }
 
     private var isBound = false
@@ -211,9 +217,10 @@ class TouchInjectionPlugin : Plugin() {
         val command = call.getString("command") ?: ""
         
         // Anti-Regression: Fix BUG-N01 via whitelist
-        val ALLOWED_COMMANDS = listOf("getevent -lp", "getevent -l", "dumpsys input", "pm list packages")
+        val ALLOWED_PREFIXES = listOf("getevent -lp", "getevent -l", "dumpsys input", "pm list packages", "input tap", "input swipe", "input keyevent")
         
-        if (!ALLOWED_COMMANDS.contains(command)) {
+        val isAllowed = ALLOWED_PREFIXES.any { command.startsWith(it) }
+        if (!isAllowed) {
             call.reject("Command not allowed")
             return
         }

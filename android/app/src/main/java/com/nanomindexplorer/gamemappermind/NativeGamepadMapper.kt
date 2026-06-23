@@ -26,6 +26,7 @@ class NativeGamepadMapper(private val context: Context) {
                     }
                 }
                 instance?.lastState?.clear()
+                instance?.buildMapCache()
             }
         }
     }
@@ -40,12 +41,30 @@ class NativeGamepadMapper(private val context: Context) {
     }
 
     val lastState = mutableMapOf<String, Boolean>()
+    var buttonMapCache = mutableMapOf<String, JSONObject>()
+    
+    fun buildMapCache() {
+        buttonMapCache.clear()
+        val jsonStr = GamepadListenerService.activeProfileJson ?: return
+        try {
+            val root = JSONObject(jsonStr)
+            val buttons = root.optJSONArray("buttons") ?: return
+            for (i in 0 until buttons.length()) {
+                val b = buttons.optJSONObject(i)
+                val key = b?.optString("mappedKey")
+                if (key != null) {
+                    buttonMapCache[key] = b
+                }
+            }
+        } catch (e: Exception) {}
+    }
     
     private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val mainHandler = Handler(Looper.getMainLooper())
 
     init {
         instance = this
+        buildMapCache()
     }
 
     private fun getScreenCoords(pctX: Double, pctY: Double): Pair<Float, Float> {
@@ -67,18 +86,7 @@ class NativeGamepadMapper(private val context: Context) {
     }
     
     private fun findButtonMapping(mappedKey: String): JSONObject? {
-        val jsonStr = GamepadListenerService.activeProfileJson ?: return null
-        try {
-            val root = JSONObject(jsonStr)
-            val buttons = root.optJSONArray("buttons") ?: return null
-            for (i in 0 until buttons.length()) {
-                val b = buttons.optJSONObject(i)
-                if (b?.optString("mappedKey") == mappedKey) {
-                    return b
-                }
-            }
-        } catch (e: Exception) {}
-        return null
+        return buttonMapCache[mappedKey]
     }
 
     private fun getAntiBanOffset(antiBanEnabled: Boolean): Pair<Float, Float> {
@@ -144,15 +152,50 @@ class NativeGamepadMapper(private val context: Context) {
         }
     }
 
+    private fun applyCurve(x: Float, curveType: String?, curvePoints: org.json.JSONArray?): Float {
+        if (curveType == null) return x
+        val sign = kotlin.math.sign(x)
+        val absX = kotlin.math.abs(x)
+        return sign * when (curveType.lowercase()) {
+            "exponential", "expo" -> absX * absX
+            "parabolic", "para" -> kotlin.math.sqrt(absX)
+            "custom" -> {
+                if (curvePoints == null || curvePoints.length() < 2) return absX
+                // Interpolate
+                val n = curvePoints.length()
+                val step = 1.0f / (n - 1)
+                val idx = (absX / step).toInt().coerceIn(0, n - 2)
+                val t = (absX - idx * step) / step
+                val y1 = curvePoints.optDouble(idx, 0.0).toFloat()
+                val y2 = curvePoints.optDouble(idx + 1, 1.0).toFloat()
+                y1 + t * (y2 - y1)
+            }
+            else -> absX // linear
+        }
+    }
+
     fun handleAxes(lx: Float, ly: Float, rx: Float, ry: Float, l2: Float, r2: Float) {
         synchronized(syncLock) {
-            val sLx = lx
-            val sLy = ly
-            val sRx = rx
-            val sRy = ry
+            val lMap = findButtonMapping("L_STICK")
+            val rMap = findButtonMapping("R_STICK")
+            
+            val lCurve = lMap?.optString("sensitivityCurve", "linear")
+            val lPoints = lMap?.optJSONArray("curvePoints")
+            
+            val rCurve = rMap?.optString("sensitivityCurve", "linear")
+            val rPoints = rMap?.optJSONArray("curvePoints")
+
+            val cLx = applyCurve(lx, lCurve, lPoints)
+            val cLy = applyCurve(ly, lCurve, lPoints)
+            val cRx = applyCurve(rx, rCurve, rPoints)
+            val cRy = applyCurve(ry, rCurve, rPoints)
+            
+            val sLx = cLx
+            val sLy = cLy
+            val sRx = cRx
+            val sRy = cRy
         
             val lMag = sqrt(sLx*sLx + sLy*sLy)
-            val lMap = findButtonMapping("L_STICK")
             val lp = pointers[0]
             if (lMap != null && lMap.has("x") && lMap.has("y")) {
                 val deadzone = lMap.optDouble("deadzone", 0.15).toFloat()
@@ -177,7 +220,6 @@ class NativeGamepadMapper(private val context: Context) {
             }
             
             val rMag = sqrt(sRx*sRx + sRy*sRy)
-            val rMap = findButtonMapping("R_STICK")
             val rp = pointers[1]
             if (rMap != null && rMap.has("x") && rMap.has("y")) {
                 val deadzone = rMap.optDouble("deadzone", 0.15).toFloat()

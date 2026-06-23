@@ -38,8 +38,6 @@ export class MacroService {
     if (this.activeMacros.has(macro.id)) return; // Prevent concurrent identical macros
     this.activeMacros.add(macro.id);
     
-    let lastTime = performance.now();
-    
     for (const step of macro.actions) {
       if (!this.activeMacros.has(macro.id)) break; // Was cancelled
       

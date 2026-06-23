@@ -32,6 +32,18 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, connected: boo
             window.dispatchEvent(new CustomEvent('native-gamepad-axis', { detail: data }));
           }
         });
+        
+        // H13: Haptics listener
+        TouchInjection.addListener('onGamepadFeedback', async (data: any) => {
+           if (!isCleanedUp && injectActive && mapProfile?.hapticIntensity) {
+              const { Haptics, ImpactStyle } = await import('@capacitor/haptics');
+              if (mapProfile.hapticIntensity > 0.5) {
+                 await Haptics.impact({ style: ImpactStyle.Heavy }).catch(()=>{});
+              } else {
+                 await Haptics.impact({ style: ImpactStyle.Light }).catch(()=>{});
+              }
+           }
+        });
       } catch (err) {
         console.error("Failed to setup native gamepad listener", err);
       }

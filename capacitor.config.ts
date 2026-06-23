@@ -6,7 +6,6 @@ const config: CapacitorConfig = {
   webDir: 'dist/client',
   server: {
     androidScheme: 'capacitor',
-    cleartext: true,
     allowNavigation: [
       "localhost",
       "127.0.0.1",

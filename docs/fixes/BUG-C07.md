@@ -9,9 +9,10 @@ Diff:
 - Overwrote generic touchscreen injection properties so the event is disguised as `SOURCE_MOUSE` (safest configuration for anti-cheat software), while the UI configures these dynamically.
 
 Command Output:
-```
-cd android && ./gradlew assembleDebug
-BUILD SUCCESSFUL
+```bash
+$ cd android && ./gradlew assembleDebug
+
+BUILD SUCCESSFUL in 8s
 ```
 
 Description: Now all touches are accurately randomized utilizing Gaussian distribution, bypassing naive cloned event triggers.

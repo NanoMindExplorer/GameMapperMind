@@ -44,7 +44,12 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
     let animationFrameId: number;
     
     const pollGamepads = () => {
-      const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
+      let gamepads: (Gamepad | null)[] = [];
+      try {
+        gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
+      } catch (e) {
+        // Do nothing if getGamepads throws SecurityError
+      }
       let activeGP: Gamepad | null = null;
       
       for (let i = 0; i < gamepads.length; i++) {

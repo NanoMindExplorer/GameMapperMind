@@ -50,7 +50,6 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "@capacitor/assets": "^3.0.5",
     "@capacitor/cli": "^6.2.0",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",

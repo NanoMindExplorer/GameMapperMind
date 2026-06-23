@@ -312,13 +312,11 @@ export default function App() {
     
     let appListener: any;
     import('@capacitor/app').then(({ App: CapacitorApp }) => {
-      appListener = CapacitorApp.addListener('appStateChange', (state) => {
+      appListener = CapacitorApp.addListener('appStateChange', async (state) => {
         if (state.isActive) {
-           fetchStatus();
-           import('./plugins/TouchInjection').then(({ default: TouchInjection }) => {
-               TouchInjection.bindService().catch(()=>{});
-               TouchInjection.startGamepadListener().catch(()=>{});
-           });
+           // BUG FIX: Only fetch status, do NOT blindly rebind on every resume
+           // bindService is already called by useShizuku.checkShizukuStatus if needed
+           await fetchStatus();
         }
       });
     }).catch(console.warn);

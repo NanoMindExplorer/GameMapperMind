@@ -307,14 +307,26 @@ class TouchInjectionPlugin : Plugin() {
     @PluginMethod
     fun checkPermission(call: PluginCall) {
         try {
-            val granted = Shizuku.pingBinder() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+            // BUG FIX: Comprehensive check per Shizuku API
+            if (Shizuku.isPreV11()) {
+                val data = JSObject()
+                data.put("granted", false)
+                data.put("isBound", false)
+                data.put("touchServiceAlive", false)
+                call.resolve(data)
+                return
+            }
+            val binderAlive = Shizuku.pingBinder()
+            val granted = binderAlive && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
             val touchServiceAlive = touchService != null && touchService!!.asBinder().isBinderAlive
             val data = JSObject()
             data.put("granted", granted)
             data.put("isBound", isBound)
             data.put("touchServiceAlive", touchServiceAlive)
+            Log.d("GameMapper", "checkPermission: binder=$binderAlive granted=$granted isBound=$isBound serviceAlive=$touchServiceAlive")
             call.resolve(data)
         } catch (e: Exception) {
+            Log.e("GameMapper", "checkPermission error", e)
             val data = JSObject()
             data.put("granted", false)
             data.put("isBound", false)

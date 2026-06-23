@@ -14,25 +14,27 @@ export const useShizuku = () => {
         const { granted, touchServiceAlive, isBound } = await TouchInjection.checkPermission();
         const { daemonRunning } = await TouchInjection.checkDaemonRunning();
         
-        let newState = 'INSTALLED';
+        // BUG FIX: Proper state machine based on ACTUAL service status, not assumptions
+        // Only try to rebind if permission is granted but service is NOT alive
+        if (granted && !touchServiceAlive) {
+            await bindAndStart();
+        }
+
+        let newState: 'INSTALLED' | 'RUNNING' | 'PERMISSION' | 'BOUND' | 'DAEMON_ALIVE' = 'INSTALLED';
         if (granted && touchServiceAlive && daemonRunning) newState = 'DAEMON_ALIVE';
         else if (granted && isBound) newState = 'BOUND';
         else if (granted) newState = 'PERMISSION';
         else newState = 'RUNNING';
 
-        if (granted && (!touchServiceAlive || !daemonRunning)) {
-            await bindAndStart();
-        }
-
         return {
           ...currentState,
           daemonRunning: !!daemonRunning, 
           status: granted ? 'CONNECTED_SHIZUKU' : 'DISCONNECTED',
-          recoveryState: newState as any
+          recoveryState: newState
         };
       } catch (err) {
         console.error("Native check error", err);
-        return { ...currentState, recoveryState: 'INSTALLED' } as any;
+        return { ...currentState, recoveryState: 'INSTALLED' as any };
       }
     }
     return currentState;

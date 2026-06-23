@@ -1,4 +1,0 @@
-return () => {
-      delete window.togglePalette;
-    };
-  }, []);

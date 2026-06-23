@@ -23,6 +23,18 @@ app_data.json
 *.backup
 _*.backup
 
-# Scratch scripts (move to scripts/ or delete)
+# Scratch scripts (move to scripts/ temp, delete after use)
 /split*.cjs
 /split*.js
+/fix_tabs.cjs
+/fix_*.cjs
+/jsx_dump.txt
+/jsx_*.txt
+/gen_*.cjs
+/extractor*.js
+
+# Scripts directory scratch (only keep permanent scripts)
+scripts/split_*
+scripts/gen_*
+scripts/extractor*
+scripts/run_ui_*

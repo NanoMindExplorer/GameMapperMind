@@ -250,7 +250,161 @@ export default function CreditsPanel({ onLogMessage }: CreditsPanelProps) {
         
         {/* Interactive Activation Guide (Panduan Aktifasi) */}
         <div className="bg-slate-950/60 rounded-xl border border-indigo-950/60 p-4 space-y-4">
-          
+          {/* Header */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="p-1 px-1.5 bg-indigo-500/10 text-indigo-400 rounded-md border border-indigo-500/20 text-xs font-bold">
+                PRO
+              </div>
+              <h3 className="text-sm font-semibold text-slate-100 flex items-center gap-1.5 font-sans">
+                <BookOpen className="w-4 h-4 text-indigo-400" />
+                Materi Panduan Aktifasi Interaktif
+              </h3>
+            </div>
+            <span className="text-[10px] text-slate-500 bg-slate-900 border border-slate-800 px-2 py-0.5 rounded font-mono">
+              {activeTab === 'shizuku' ? 'Shizuku Wizard' : 'ADB Wizard'}
+            </span>
+          </div>
+
+          {/* Tab Switcher */}
+          <div className="flex gap-2">
+            <button
+              onClick={() => setActiveTab('shizuku')}
+              className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                activeTab === 'shizuku'
+                  ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40'
+                  : 'bg-slate-900/50 text-slate-400 border border-slate-800 hover:bg-slate-900'
+              }`}
+            >
+              <Smartphone className="w-3.5 h-3.5" />
+              Shizuku (Wireless)
+            </button>
+            <button
+              onClick={() => setActiveTab('desktop')}
+              className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                activeTab === 'desktop'
+                  ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40'
+                  : 'bg-slate-900/50 text-slate-400 border border-slate-800 hover:bg-slate-900'
+              }`}
+            >
+              <Laptop className="w-3.5 h-3.5" />
+              Desktop (USB ADB)
+            </button>
+          </div>
+
+          {/* Progress Checklist bar */}
+          <div>
+            <div className="flex justify-between items-center mb-1.5">
+              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Progress Checklist Aktifasi</span>
+              <span className="text-xs font-bold font-mono text-indigo-400">
+                {activeTab === 'shizuku'
+                  ? `${shizukuChecklist.filter(Boolean).length}/${SHIZUKU_STEPS.length} Langkah`
+                  : `${desktopChecklist.filter(Boolean).length}/${DESKTOP_STEPS.length} Langkah`}
+                {` `}(
+                {activeTab === 'shizuku'
+                  ? Math.round((shizukuChecklist.filter(Boolean).length / SHIZUKU_STEPS.length) * 100)
+                  : Math.round((desktopChecklist.filter(Boolean).length / DESKTOP_STEPS.length) * 100)}%)
+              </span>
+            </div>
+            <div className="w-full bg-slate-900 h-1.5 rounded-full overflow-hidden border border-slate-800/60">
+              <div
+                className="bg-gradient-to-r from-indigo-500 to-purple-500 h-full transition-all duration-500 rounded-full"
+                style={{
+                  width: activeTab === 'shizuku'
+                    ? `${(shizukuChecklist.filter(Boolean).length / SHIZUKU_STEPS.length) * 100}%`
+                    : `${(desktopChecklist.filter(Boolean).length / DESKTOP_STEPS.length) * 100}%`
+                }}
+              />
+            </div>
+          </div>
+
+          {/* Step list Container */}
+          <div className="space-y-2.5">
+            {(activeTab === 'shizuku' ? SHIZUKU_STEPS : DESKTOP_STEPS).map((step, idx) => {
+              const isShizuku = activeTab === 'shizuku';
+              const isExpanded = isShizuku ? expandedShizukuStep === idx : expandedDesktopStep === idx;
+              const isCompleted = isShizuku ? shizukuChecklist[idx] : desktopChecklist[idx];
+
+              return (
+                <div
+                  key={idx}
+                  className={`rounded-lg border transition-all overflow-hidden ${
+                    isExpanded
+                      ? 'border-indigo-500/40 bg-indigo-950/10 shadow-[0_4px_16px_rgba(99,102,241,0.05)]'
+                      : 'border-slate-800/80 bg-slate-900/30 hover:border-slate-800 hover:bg-slate-900/50'
+                  }`}
+                >
+                  {/* Header bar of step */}
+                  <div
+                    onClick={() => handleToggleExpand(idx)}
+                    className="px-3.5 py-3 flex items-center justify-between cursor-pointer select-none"
+                  >
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      {/* Checkbox */}
+                      <button
+                        type="button"
+                        onClick={handleToggleCheck}
+                        className="focus:outline-none flex-shrink-0"
+                        title="Tandai Selesai"
+                      >
+                        {isCompleted ? (
+                          <CheckSquare className="w-5 h-5 text-emerald-400" />
+                        ) : (
+                          <Square className="w-5 h-5 text-slate-500 hover:text-slate-300" />
+                        )}
+                      </button>
+
+                      {/* Step info */}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <span className="text-[10px] font-bold text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded border border-indigo-500/20">
+                            {step.badge}
+                          </span>
+                          {isCompleted && (
+                            <Check className="w-3 h-3 text-emerald-400" />
+                          )}
+                        </div>
+                        <h4 className={`text-xs font-semibold truncate ${isCompleted ? 'text-slate-500 line-through' : 'text-slate-200'}`}>
+                          {step.title}
+                        </h4>
+                        <p className="text-[10px] text-slate-500 truncate">{step.short}</p>
+                      </div>
+                    </div>
+
+                    {/* Expand icon */}
+                    {isExpanded ? (
+                      <ChevronDown className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                    ) : (
+                      <ChevronRight className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                    )}
+                  </div>
+
+                  {/* Expanded content */}
+                  {isExpanded && (
+                    <div className="px-3.5 pb-3.5 space-y-2 border-t border-slate-800/50 pt-3">
+                      <ul className="space-y-1.5">
+                        {step.details.map((detail, dIdx) => (
+                          <li key={dIdx} className="text-[11px] text-slate-400 leading-relaxed flex gap-2">
+                            <span className="text-indigo-400 flex-shrink-0">▸</span>
+                            <span>{detail}</span>
+                          </li>
+                        ))}
+                      </ul>
+                      {step.actionButton && step.actionMessage && (
+                        <button
+                          onClick={() => onLogMessage?.(step.actionMessage!)}
+                          className="w-full mt-2 px-3 py-2 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 text-xs font-semibold rounded-lg border border-indigo-500/30 transition-colors flex items-center justify-center gap-1.5"
+                        >
+                          <Settings className="w-3.5 h-3.5" />
+                          {step.actionButton}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
 
         {/* Donation Section - Support the Creator */}

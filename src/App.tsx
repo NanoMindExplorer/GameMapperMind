@@ -644,7 +644,7 @@ export default function App() {
           )}
 
           {selectedMainView === 'credits' && (
-            <CreditsPanel />
+            <CreditsPanel onLogMessage={handleLogMessage} />
           )}
         </div>
 

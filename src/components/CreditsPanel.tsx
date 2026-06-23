@@ -1,7 +1,180 @@
 import React from 'react';
-import { Send, Instagram, Twitter, MessageSquare, Youtube, Heart, Code } from 'lucide-react';
+import { Send, Instagram, Twitter, MessageSquare, Youtube, Heart, Code, BookOpen, Smartphone, Laptop, CheckSquare, Square, ChevronRight, ChevronDown, Check, Settings } from 'lucide-react';
+import { useState } from 'react';
 
-export default function CreditsPanel() {
+const SHIZUKU_STEPS = [
+  {
+    title: "1. Aktifkan Opsi Pengembang (Developer Options)",
+    short: "Buka pengaturan sistem Android Anda untuk mengakses opsi developer.",
+    details: [
+      "Buka aplikasi ⚙️ Setelan / Pengaturan (Settings) pada HP Android Anda.",
+      "Gulir ke bawah, pilih Tentang Telepon (About Phone).",
+      "Cari 'Nomor Versi' (Build Number) atau versi OS/ROM Anda (misalnya Versi MIUI / HyperOS).",
+      "Ketuk cepat Nomor Versi tersebut sebanyak 7 kali berturut-turut hingga muncul balon teks berisi informasi 'Anda sekarang adalah pengembang!'."
+    ],
+    badge: "Prasyarat Awal",
+    actionButton: "Buka Opsi Pengembang",
+    actionMessage: "[SYSTEM] Intent: android.settings.APPLICATION_DEVELOPMENT_SETTINGS dipanggil."
+  },
+  {
+    title: "2. Aktifkan Proses Debug USB & Nirkabel",
+    short: "Aktifkan saluran transmisi perintah dan sentuhan virtual.",
+    details: [
+      "Pergi ke submenu Sistem -> Opsi Pengembang (Developer Options).",
+      "Aktifkan opsi 'Proses Debug USB' (USB Debugging).",
+      "Aktifkan opsi 'Proses Debug Nirkabel' (Wireless Debugging). Hubungkan perangkat ke Wi-Fi terlebih dahulu untuk mengaktifkan ini.",
+      "⚠️ SANGAT PENTING (HP Xiaomi, POCO, Oppo, Vivo, Realme): Cari dan aktifkan opsi 'Proses Debug USB (Setelan Keamanan)' / 'USB Debugging (Security Settings)' agar simulasi sentuhan tombol terdaftar secara lancar."
+    ],
+    badge: "Setelan Sistem"
+  },
+  {
+    title: "3. Jalankan Aplikasi & Sinkronkan Shizuku",
+    short: "Hubungkan Shizuku ke antrean driver HP menggunakan kode pairing.",
+    details: [
+      "Instal & buka aplikasi Shizuku (bisa diunduh via Google Play Store / Github).",
+      "Lakukan Penyandingan: Ketuk 'Sandingkan / Pairing', lalu ketuk opsi tersebut di Opsi Pengembang -> Wireless Debugging.",
+      "Pilih 'Sandingkan Perangkat dengan Kode Penyandingan'. Catat kode 6-digit nirkabel yang tertera di layar.",
+      "Masukkan kode tersebut pada baris notifikasi Shizuku yang muncul untuk menyelesaikan pairing.",
+      "Berhasil pairing? Kembali ke beranda Shizuku dan klik 'Mulai / Start' untuk mengaktifkannya!"
+    ],
+    badge: "Koneksi Shizuku"
+  },
+  {
+    title: "4. Izinkan Otorisasi Layanan Nexion",
+    short: "Berikan izin binder IPC aman ke aplikasi Nexion ini.",
+    details: [
+      "Ketuk tombol 'Authorize Shizuku AIDL Bindings' di panel atas.",
+      "Jendela pop-up bawaan Shizuku akan langsung muncul di HP Anda.",
+      "Silakan ketuk opsi 'Izinkan Selalu' (Allow Always). Otorisasi akan sukses seketika!"
+    ],
+    badge: "Izin Aplikasi"
+  },
+  {
+    title: "5. Izinkan Tampilan Di Atas Aplikasi Lain & Optimasi Baterai",
+    short: "Izinkan rendering overlay di atas game.",
+    details: [
+      "Buka Pengaturan HP -> Aplikasi -> Kelola Aplikasi -> Cari 'Nexion' -> Aktifkan 'Tampilkan di atas aplikasi lain' (Display over other apps / Draw over other apps) agar tombol overlay HUD bisa muncul mengambang saat Anda bermain game.",
+      "🔋 MATIKAN PENGHEMAT BATERAI: Anda dapat menggunakan tombol 'Ignore Battery Optimizations' di panel atas, atau rubah secara manual di pengaturan perangkat.",
+      "Langkah ini sangat krusial agar overlay Anda tidak dihentikan (force close) atau freeze oleh sistem saat bermain game berat."
+    ],
+    badge: "Overlay & Akses",
+    actionButton: "Buka Pengaturan Aplikasi & Izin",
+    actionMessage: "[SYSTEM] Intent: android.settings.APPLICATION_DETAILS_SETTINGS dipanggil. Buka menu Overlay."
+  },
+  {
+    title: "6. Boot Daemon Shuttle & Mulai Bermain!",
+    short: "Aktifkan engine pemeta virtual dengan respons instan.",
+    details: [
+      "Klik tombol 'BOOT NEXION SHUTTLE DAEMON' di atas.",
+      "Secara instan, Anda akan melihat terminal STDOUT di sebelah kanan mencetak kode verifikasi.",
+      "Status akan berubah menjadi 'CORE DAEMON ACTIVE'. Berhasil! Pasang Gamepad Anda, buka tab 'Gamepad Tester' atau 'Overlay Editor' untuk merancang layout tombol favorit!"
+    ],
+    badge: "Finishing"
+  }
+];
+
+const DESKTOP_STEPS = [
+  {
+    title: "1. Aktifkan Proses Debug USB",
+    short: "Berikan komputer wewenang penuh untuk mengirim perintah data input.",
+    details: [
+      "Aktifkan Opsi Pengembang terlebih dahulu di HP Anda (Ketuk 'Nomor Versi' 7 kali di Tentang Telepon).",
+      "Masuk ke Opsi Pengembang, lalu hidupkan sakelar 'Proses Debug USB'.",
+      "💡 Bagi pengguna Xiaomi/POCO/Oppo: Hidupkan pula 'Proses Debug USB (Setelan Keamanan)' agar touchpad virtual berjalan."
+    ],
+    badge: "Opsi Pengembang",
+    actionButton: "Buka Opsi Pengembang",
+    actionMessage: "[SYSTEM] Intent: android.settings.APPLICATION_DEVELOPMENT_SETTINGS dipanggil."
+  },
+  {
+    title: "2. Sambungkan HP ke PC/Laptop",
+    short: "Gunakan kabel USB data orisinal dengan sambungan solid.",
+    details: [
+      "Hubungkan HP ke komputer dengan kabel USB yang bisa mentransfer berkas.",
+      "Pilih opsi 'Transfer File' (MTP) pada popup koneksi USB di HP.",
+      "Saat HP menampilkan popup 'Izinkan Debugging USB dari PC ini?', centang 'Selalu izinkan' lalu ketuk Oke."
+    ],
+    badge: "Konektivitas USB"
+  },
+  {
+    title: "3. Jalankan Berkas Companion PC",
+    short: "Jalankan skrip pembantu untuk menginjeksi core driver daemon.",
+    details: [
+      "Unduh zip Nexion Desktop Companion di PC Anda dan ekstrak arsip tersebut.",
+      "Buka folder hasil ekstrak, jalankan file pembantu instalasi:",
+      "• Mac/Linux: Jalankan terminal lalu ketik perintah './start.sh'",
+      "• Windows: Klik ganda file 'start.bat' untuk membukanya langsung.",
+      "Skrip pendamping akan otomatis menyuntikkan driver mapper ke memory heap lokal HP."
+    ],
+    badge: "Script Companion"
+  },
+  {
+    title: "4. Izinkan Tampilan Di Atas Aplikasi Lain",
+    short: "Izinkan aplikasi overlay controller & mendeteksi hardware.",
+    details: [
+      "Pergi ke Setelan HP -> Aplikasi -> Kelola Aplikasi -> Pilih 'Nexion' -> Nyalakan izin 'Tampilkan di Atas Aplikasi Lain' (Draw Over Other Apps / Display over details).",
+      "Izin overlay ini diperlukan agar panel tombol konfigurasi map bisa melayang di atas layar game Anda untuk penempatan langsung.",
+      "🔋 MATIKAN PENGHEMAT BATERAI: Anda dapat menggunakan tombol 'Ignore Battery Optimizations' di panel atas, atau rubah secara manual di pengaturan perangkat. Ini mencegah overlay keluar sendiri atau ngelag di tengah permainan."
+    ],
+    badge: "Overlay & Akses",
+    actionButton: "Buka Pengaturan Aplikasi & Izin",
+    actionMessage: "[SYSTEM] Intent: android.settings.APPLICATION_DETAILS_SETTINGS dipanggil. Buka menu Overlay."
+  },
+  {
+    title: "5. Aktifkan Driver & Lakukan Kalibrasi",
+    short: "Hubungkan terminal aplikasi dan nikmati pengalaman nol-latensi.",
+    details: [
+      "Ketuk tombol biru 'INITIALIZE VIA DESKTOP ADAPTER' di atas.",
+      "Jika terminal logs mencetak pesan sukses, mapping aktif sepenuhnya!",
+      "Selamat bermain! Sesuaikan sensor gyro, arah swipe, dan area analog sesukamu."
+    ],
+    badge: "Boot Up"
+  }
+];
+
+interface CreditsPanelProps {
+  onLogMessage?: (msg: string) => void;
+}
+
+export default function CreditsPanel({ onLogMessage }: CreditsPanelProps) {
+
+  const [activeTab, setActiveTab] = useState<'shizuku' | 'desktop'>('shizuku');
+  const [expandedShizukuStep, setExpandedShizukuStep] = useState<number | null>(0);
+  const [expandedDesktopStep, setExpandedDesktopStep] = useState<number | null>(0);
+  const [shizukuChecklist, setShizukuChecklist] = useState<boolean[]>([false, false, false, false, false, false]);
+  const [desktopChecklist, setDesktopChecklist] = useState<boolean[]>([false, false, false, false, false]);
+
+  const handleToggleExpand = (stepIdx: number) => {
+    if (activeTab === 'shizuku') setExpandedShizukuStep(prev => prev === stepIdx ? null : stepIdx);
+    else setExpandedDesktopStep(prev => prev === stepIdx ? null : stepIdx);
+  };
+
+  const handleToggleCheck = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const currExpanded = activeTab === 'shizuku' ? expandedShizukuStep : expandedDesktopStep;
+    if (currExpanded === null) return;
+    
+    if (activeTab === 'shizuku') {
+      const arr = [...shizukuChecklist];
+      arr[currExpanded] = !arr[currExpanded];
+      setShizukuChecklist(arr);
+      if (arr[currExpanded] && currExpanded < SHIZUKU_STEPS.length - 1) setExpandedShizukuStep(currExpanded + 1);
+    } else {
+      const arr = [...desktopChecklist];
+      arr[currExpanded] = !arr[currExpanded];
+      setDesktopChecklist(arr);
+      if (arr[currExpanded] && currExpanded < DESKTOP_STEPS.length - 1) setExpandedDesktopStep(currExpanded + 1);
+    }
+  };
+
+  const [copiedAddress, setCopiedAddress] = useState<string | null>(null);
+
+  const handleCopy = (address: string, label: string) => {
+    navigator.clipboard.writeText(address);
+    setCopiedAddress(label);
+    setTimeout(() => setCopiedAddress(null), 2000);
+  };
+
   const socials = [
     {
       name: "Telegram Chat Room",
@@ -73,6 +246,110 @@ export default function CreditsPanel() {
             </a>
           ))}
         </div>
+
+        
+        {/* Interactive Activation Guide (Panduan Aktifasi) */}
+        <div className="bg-slate-950/60 rounded-xl border border-indigo-950/60 p-4 space-y-4">
+          
+        </div>
+
+        {/* Donation Section - Support the Creator */}
+        <div className="bg-gradient-to-br from-amber-950/20 to-orange-950/10 rounded-xl border border-amber-900/40 p-6 space-y-4">
+          <div className="text-center space-y-2">
+            <div className="inline-flex items-center justify-center p-3 bg-amber-500/10 rounded-full mb-2 ring-1 ring-amber-500/30">
+              <Heart className="w-6 h-6 text-amber-400" />
+            </div>
+            <h3 className="text-xl font-bold text-white">Support the Creator</h3>
+            <p className="text-sm text-slate-400 max-w-md mx-auto">
+              Jika aplikasi ini bermanfaat untuk Anda, dukung kreator dengan donasi crypto. Setiap kontribusi sangat berarti untuk pengembangan lebih lanjut.
+            </p>
+          </div>
+
+          {/* Crypto Address Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {/* Bitcoin */}
+            <div className="bg-slate-950/50 rounded-lg border border-amber-900/30 p-4 space-y-2 hover:border-amber-500/50 transition-colors">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 bg-amber-500/10 rounded-full flex items-center justify-center text-amber-400 font-bold text-xs">₿</div>
+                  <span className="font-semibold text-amber-300">Bitcoin (BTC)</span>
+                </div>
+                <button
+                  onClick={() => handleCopy('TDzaGUA7YgQEaB1RfnBgWWn9QzJ8QFCVmt', 'BTC')}
+                  className="text-xs px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded transition-colors"
+                >
+                  {copiedAddress === 'BTC' ? 'Copied!' : 'Copy'}
+                </button>
+              </div>
+              <code className="text-[11px] text-slate-400 break-all font-mono block">
+                TDzaGUA7YgQEaB1RfnBgWWn9QzJ8QFCVmt
+              </code>
+            </div>
+
+            {/* EVM */}
+            <div className="bg-slate-950/50 rounded-lg border border-blue-900/30 p-4 space-y-2 hover:border-blue-500/50 transition-colors">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 bg-blue-500/10 rounded-full flex items-center justify-center text-blue-400 font-bold text-xs">Ξ</div>
+                  <span className="font-semibold text-blue-300">EVM (ETH/BSC/Polygon)</span>
+                </div>
+                <button
+                  onClick={() => handleCopy('0x96e49c673252bb0a2253418417cf1db000fec6ef', 'EVM')}
+                  className="text-xs px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded transition-colors"
+                >
+                  {copiedAddress === 'EVM' ? 'Copied!' : 'Copy'}
+                </button>
+              </div>
+              <code className="text-[11px] text-slate-400 break-all font-mono block">
+                0x96e49c673252bb0a2253418417cf1db000fec6ef
+              </code>
+            </div>
+
+            {/* Solana */}
+            <div className="bg-slate-950/50 rounded-lg border border-purple-900/30 p-4 space-y-2 hover:border-purple-500/50 transition-colors">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 bg-purple-500/10 rounded-full flex items-center justify-center text-purple-400 font-bold text-xs">◎</div>
+                  <span className="font-semibold text-purple-300">Solana (SOL)</span>
+                </div>
+                <button
+                  onClick={() => handleCopy('4B4wprDDz3pnd6EUumwAKf4LNzRHK5pH4qbustsLcLuR', 'SOL')}
+                  className="text-xs px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded transition-colors"
+                >
+                  {copiedAddress === 'SOL' ? 'Copied!' : 'Copy'}
+                </button>
+              </div>
+              <code className="text-[11px] text-slate-400 break-all font-mono block">
+                4B4wprDDz3pnd6EUumwAKf4LNzRHK5pH4qbustsLcLuR
+              </code>
+            </div>
+
+            {/* Tron */}
+            <div className="bg-slate-950/50 rounded-lg border border-red-900/30 p-4 space-y-2 hover:border-red-500/50 transition-colors">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 bg-red-500/10 rounded-full flex items-center justify-center text-red-400 font-bold text-xs">T</div>
+                  <span className="font-semibold text-red-300">Tron (TRX)</span>
+                </div>
+                <button
+                  onClick={() => handleCopy('TDzaGUA7YgQEaB1RfnBgWWn9QzJ8QFCVmt', 'TRX')}
+                  className="text-xs px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded transition-colors"
+                >
+                  {copiedAddress === 'TRX' ? 'Copied!' : 'Copy'}
+                </button>
+              </div>
+              <code className="text-[11px] text-slate-400 break-all font-mono block">
+                TDzaGUA7YgQEaB1RfnBgWWn9QzJ8QFCVmt
+              </code>
+            </div>
+          </div>
+
+          {/* Disclaimer */}
+          <p className="text-[10px] text-slate-500 text-center mt-3">
+            Always double-check the address before sending. Crypto transactions are irreversible.
+          </p>
+        </div>
+
 
         {/* Footer info */}
         <div className="mt-12 p-6 rounded-xl border border-slate-800 bg-slate-900/50 text-center">

@@ -18,3 +18,11 @@ android/app/release/
 .admin_token
 app_data.json
 .data_key
+
+# Backup files
+*.backup
+_*.backup
+
+# Scratch scripts (move to scripts/ or delete)
+/split*.cjs
+/split*.js

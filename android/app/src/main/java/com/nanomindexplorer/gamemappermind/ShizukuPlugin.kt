@@ -53,10 +53,10 @@ class ShizukuPlugin : Plugin() {
     
     @PluginMethod
     fun startDaemon(call: PluginCall) {
-        val intent = android.content.Intent("com.nanomindexplorer.gamemappermind.GamepadDaemonService")
+        val intent = android.content.Intent("com.nanomindexplorer.gamemappermind.TouchDaemonService")
         intent.setPackage(context.packageName)
         try {
-            Shizuku.bindUserService(Shizuku.UserServiceArgs(ComponentName(context.packageName, GamepadDaemonService::class.java.name)).daemon(false), connection)
+            Shizuku.bindUserService(Shizuku.UserServiceArgs(ComponentName(context.packageName, TouchDaemonService::class.java.name)).daemon(false), connection)
             call.resolve()
         } catch (e: Exception) {
             call.reject("Failed to bind Shizuku user service", e)
@@ -65,7 +65,7 @@ class ShizukuPlugin : Plugin() {
 
     @PluginMethod
     fun stopDaemon(call: PluginCall) {
-        Shizuku.unbindUserService(Shizuku.UserServiceArgs(ComponentName(context.packageName, GamepadDaemonService::class.java.name)), connection, true)
+        Shizuku.unbindUserService(Shizuku.UserServiceArgs(ComponentName(context.packageName, TouchDaemonService::class.java.name)), connection, true)
         call.resolve()
     }
 }

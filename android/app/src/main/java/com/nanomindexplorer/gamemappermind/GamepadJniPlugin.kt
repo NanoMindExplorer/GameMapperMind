@@ -42,4 +42,9 @@ object GamepadJniPlugin {
             NativeGamepadMapper.instance?.handleButton(gamepadIndex, buttonName, isDown)
         }
     }
+
+    // Overloaded 2-arg version for backward compatibility (default gamepadIndex = 0)
+    fun handleButtonBatched(buttonName: String, isDown: Boolean) {
+        handleButtonBatched(0, buttonName, isDown)
+    }
 }

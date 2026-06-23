@@ -172,7 +172,7 @@ class GamepadListenerService : Service() {
                                     
                                     val btnMap = mapEvdevToButton(btnRaw)
                                     if (btnMap != "UNKNOWN") {
-                                        GamepadJniPlugin.handleButtonBatched(gpIdx, , )
+                                        GamepadJniPlugin.handleButtonBatched(gpIdx, btnMap, isDown == 1)
                                         TouchInjectionPlugin.emitGamepadButton(btnMap, isDown, 1.0f)
                                     }
                                 }
@@ -185,6 +185,7 @@ class GamepadListenerService : Service() {
                             if (parts.size >= 3) {
                                 val isPrefixed = parts[0].startsWith("/dev/input/")
                                 val evIdx = if (isPrefixed) 1 else 0
+                                val gpIdx = if (isPrefixed) Math.max(0, gamepadDevices.indexOf(parts[0])) else 0
                                 if (parts.size > evIdx + 2) {
                                     val axisType = parts[evIdx + 1]
                                     val valueHex = parts[evIdx + 2]
@@ -195,20 +196,20 @@ class GamepadListenerService : Service() {
                                         "ABS_HAT0Y" -> {
                                             when (rawVal) {
                                                 -1 -> { 
-                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, , )
-                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, , )
+                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, "DPAD_UP", true)
+                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, "DPAD_DOWN", false)
                                                     TouchInjectionPlugin.emitGamepadButton("DPAD_UP", 1, 1f)
                                                     TouchInjectionPlugin.emitGamepadButton("DPAD_DOWN", 0, 0f) 
                                                 }
                                                 1  -> { 
-                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, , )
-                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, , )
+                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, "DPAD_DOWN", true)
+                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, "DPAD_UP", false)
                                                     TouchInjectionPlugin.emitGamepadButton("DPAD_DOWN", 1, 1f)
                                                     TouchInjectionPlugin.emitGamepadButton("DPAD_UP", 0, 0f) 
                                                 }
                                                 0  -> { 
-                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, , )
-                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, , )
+                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, "DPAD_UP", false)
+                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, "DPAD_DOWN", false)
                                                     TouchInjectionPlugin.emitGamepadButton("DPAD_UP", 0, 0f)
                                                     TouchInjectionPlugin.emitGamepadButton("DPAD_DOWN", 0, 0f) 
                                                 }
@@ -217,20 +218,20 @@ class GamepadListenerService : Service() {
                                         "ABS_HAT0X" -> {
                                             when (rawVal) {
                                                 -1 -> { 
-                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, , )
-                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, , )
+                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, "DPAD_LEFT", true)
+                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, "DPAD_RIGHT", false)
                                                     TouchInjectionPlugin.emitGamepadButton("DPAD_LEFT", 1, 1f)
                                                     TouchInjectionPlugin.emitGamepadButton("DPAD_RIGHT", 0, 0f) 
                                                 }
                                                 1  -> { 
-                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, , )
-                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, , )
+                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, "DPAD_RIGHT", true)
+                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, "DPAD_LEFT", false)
                                                     TouchInjectionPlugin.emitGamepadButton("DPAD_RIGHT", 1, 1f)
                                                     TouchInjectionPlugin.emitGamepadButton("DPAD_LEFT", 0, 0f) 
                                                 }
                                                 0  -> { 
-                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, , )
-                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, , )
+                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, "DPAD_LEFT", false)
+                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, "DPAD_RIGHT", false)
                                                     TouchInjectionPlugin.emitGamepadButton("DPAD_LEFT", 0, 0f)
                                                     TouchInjectionPlugin.emitGamepadButton("DPAD_RIGHT", 0, 0f) 
                                                 }

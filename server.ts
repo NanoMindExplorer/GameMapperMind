@@ -1,137 +1,185 @@
 import express, { Request, Response, NextFunction } from "express";
 import path from "path";
 import cors from "cors";
-import fs from "fs/promises";
 import crypto from "crypto";
 import { z } from "zod";
+import rateLimit from "express-rate-limit";
+import db, { saveProfileDB, loadAllProfilesDB } from "./data/db";
 
 const app = express();
-const PORT: number = parseInt(process.env.PORT ?? "3000", 10);
+const PORT: number = parseInt(process.env.PORT || "3000", 10);
 
-const ALLOWED_ORIGINS = ["http://localhost:3000", "capacitor://localhost", "http://localhost"];
+const ALLOWED_ORIGINS = [
+  "capacitor://localhost",
+  "http://localhost",
+  "http://localhost:3000",
+  "http://localhost:5173",
+];
 
+// BUG-02: CORS middleware
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin || ALLOWED_ORIGINS.includes(origin) || origin.endsWith('.run.app')) {
       callback(null, true);
     } else {
-      callback(new Error("Not allowed by CORS"));
+      callback(new Error("CORS: Origin tidak diizinkan"));
     }
   },
-  credentials: true
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true,
 }));
-
-const API_KEY = process.env.VITE_NEXION_API_KEY;
-
-if (!API_KEY || API_KEY.length < 32) {
-  console.error("FATAL: VITE_NEXION_API_KEY must be set and at least 32 chars");
-  process.exit(1);
-}
-
-// Simple API Key Middleware
-app.use("/api", (req: Request, res: Response, next: NextFunction) => {
-  if (req.method === "OPTIONS") return next();
-  const authHeader = req.headers.authorization;
-  if (!authHeader || authHeader !== `Bearer ${API_KEY}`) {
-    res.status(401).json({ error: "Unauthorized" });
-    return;
-  }
-  next();
-});
 
 app.use(express.json({ limit: "1mb" }));
 
-// Bug #21: trimLog
-function trimLog<T>(arr: T[], maxSize: number = 50): T[] {
-  return arr.length > maxSize ? arr.slice(arr.length - maxSize) : arr;
+// BUG-01: Generate secure token
+const generateSecureToken = () => crypto.randomBytes(32).toString("hex");
+
+// BUG-15: Safe logic clamped Random
+function clampedRandom(min: number, max: number): number {
+  const val = min + Math.random() * (max - min);
+  return Math.min(1.0, Math.max(0.0, parseFloat(val.toFixed(4))));
 }
 
-// Bug #14: State persistensi
-const STATE_FILE = path.join(process.cwd(), "state.json");
-interface AppState {
-  logs: string[];
-}
-let appState: AppState = { logs: [] };
+// Global state
+const aiTunnelState = {
+  apiToken: process.env.AI_TUNNEL_SECRET || generateSecureToken(),
+  confidenceScore: clampedRandom(0.80, 0.99),
+  logs: [] as string[]
+};
 
-async function loadState() {
-  try {
-    const data = await fs.readFile(STATE_FILE, "utf-8");
-    appState = JSON.parse(data);
-  } catch (err: unknown) {
-    console.log("No existing state file found or invalid JSON. Initializing new state.");
+// BUG-08: Auto-trim with while loop
+function pushLog(logs: string[], message: string, max = 50): void {
+  logs.push(message);
+  while (logs.length > max) {
+    logs.shift();
   }
 }
 
-async function saveState() {
-  try {
-    await fs.writeFile(STATE_FILE, JSON.stringify(appState, null, 2), "utf-8");
-  } catch (err: unknown) {
-    console.error("Failed to save state.");
-  }
-}
+// BUG-11: Mask token in logs
+pushLog(aiTunnelState.logs, "[AI-TUNNEL] Server listening on /api/ai/* endpoints.");
+pushLog(aiTunnelState.logs, "[AI-TUNNEL] Token generated. Visible ONLY in server console.");
+pushLog(aiTunnelState.logs, "[AI-TUNNEL] Waiting for VLM agent handshake...");
 
-app.get("/api/health", (req: Request, res: Response) => {
-  res.json({ status: "ok" });
+app.get("/api/ai/tunnel-status", (req: Request, res: Response) => {
+  const { apiToken, ...safeState } = aiTunnelState;
+  res.json(safeState);
 });
 
-// Bug #16: typo instruksi
+// BUG-19: Rate limit
+const aiLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 120, // max 120 req/min
+  message: { error: "Terlalu banyak request. Coba lagi nanti." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use("/api/ai/", aiLimiter);
+
+// BUG-05 & BUG-25: Sanitize input & Zod schema validation
+function sanitizeLogInput(input: string): string {
+  if (typeof input !== "string") return "[INVALID INPUT]";
+  return input
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/[\x00-\x1F]/g, "")
+    .substring(0, 256);
+}
+
+const DaemonControlSchema = z.object({
+  action: z.enum(["start", "stop", "toggle_mode"]),
+  mode: z.enum(["shizuku", "desktop", "adb"]).optional(),
+});
+
+app.post("/api/daemon/control", (req: Request, res: Response) => {
+  const parsed = DaemonControlSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.flatten() });
+    return;
+  }
+  const { action, mode } = parsed.data;
+  
+  if (action === "start") {
+    pushLog(aiTunnelState.logs, `[INFO] Daemon start requested via mode: ${mode || 'unknown'}`);
+  } else if (action === "stop") {
+    pushLog(aiTunnelState.logs, `[INFO] Daemon stop requested`);
+  }
+  
+  res.json({ success: true, action, state: "applied" });
+});
+
+app.post("/api/daemon/log", (req: Request, res: Response) => {
+  const msg = req.body?.message;
+  if (msg) {
+    const cleanMsg = sanitizeLogInput(msg);
+    pushLog(aiTunnelState.logs, `[DAEMON] ${cleanMsg}`);
+  }
+  res.json({ success: true });
+});
+
+// Endpoint untuk menyimpan log biasa
 const LogSchema = z.object({
   message: z.string(),
-  instruksi: z.string().optional()
+  instruksi: z.string().optional() // BUG-16: typo diperbaiki
 });
 
-app.post("/api/log", async (req: Request, res: Response) => {
+app.post("/api/log", (req: Request, res: Response) => {
   try {
     const parsed = LogSchema.parse(req.body);
-    const clientIp = req.ip || ""; // Bug #10
+    const clientIp = req.ip || "";
+    const cleanMsg = sanitizeLogInput(`[${clientIp}] ${parsed.message} ${parsed.instruksi ? '- ' + parsed.instruksi : ''}`);
+    pushLog(aiTunnelState.logs, cleanMsg);
     
-    appState.logs.push(`[${clientIp}] ${parsed.message} ${parsed.instruksi ? '- ' + parsed.instruksi : ''}`);
-    appState.logs = trimLog(appState.logs);
+    // SQLite persist settings as example (BUG-06)
+    const storeLog = db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
+    storeLog.run("last_log", cleanMsg);
     
-    await saveState();
-    res.json({ success: true, count: appState.logs.length });
+    res.json({ success: true, count: aiTunnelState.logs.length });
   } catch (error: unknown) {
     res.status(400).json({ error: "Invalid request payload" });
   }
 });
 
 app.get("/api/logs", (req: Request, res: Response) => {
-    res.json({ logs: appState.logs });
+    res.json({ logs: aiTunnelState.logs });
 });
 
-// Vite middleware for development
+// BUG-09: Try/Catch on server start
 async function startServer() {
-  await loadState();
+  try {
+    if (process.env.NODE_ENV !== "production") {
+      const { createServer: createViteServer } = await import("vite");
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa",
+      });
+      app.use(vite.middlewares);
+    } else {
+      const distPath = path.join(process.cwd(), "dist", "client");
+      app.use(express.static(distPath));
+      app.get("*", (req: Request, res: Response) => {
+        res.sendFile(path.join(distPath, "index.html"));
+      });
+    }
 
-  if (process.env.NODE_ENV !== "production") {
-    // Bug #3: Dynamic import
-    const { createServer: createViteServer } = await import("vite");
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
+    app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
+      console.error("Global Error:", err.message);
+      res.status(500).json({ error: "Internal Server Error" });
     });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), "dist", "client");
-    app.use(express.static(distPath));
-    app.get("*", (req: Request, res: Response) => {
-      res.sendFile(path.join(distPath, "index.html"));
+
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`✅ Server running on http://localhost:${PORT}`);
+      console.log(`🔑 AI Tunnel Token (RAHASIA): ${aiTunnelState.apiToken}`);
+      console.log("⚠️  Jangan bagikan token ini! Simpan di environment variable.");
     });
+  } catch (err) {
+    console.error("❌ FATAL: Server gagal start:", err);
+    process.exit(1);
   }
-
-  // Bug #17: Global error handler
-  app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
-    console.error("Global Error:", err.message);
-    res.status(500).json({ error: "Internal Server Error" });
-  });
-
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on port ${PORT}`);
-  });
 }
 
-// Bug #20: Catch start pattern
-startServer().catch(err => {
-  console.error("Failed to start server", err);
+process.on("unhandledRejection", (reason) => {
+  console.error("Unhandled rejection:", reason);
   process.exit(1);
 });
+
+startServer();

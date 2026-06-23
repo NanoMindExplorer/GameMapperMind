@@ -25,6 +25,7 @@ import {
 import { useShizuku } from './hooks/useShizuku';
 import { useGamepadLoop } from './hooks/useGamepadLoop';
 import { useInputInjector } from './hooks/useInputInjector';
+import { GamepadStatusBadge } from './components/GamepadStatusBadge';
 
 export default function App() {
   const { checkShizukuStatus, executeShizukuCommand, injectInput, stopDaemon } = useShizuku();
@@ -389,6 +390,7 @@ export default function App() {
 
           {/* Quick HUD State indications & Emergency Kill Switch */}
           <div className="flex items-center gap-4">
+            <GamepadStatusBadge />
             <div className="hidden md:flex items-center gap-6 text-[10px] text-slate-400 font-mono pr-2 border-r border-slate-800">
               <div className="flex items-center gap-2" title={shizukuState.status === 'CONNECTED_SHIZUKU' || shizukuState.status === 'CONNECTED_ADB' ? `Shizuku Service Running` : 'No gamepad connected'}>
                 <span className={`w-1.5 h-1.5 rounded-full ${shizukuState.status === 'CONNECTED_SHIZUKU' || shizukuState.status === 'CONNECTED_ADB' ? 'bg-green-500 animate-pulse' : 'bg-slate-600'}`}></span>

@@ -6,4 +6,12 @@ coverage/
 *.log
 .env*
 !.env.example
+.env.local
+.env.*.local
+.env.production
 state.json
+data/
+*.db
+*.db-shm
+*.db-wal
+android/app/release/

@@ -135,18 +135,24 @@ export default function OverlayCanvas({ h }: { h: OverlayWysiwygHook }) {
                   
                   return (
                     <React.Fragment>
-                      {/* Sub-grid crosshair indicator */}
+                      {/* Sub-grid crosshair indicator — pointer-events-none */}
                       <div className="absolute inset-3 border border-white/10 rounded-full flex items-center justify-center pointer-events-none">
                         <div className="w-full h-[1px] bg-white/5 absolute"></div>
                         <div className="h-full w-[1px] bg-white/5 absolute"></div>
                       </div>
                       
-                      {/* The analog cap that moves */}
+                      {/* The analog cap that moves.
+                          BUG-FIX: pointer-events-none — analog cap tidak boleh intercept
+                          touch/mouse events. Sebelumnya, analog cap (absolute w-[45%] h-[45%])
+                          menyerap mousedown/touchstart, sehingga setelah drag analog stick,
+                          drag tombol lain tidak berfungsi (event tertangkap oleh analog cap).
+                          BUG-FIX: Hapus transition transform saat sedang drag (h.isDragging)
+                          untuk mencegah visual glitch "membesar" saat drag analog + gamepad gerak. */}
                       <div 
-                        className={`absolute w-[45%] h-[45%] ${baseColor} rounded-full border-[2.5px] ${borderColor} shadow-[0_4px_10px_rgba(0,0,0,0.5),inset_0_3px_5px_rgba(255,255,255,0.4)] z-10 flex items-center justify-center backdrop-blur-md`}
+                        className={`absolute w-[45%] h-[45%] ${baseColor} rounded-full border-[2.5px] ${borderColor} shadow-[0_4px_10px_rgba(0,0,0,0.5),inset_0_3px_5px_rgba(255,255,255,0.4)] z-10 flex items-center justify-center backdrop-blur-md pointer-events-none`}
                         style={{
                           transform: `translate(${stickX}px, ${stickY}px)`,
-                          transition: 'transform 80ms ease-out'
+                          transition: h.isDragging ? 'none' : 'transform 80ms ease-out'
                         }}
                       >
                          <div className="w-1/3 h-1/3 rounded-full bg-white/30 blur-[1px]"></div>
@@ -156,7 +162,7 @@ export default function OverlayCanvas({ h }: { h: OverlayWysiwygHook }) {
                 }
                 
                 if (btn.type === 'gyro_area') {
-                  return <div className="border border-dashed border-pink-400/40 absolute inset-2 rounded-full animate-spin" style={{ animationDuration: '20s' }}></div>;
+                  return <div className="border border-dashed border-pink-400/40 absolute inset-2 rounded-full animate-spin pointer-events-none" style={{ animationDuration: '20s' }}></div>;
                 }
                 
                 if (isSwipe) {

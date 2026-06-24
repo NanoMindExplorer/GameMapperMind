@@ -117,7 +117,7 @@ export const INITIAL_PROFILES: GamepadProfile[] = [
     // Layout: Pass/Shoot/Sprint/Through-ball + analog gerak + skill moves.
     id: 'efootball',
     name: 'eFootball',
-    packageName: 'com.konami.pesam',
+    packageName: 'jp.konami.pesam',
     description: 'Default mapping untuk eFootball (PES mobile)',
     isCustom: false,
     gyroSensitivity: 1.0,

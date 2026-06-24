@@ -164,9 +164,14 @@ export default function OverlayCanvas({ h }: { h: OverlayWysiwygHook }) {
                           menyerap mousedown/touchstart, sehingga setelah drag analog stick,
                           drag tombol lain tidak berfungsi (event tertangkap oleh analog cap).
                           BUG-FIX: Hapus transition transform saat sedang drag (h.isDragging)
-                          untuk mencegah visual glitch "membesar" saat drag analog + gamepad gerak. */}
+                          untuk mencegah visual glitch "membesar" saat drag analog + gamepad gerak.
+                          BUG-FIX: Hapus backdrop-blur-md — backdrop-filter memaksa WebView
+                          render ulang seluruh area di belakang analog cap (canvas, screenshot,
+                          grid, tombol lain) setiap kali analog cap re-render. Saat analog
+                          stick di-select/deselect, re-render analog cap memicu composite
+                          ulang seluruh canvas → visual "membesar/mengecil". */}
                       <div 
-                        className={`absolute w-[45%] h-[45%] ${baseColor} rounded-full border-[2.5px] ${borderColor} shadow-[0_4px_10px_rgba(0,0,0,0.5),inset_0_3px_5px_rgba(255,255,255,0.4)] z-10 flex items-center justify-center backdrop-blur-md pointer-events-none`}
+                        className={`absolute w-[45%] h-[45%] ${baseColor} rounded-full border-[2.5px] ${borderColor} shadow-[0_4px_10px_rgba(0,0,0,0.5),inset_0_3px_5px_rgba(255,255,255,0.4)] z-10 flex items-center justify-center pointer-events-none`}
                         style={{
                           transform: `translate(${stickX}px, ${stickY}px)`,
                           transition: h.isDragging ? 'none' : 'transform 80ms ease-out'
@@ -213,7 +218,7 @@ export default function OverlayCanvas({ h }: { h: OverlayWysiwygHook }) {
               })()}
 
               {isSelected(btn.id) && (
-                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 flex gap-1 pointer-events-auto shadow-xl z-50 bg-slate-900/95 backdrop-blur p-1.5 rounded-lg border border-slate-700">
+                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 flex gap-1 pointer-events-auto shadow-xl z-50 bg-slate-900/95 p-1.5 rounded-lg border border-slate-700">
                   <button 
                     onClick={(e) => { e.stopPropagation(); h.relocateButtonOffset(btn.id, 0, -1); }}
                     className="w-7 h-7 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center justify-center text-[11px] touch-none"
@@ -269,7 +274,7 @@ export default function OverlayCanvas({ h }: { h: OverlayWysiwygHook }) {
         })}
 
         {/* Quick HUD guide */}
-        <div className="absolute bottom-3 left-4 right-4 flex justify-between text-[10px] font-mono text-slate-400 tracking-wide bg-slate-950/80 p-2 rounded backdrop-blur border border-slate-900 pointer-events-none">
+        <div className="absolute bottom-3 left-4 right-4 flex justify-between text-[10px] font-mono text-slate-400 tracking-wide bg-slate-950/80 p-2 rounded border border-slate-900 pointer-events-none">
           <span>Orchestration Context Active Node Out: {h.activeProfile.packageName}</span>
           <span>Sub-frame Latency: &lt;8 ms</span>
         </div>

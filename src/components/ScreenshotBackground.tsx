@@ -23,7 +23,7 @@ export default function ScreenshotBackground({ h, children }: { h: OverlayWysiwy
 
           {/* Settings Panel — absolute overlay, tidak push canvas */}
           {h.showConfig && (
-            <div className="absolute left-7 top-2 bottom-2 w-64 bg-slate-950/95 backdrop-blur-md border border-slate-700 rounded-lg p-4 flex flex-col gap-4 overflow-y-auto custom-scrollbar z-20 shadow-2xl">
+            <div className="absolute left-7 top-2 bottom-2 w-64 bg-slate-950/95 border border-slate-700 rounded-lg p-4 flex flex-col gap-4 overflow-y-auto custom-scrollbar z-20 shadow-2xl">
               <div>
                 <h3 className="text-sm font-bold font-sans tracking-tight text-white flex items-center gap-2 mb-1">
                   <Settings className="w-4 h-4 text-indigo-400" /> Layout Settings

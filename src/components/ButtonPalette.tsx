@@ -6,7 +6,7 @@ export default function ButtonPalette({ h }: { h: OverlayWysiwygHook }) {
   if (!h.showPalette) return null;
   
   return (
-    <div className="absolute top-24 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-xl p-4 shadow-2xl w-[90%] max-w-[600px] pointer-events-auto transition-all">
+    <div className="absolute top-24 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 border border-slate-700/80 rounded-xl p-4 shadow-2xl w-[90%] max-w-[600px] pointer-events-auto transition-all">
       <div className="flex justify-between items-center mb-3 border-b border-slate-800 pb-2">
         <div className="text-[11px] font-bold text-slate-300 uppercase tracking-wider">Gamepad Palette</div>
         <button onClick={() => h.setShowPalette(false)} className="text-slate-400 hover:text-white transition-colors">

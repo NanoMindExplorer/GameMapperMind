@@ -93,11 +93,28 @@ export default function OverlayCanvas({ h }: { h: OverlayWysiwygHook }) {
                 height: `${btn.height || 56}px`,
                 transform: 'translate(-50%, -50%)',
                 opacity: h.globalNodeOpacity / 100,
-                boxShadow: isSelected(btn.id) && h.showPalette ? '0 0 16px rgba(139, 92, 246, 0.8), inset 0 0 8px rgba(139, 92, 246, 0.4)' : undefined,
-                borderColor: isSelected(btn.id) && h.showPalette ? '#8B5CF6' : undefined
+                // BUG-FIX: Hapus box-shadow saat selected — visual "membesar" illusion
+                // disebabkan oleh border-2 + box-shadow yang membuat analog stick (120px)
+                // terlihat berubah ukuran saat select/deselect. Gunakan outline instead
+                // (tidak menambah layout size).
+                outline: isSelected(btn.id) && h.showPalette ? '2px solid #8B5CF6' : undefined,
+                outlineOffset: '2px',
+                boxShadow: undefined,
+                borderColor: undefined,
               }}
-              onMouseDown={(e) => h.handleDragStart(btn.id, e)}
-              onTouchStart={(e) => h.handleDragStart(btn.id, e)}
+              onMouseDown={(e) => {
+                // BUG-FIX: preventDefault di sini untuk stop WebView zoom/scroll
+                // saat touch analog stick. Sebelumnya hanya stopPropagation.
+                e.preventDefault();
+                e.stopPropagation();
+                h.handleDragStart(btn.id, e);
+              }}
+              onTouchStart={(e) => {
+                // BUG-FIX: preventDefault di touchStart juga untuk stop pinch-zoom.
+                e.preventDefault();
+                e.stopPropagation();
+                h.handleDragStart(btn.id, e);
+              }}
               onClick={(e) => e.stopPropagation()}
             >
               {isSelected(btn.id) && h.showPalette && (

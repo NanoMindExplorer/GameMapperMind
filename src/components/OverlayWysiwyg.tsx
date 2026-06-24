@@ -23,7 +23,10 @@ export default function OverlayWysiwyg(props: OverlayWysiwygProps) {
     <div className="flex flex-col h-full bg-slate-950 font-sans text-slate-200 overflow-hidden">
       <ProfileToolbar h={h} />
       
-      <div className="flex-1 relative min-h-0 container mx-auto px-4 max-w-7xl overflow-hidden">
+      {/* BUG-SYNC1 FIX: Hapus px-4 dan max-w-7xl — canvas harus full width agar
+          persen canvas = persen layar. Sebelumnya px-4 (32px padding) menyebabkan
+          offset: canvas 85% ≠ screen 85% → injeksi mendarat 27px lebih kanan. */}
+      <div className="flex-1 relative min-h-0 overflow-hidden">
         <ScreenshotBackground h={h}>
           <OverlayCanvas h={h} />
           <ButtonPropertyPanel h={h} />

@@ -51,10 +51,14 @@ class GamepadPlugin : Plugin() {
     fun handleGenericMotionEvent(event: MotionEvent?): Boolean {
         if (event == null) return false
         if ((event.source and android.view.InputDevice.SOURCE_JOYSTICK) == android.view.InputDevice.SOURCE_JOYSTICK) {
-            val axisX = event.getAxisValue(MotionEvent.AXIS_X)
-            val axisY = event.getAxisValue(MotionEvent.AXIS_Y)
-            val axisZ = event.getAxisValue(MotionEvent.AXIS_Z)
-            val axisRZ = event.getAxisValue(MotionEvent.AXIS_RZ)
+            val axisX = event.getAxisValue(MotionEvent.AXIS_X)   // Left stick X
+            val axisY = event.getAxisValue(MotionEvent.AXIS_Y)   // Left stick Y
+            // BUG-SYNC3 FIX: Use AXIS_RX/AXIS_RY for right stick (not AXIS_Z/AXIS_RZ).
+            // AXIS_Z = L2 trigger on PS controllers, right stick X on Xbox only.
+            // AXIS_RZ = R2 trigger on PS controllers, right stick Y on Xbox only.
+            // AXIS_RX/AXIS_RY = right stick on ALL standard controllers (W3C mapping).
+            val axisRX = event.getAxisValue(MotionEvent.AXIS_RX)  // Right stick X
+            val axisRY = event.getAxisValue(MotionEvent.AXIS_RY)  // Right stick Y
             val hatX = event.getAxisValue(MotionEvent.AXIS_HAT_X)
             val hatY = event.getAxisValue(MotionEvent.AXIS_HAT_Y)
             
@@ -66,27 +70,28 @@ class GamepadPlugin : Plugin() {
             val changed =
                 Math.abs(axisX - lastAxis[0]) > EPSILON ||
                 Math.abs(axisY - lastAxis[1]) > EPSILON ||
-                Math.abs(axisZ - lastAxis[2]) > EPSILON ||
-                Math.abs(axisRZ - lastAxis[3]) > EPSILON ||
+                Math.abs(axisRX - lastAxis[2]) > EPSILON ||
+                Math.abs(axisRY - lastAxis[3]) > EPSILON ||
                 Math.abs(hatX - lastAxis[4]) > EPSILON ||
                 Math.abs(hatY - lastAxis[5]) > EPSILON ||
                 Math.abs(l2Trigger - lastAxis[6]) > EPSILON ||
                 Math.abs(r2Trigger - lastAxis[7]) > EPSILON
             if (!changed) return true
-            lastAxis = floatArrayOf(axisX, axisY, axisZ, axisRZ, hatX, hatY, l2Trigger, r2Trigger)
+            lastAxis = floatArrayOf(axisX, axisY, axisRX, axisRY, hatX, hatY, l2Trigger, r2Trigger)
             
             val ret = JSObject()
             ret.put("type", "AXIS")
             ret.put("axisX", axisX)
             ret.put("axisY", axisY)
-            ret.put("axisZ", axisZ)
-            ret.put("axisRZ", axisRZ)
+            ret.put("axisRX", axisRX)
+            ret.put("axisRY", axisRY)
             ret.put("hatX", hatX)
             ret.put("hatY", hatY)
             ret.put("timestamp", event.eventTime)
             notifyListeners("gamepadEvent", ret)
 
-            val axes = floatArrayOf(axisX, axisY, axisZ, axisRZ, l2Trigger, r2Trigger)
+            // BUG-SYNC3 FIX: Emit [LX, LY, RX, RY, L2, R2] — consistent with Shizuku path.
+            val axes = floatArrayOf(axisX, axisY, axisRX, axisRY, l2Trigger, r2Trigger)
             TouchInjectionPlugin.emitGamepadAxis(axes)
             
             // D-pad: emit press AND release

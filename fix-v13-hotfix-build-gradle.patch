@@ -1,0 +1,13 @@
+diff --git a/android/app/build.gradle b/android/app/build.gradle
+index 4d8dd6e..06f7d89 100755
+--- a/android/app/build.gradle
++++ b/android/app/build.gradle
+@@ -10,7 +10,7 @@ android {
+         targetSdkVersion rootProject.ext.targetSdkVersion
+         // BUG-K2 FIX: Auto-increment versionCode from CI run number. Falls back to 1 for local builds.
+         // This ensures every CI build has a unique, monotonically increasing versionCode for Play Store updates.
+-        versionCode System.getenv("GITHUB_RUN_NUMBER")?.toInt() ?: 1
++        versionCode Integer.parseInt(System.getenv("GITHUB_RUN_NUMBER") ?: "1")
+         versionName "1.0"
+         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+         aaptOptions {

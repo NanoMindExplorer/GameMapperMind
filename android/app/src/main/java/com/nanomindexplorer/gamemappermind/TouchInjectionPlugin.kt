@@ -50,7 +50,7 @@ class TouchInjectionPlugin : Plugin() {
     // BUG FIX: Add tag for ProGuard/R8 stability (per Shizuku API docs)
     private val USER_SERVICE_ARGS = Shizuku.UserServiceArgs(
         ComponentName("com.nanomindexplorer.gamemappermind", TouchDaemonService::class.java.name)
-    ).tag("touch_daemon_v1").daemon(false).processNameSuffix("touch_daemon").version(1)
+    ).tag("touch_daemon_v1").daemon(true).processNameSuffix("touch_daemon").version(1)
 
     // BUG-B1/B2 FIX: pendingBindCalls must be cleaned up on error / disconnect.
     private val pendingBindCalls = mutableListOf<PluginCall>()
@@ -124,9 +124,9 @@ class TouchInjectionPlugin : Plugin() {
                     synchronized(pendingLock) { pendingBindCalls.add(call) }
                     try {
                         if (isBound) {
-                            // BUG FIX: Use false (don't remove) instead of true (remove).
-                            // unbindUserService with true KILLS the service process,
-                            // causing app to disappear from Shizuku management.
+                            // daemon(true) means service may still be alive even if our binder died.
+                            // Use false (don't remove) — just unbind our connection, keep service running.
+                            // Then re-bind with bindUserService below.
                             Shizuku.unbindUserService(USER_SERVICE_ARGS, serviceConnection, false)
                         }
                     } catch (e: Exception) {}
@@ -168,13 +168,11 @@ class TouchInjectionPlugin : Plugin() {
             try { Thread.sleep(100) } catch (e: InterruptedException) {}
             
             if (isBound) {
-                // CRITICAL FIX: Do NOT call touchService?.destroy() directly!
-                // destroy() calls System.exit(0) which kills the process immediately.
-                // unbindUserService(..., true) will send the destroy transaction
-                // (code 16777114) to the service, which calls destroy() internally.
-                // Calling destroy() directly here kills the process BEFORE
-                // unbindUserService can clean up, causing the app to disappear
-                // from Shizuku management.
+                // daemon(true) means service stays alive even after unbind.
+                // unbindUserService(..., true) sends the destroy transaction (code 16777114)
+                // to the service, which calls destroy() → System.exit(0) → service process dies.
+                // This is the ONLY way to stop a daemon(true) service (besides stopping Shizuku itself).
+                // Use true here because user explicitly clicked "Stop Daemon" — they want full shutdown.
                 Shizuku.unbindUserService(USER_SERVICE_ARGS, serviceConnection, true)
                 touchService = null
                 isBound = false

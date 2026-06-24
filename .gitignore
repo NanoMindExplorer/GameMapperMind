@@ -41,3 +41,7 @@ scripts/run_ui_*
 
 # Patch files - should not be committed
 *.patch
+
+# Build artifact files - should not be committed
+fix-compile*.txt
+*.b64

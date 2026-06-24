@@ -168,8 +168,23 @@ class NativeGamepadMapper(private val context: Context) {
                 y += oy
                 
                 if (tapDuration > 0L) {
-                    TouchInjectionPlugin.touchService?.injectTap(x, y, tapDuration)
-                    lastState[buttonName + gamepadIndex] = true
+                    // DEFECT #2 FIX: injectTap uses internal daemon pointer (100-199), NOT pointersById.
+                    // Previously, lastState was set true and return — but if injectTap failed (service
+                    // null, RemoteException), lastState stayed true forever. Next press: wasDown=true →
+                    // `isDown && !wasDown` false → injectTap never fires again → button permanently stuck.
+                    //
+                    // Fix: Use try-catch. If injectTap succeeds, set lastState=true. If it fails,
+                    // do NOT set lastState=true (allow retry on next press).
+                    try {
+                        val tapResult = TouchInjectionPlugin.touchService?.injectTap(x, y, tapDuration) ?: false
+                        if (tapResult) {
+                            lastState[buttonName + gamepadIndex] = true
+                        }
+                        // If tapResult is false, lastState stays false → next press will retry.
+                    } catch (e: Exception) {
+                        Log.w("GameMapper", "injectTap failed for $buttonName: ${e.message}")
+                        // lastState stays false → retry on next press.
+                    }
                     return
                 }
 
@@ -183,14 +198,11 @@ class NativeGamepadMapper(private val context: Context) {
                     if (type == "swipe" && mapping.has("swipeEndX") && mapping.has("swipeEndY")) {
                         val (ex, ey) = getScreenCoords(mapping.getDouble("swipeEndX"), mapping.getDouble("swipeEndY"))
                         // BUG-M10 FIX: Schedule touchMove AND touchUp after the swipe duration.
-                        // Previously, only touchMove was scheduled — pointer stayed "down" forever,
-                        // consuming a slot and causing ghost touches on next button press.
                         val swipeDuration = mapping.optLong("swipeDuration", 50L)
                         mainHandler.postDelayed({
                             synchronized(syncLock) {
                                 if (p.isActive) {
                                     TouchInjectionPlugin.touchService?.touchMove(p.id, ex + ox, ey + oy)
-                                    // Schedule touchUp shortly after move completes.
                                     mainHandler.postDelayed({
                                         synchronized(syncLock) {
                                             if (p.isActive) {
@@ -206,6 +218,11 @@ class NativeGamepadMapper(private val context: Context) {
                     }
                 }
             } else if (!isDown && wasDown) {
+                // DEFECT #2 FIX: For tapDuration path, no pointer is active in pointersById
+                // (injectTap uses internal daemon pointer). The release branch correctly finds
+                // p=null and skips touchUp (injectTap schedules its own touchUp internally).
+                // lastState is reset to false at line 216 below — this is correct.
+                // No additional fix needed here; the fix is in the press path (try-catch above).
                 val p = (offset..offset+15).mapNotNull { pointersById[it] }.find { it.isActive && it.virtualKey == buttonName }
                 if (p != null) {
                     p.isActive = false

@@ -38,3 +38,6 @@ scripts/split_*
 scripts/gen_*
 scripts/extractor*
 scripts/run_ui_*
+
+# Patch files - should not be committed
+*.patch

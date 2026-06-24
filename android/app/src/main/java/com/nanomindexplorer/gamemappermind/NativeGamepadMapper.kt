@@ -3,6 +3,7 @@ package com.nanomindexplorer.gamemappermind
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.view.WindowManager
 import org.json.JSONObject
 import kotlin.math.sqrt

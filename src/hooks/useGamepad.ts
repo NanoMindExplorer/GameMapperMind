@@ -60,7 +60,17 @@ export function useGamepad(onButtonPress?: (gamepadIndex: number, buttonIndex: n
             const getAxis = (idx: number) => axesArray.length > idx ? axesArray[idx] : 0;
             
             const buttonsList = Array.from(gp.buttons || []);
-            const currentButtons = buttonsList.map((b: any) => (typeof b === "object" && b !== null) ? b.pressed : b === 1.0);
+            // BUG-M4 FIX: Use threshold comparison (>= 0.5) instead of strict equality (=== 1.0).
+            // Gamepad analog buttons (e.g., L2/R2 triggers) report float values 0.0-1.0.
+            // Using === 1.0 misses presses where value is 0.95-0.99 (common with worn controllers).
+            // The W3C spec defines "pressed" as value >= 0.5 for analog buttons, but for digital
+            // buttons (boolean), b.pressed is authoritative.
+            const currentButtons = buttonsList.map((b: any) => {
+              if (typeof b === "object" && b !== null) {
+                return b.pressed === true || (typeof b.value === "number" && b.value >= 0.5);
+              }
+              return b === 1.0 || b === true;
+            });
             const currentStates: ButtonActionState[] = [];
 
             if (prevButtonsRef.current[gpIdx].length === 0 && currentButtons.length > 0) {
@@ -111,6 +121,9 @@ export function useGamepad(onButtonPress?: (gamepadIndex: number, buttonIndex: n
         setStates(prev => {
             if (prev.length !== newStates.length) return newStates;
             let changed = false;
+            // BUG-M13 FIX: Use epsilon comparison for axes to avoid infinite re-renders
+            // caused by floating-point drift (e.g., 0.12345678 vs 0.12345679).
+            const AXES_EPSILON = 0.001;
             for (let i = 0; i < prev.length; i++) {
                 const p = prev[i];
                 const n = newStates[i];
@@ -122,7 +135,7 @@ export function useGamepad(onButtonPress?: (gamepadIndex: number, buttonIndex: n
                 }
                 if (!changed) {
                     for (let j = 0; j < p.axes.length; j++) {
-                        if (p.axes[j] !== n.axes[j]) { changed = true; break; }
+                        if (Math.abs(p.axes[j] - n.axes[j]) > AXES_EPSILON) { changed = true; break; }
                     }
                 }
                 if (changed) break;

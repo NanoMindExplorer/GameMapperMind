@@ -253,23 +253,29 @@ class GamepadListenerService : Service() {
                                             val range = absRanges[axisType]
                                             val min = range?.first ?: -32768
                                             val max = range?.second ?: 32767
-                                            val mid = min + (max - min) / 2f
-                                            val half = (max - min) / 2f
-                                            
+                                            // BUG-MATH FIX: Use Float division throughout for precision.
+                                            // Previous code used Int division (max - min) / 2f which is OK,
+                                            // but mid computation min + (max-min)/2f can lose precision
+                                            // when min is large negative and max is large positive.
+                                            // Use Float arithmetic explicitly.
+                                            val span = (max - min).toFloat()
+                                            val mid = min + span / 2f
+                                            val half = span / 2f
+
                                             var finalVal = 0f
                                             if (axisType == "ABS_Z" || axisType == "ABS_RZ") {
-                                                // Triggers 0 to 1
-                                                finalVal = if (max > min) ((rawVal - min).toFloat() / (max - min).toFloat()).coerceIn(0f, 1f) else 0f
+                                                // Triggers: map [min, max] → [0, 1]
+                                                finalVal = if (half > 0f) ((rawVal - min).toFloat() / span).coerceIn(0f, 1f) else 0f
                                             } else {
-                                                // Analog sticks -1 to 1
-                                                var normalizedVal = if (half > 0) (rawVal - mid) / half else 0f
-                                                // Apply deadzone
+                                                // Analog sticks: map [min, max] → [-1, 1]
+                                                var normalizedVal = if (half > 0f) ((rawVal - mid) / half) else 0f
+                                                // Apply deadzone (radial-style for single axis).
                                                 if (Math.abs(normalizedVal) < 0.15f) {
                                                     normalizedVal = 0f
                                                 }
                                                 finalVal = normalizedVal.coerceIn(-1f, 1f)
                                             }
-                                            
+
                                             when (axisType) {
                                                 "ABS_X"  -> { lStickX = finalVal; hasAxisChange = true }
                                                 "ABS_Y"  -> { lStickY = finalVal; hasAxisChange = true }

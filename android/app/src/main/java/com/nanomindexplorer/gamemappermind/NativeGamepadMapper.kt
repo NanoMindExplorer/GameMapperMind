@@ -78,14 +78,16 @@ class NativeGamepadMapper(private val context: Context) {
     }
 
     private fun getScreenCoords(pctX: Double, pctY: Double): Pair<Float, Float> {
-        // BUG-F4 FIX: Use WindowMetrics on API 33+, fall back to deprecated Display API on older versions.
-        val (sw, sh) = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+        // BUG-M15 FIX: WindowMetrics.currentWindowMetrics is stable since API 30 (R), not API 31 (S).
+        // Use VERSION_CODES.R as the threshold for the modern API path.
+        val (sw, sh) = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
             try {
                 val windowMetrics = windowManager.currentWindowMetrics
                 val bounds = windowMetrics.bounds
-                val rotation = android.view.Surface.ROTATION_0  // WindowMetrics already accounts for rotation
                 Pair(bounds.width().toFloat(), bounds.height().toFloat())
             } catch (e: Exception) {
+                // BUG-M9 FALLBACK: If WindowMetrics fails (e.g., on some MIUI/EMUI devices),
+                // fall back to deprecated Display API with rotation handling.
                 val dm = android.util.DisplayMetrics()
                 @Suppress("DEPRECATION")
                 windowManager.defaultDisplay.getRealMetrics(dm)
@@ -177,13 +179,27 @@ class NativeGamepadMapper(private val context: Context) {
                     p.isActive = true
                     p.virtualKey = buttonName
                     TouchInjectionPlugin.touchService?.touchDown(p.id, x, y)
-                    
+
                     if (type == "swipe" && mapping.has("swipeEndX") && mapping.has("swipeEndY")) {
                         val (ex, ey) = getScreenCoords(mapping.getDouble("swipeEndX"), mapping.getDouble("swipeEndY"))
+                        // BUG-M10 FIX: Schedule touchMove AND touchUp after the swipe duration.
+                        // Previously, only touchMove was scheduled — pointer stayed "down" forever,
+                        // consuming a slot and causing ghost touches on next button press.
+                        val swipeDuration = mapping.optLong("swipeDuration", 50L)
                         mainHandler.postDelayed({
                             synchronized(syncLock) {
                                 if (p.isActive) {
                                     TouchInjectionPlugin.touchService?.touchMove(p.id, ex + ox, ey + oy)
+                                    // Schedule touchUp shortly after move completes.
+                                    mainHandler.postDelayed({
+                                        synchronized(syncLock) {
+                                            if (p.isActive) {
+                                                p.isActive = false
+                                                p.virtualKey = null
+                                                TouchInjectionPlugin.touchService?.touchUp(p.id)
+                                            }
+                                        }
+                                    }, swipeDuration)
                                 }
                             }
                         }, 50)
@@ -213,14 +229,16 @@ class NativeGamepadMapper(private val context: Context) {
             "concave" -> kotlin.math.sqrt(absX)  // stick-small=sensitive, stick-large=insensitive (inverse)
             "custom" -> {
                 if (curvePoints == null || curvePoints.length() < 2) return absX
-                // Interpolate
+                // BUG-M7 FIX: Clamp absX to [0, 1] before interpolation to avoid idx out of range.
+                // Also coerce idx to [0, n-2] and recompute t from clamped values.
+                val clampedX = absX.coerceIn(0f, 1f)
                 val n = curvePoints.length()
                 val step = 1.0f / (n - 1)
-                val idx = (absX / step).toInt().coerceIn(0, n - 2)
-                val t = (absX - idx * step) / step
+                val idx = (clampedX / step).toInt().coerceIn(0, n - 2)
+                val t = (clampedX - idx * step) / step
                 val y1 = curvePoints.optDouble(idx, 0.0).toFloat()
                 val y2 = curvePoints.optDouble(idx + 1, 1.0).toFloat()
-                y1 + t * (y2 - y1)
+                (y1 + t * (y2 - y1)).coerceIn(0f, 1f)
             }
             else -> absX // linear
         }
@@ -234,14 +252,18 @@ class NativeGamepadMapper(private val context: Context) {
 
             val lMap = findButtonMapping("L_STICK")
             val rMap = findButtonMapping("R_STICK")
-            
-            val smoothing = lMap?.optDouble("smoothing", 0.0)?.toFloat() ?: 0f
-            val alpha = 1f - smoothing.coerceIn(0f, 0.95f)
 
-            smoothedAxes[gamepadIndex][0] = alpha * lx + (1 - alpha) * smoothedAxes[gamepadIndex][0]
-            smoothedAxes[gamepadIndex][1] = alpha * ly + (1 - alpha) * smoothedAxes[gamepadIndex][1]
-            smoothedAxes[gamepadIndex][2] = alpha * rx + (1 - alpha) * smoothedAxes[gamepadIndex][2]
-            smoothedAxes[gamepadIndex][3] = alpha * ry + (1 - alpha) * smoothedAxes[gamepadIndex][3]
+            // BUG-M8 FIX: Use independent smoothing factors for L and R sticks.
+            // Previously, lMap's smoothing was applied to BOTH sticks, ignoring rMap's smoothing.
+            val lSmoothing = lMap?.optDouble("smoothing", 0.0)?.toFloat() ?: 0f
+            val rSmoothing = rMap?.optDouble("smoothing", 0.0)?.toFloat() ?: 0f
+            val lAlpha = 1f - lSmoothing.coerceIn(0f, 0.95f)
+            val rAlpha = 1f - rSmoothing.coerceIn(0f, 0.95f)
+
+            smoothedAxes[gamepadIndex][0] = lAlpha * lx + (1 - lAlpha) * smoothedAxes[gamepadIndex][0]
+            smoothedAxes[gamepadIndex][1] = lAlpha * ly + (1 - lAlpha) * smoothedAxes[gamepadIndex][1]
+            smoothedAxes[gamepadIndex][2] = rAlpha * rx + (1 - rAlpha) * smoothedAxes[gamepadIndex][2]
+            smoothedAxes[gamepadIndex][3] = rAlpha * ry + (1 - rAlpha) * smoothedAxes[gamepadIndex][3]
 
             val sLxRaw = smoothedAxes[gamepadIndex][0]
             val sLyRaw = smoothedAxes[gamepadIndex][1]

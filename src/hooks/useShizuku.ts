@@ -15,10 +15,10 @@ export const useShizuku = () => {
         const { granted, touchServiceAlive, isBound } = await TouchInjection.checkPermission();
         const { daemonRunning } = await TouchInjection.checkDaemonRunning();
         
-        // CRITICAL FIX: Only rebind if:
-        // 1. Permission granted
-        // 2. Service NOT alive
-        // 3. NOT already binding (prevent concurrent bind attempts)
+        // BUG-FIX: Auto-rebind if permission granted but service not alive.
+        // With daemon(true), service process persists even after app is killed.
+        // But our binder connection (touchService) is null after app restart.
+        // Re-bind to reconnect to the still-running daemon service.
         if (granted && !touchServiceAlive && !isBindingRef.current) {
             isBindingRef.current = true;
             try {

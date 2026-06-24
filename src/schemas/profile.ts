@@ -20,7 +20,10 @@ export const VirtualButtonSchema = z.object({
   toolType: z.enum(['FINGER', 'STYLUS']).optional(),
   tapDuration: z.number().optional(),
   player: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).optional(),
-  sensitivityCurve: z.enum(['linear', 'exponential', 'parabolic', 'custom']).optional(),
+  // BUG-P1 FIX: Add 'concave' to enum (added in math audit v1 BUG-F1 fix).
+  // NativeGamepadMapper.applyCurve supports: linear, exponential, parabolic, concave, custom.
+  // Without 'concave' in schema, OverlayApp rejects profiles that use this curve type.
+  sensitivityCurve: z.enum(['linear', 'exponential', 'parabolic', 'concave', 'custom']).optional(),
   curvePoints: z.array(z.array(z.number())).optional(),
 });
 

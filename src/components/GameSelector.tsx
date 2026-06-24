@@ -7,6 +7,7 @@
 import React, { useRef } from 'react';
 import { GamepadProfile } from '../types';
 import { Target, Settings, Sliders, Box, HardDrive, Cpu, AlertTriangle, Play, Flame, Plus, Trash2, Edit2, Check, X, ShieldAlert, Download, Upload } from 'lucide-react';
+import { GamepadProfileSchema } from '../schemas/profile';
 
 interface GameSelectorProps {
   profiles: GamepadProfile[];
@@ -77,18 +78,60 @@ export default function GameSelector({ profiles, activeProfileId, onProfileSelec
     reader.onload = (e) => {
       try {
         const importedData = JSON.parse(e.target?.result as string);
-        if (importedData && typeof importedData === 'object' && importedData.id && typeof importedData.name === 'string') {
-          // generate a new id to prevent conflicts
-          const importedProfile: GamepadProfile = {
-            ...importedData,
+        // BUG-P7 FIX: Validate imported profile with Zod schema before accepting.
+        // Previously, only checked `typeof === 'object'` and presence of `id`/`name`.
+        // Malicious or corrupt profiles (e.g., with invalid button types, NaN coordinates)
+        // would be imported and crash the editor or native mapper.
+        const result = GamepadProfileSchema.safeParse(importedData);
+        if (result.success) {
+          // Build GamepadProfile with explicit required-field fallbacks.
+          // Schema marks some fields optional, but GamepadProfile type requires them.
+          const v = result.data;
+          const importedProfile = {
             id: `custom_imported_${Date.now()}`,
-            name: `${importedData.name} (Imported)`,
-            isCustom: true
-          };
+            name: `${v.name} (Imported)`,
+            packageName: v.packageName || 'com.unknown.app',
+            description: v.description || 'Imported profile',
+            buttons: (v.buttons || []).map((b, idx) => ({
+              id: b.id || `btn_${idx}_${Date.now()}`,
+              label: b.label || `Button ${idx}`,
+              type: b.type || 'button' as const,
+              x: b.x ?? 50,
+              y: b.y ?? 50,
+              width: b.width ?? 56,
+              height: b.height ?? 56,
+              mappedKey: b.mappedKey || 'A',
+              androidEventCode: b.androidEventCode ?? 96,
+              opacity: b.opacity ?? 80,
+              ...(b.macroId && { macroId: b.macroId }),
+              ...(b.deadzone !== undefined && { deadzone: b.deadzone }),
+              ...(b.sensitivity !== undefined && { sensitivity: b.sensitivity }),
+              ...(b.swipeDirection && { swipeDirection: b.swipeDirection }),
+              ...(b.swipeDuration !== undefined && { swipeDuration: b.swipeDuration }),
+              ...(b.inputSource && { inputSource: b.inputSource }),
+              ...(b.toolType && { toolType: b.toolType }),
+              ...(b.tapDuration !== undefined && { tapDuration: b.tapDuration }),
+              ...(b.player && { player: b.player }),
+              ...(b.sensitivityCurve && { sensitivityCurve: b.sensitivityCurve }),
+              ...(b.curvePoints && { curvePoints: b.curvePoints }),
+            })),
+            gyroSensitivity: v.gyroSensitivity ?? 1.0,
+            deadzone: v.deadzone ?? 0.15,
+            smoothing: v.smoothing ?? 0.2,
+            isCustom: true,
+            ...(v.icon && { icon: v.icon }),
+            ...(v.globalOpacity !== undefined && { globalOpacity: v.globalOpacity }),
+            ...(v.antiBanEnabled !== undefined && { antiBanEnabled: v.antiBanEnabled }),
+            ...(v.screenshotMode && { screenshotMode: v.screenshotMode }),
+            ...(v.customScreenshotUrl && { customScreenshotUrl: v.customScreenshotUrl }),
+            ...(v.orientation && { orientation: v.orientation }),
+            ...(v.portraitButtons && { portraitButtons: v.portraitButtons }),
+            ...(v.hapticIntensity !== undefined && { hapticIntensity: v.hapticIntensity }),
+          } as GamepadProfile;
           onCreateProfile(importedProfile);
           onLogMessage(`Profile Engine: Successfully imported profile [${importedProfile.name}]`);
         } else {
-          onLogMessage("Profile Engine: Failed. Invalid profile JSON format.");
+          onLogMessage(`Profile Engine: Import failed — invalid profile format. ${result.error.issues[0]?.message || ''}`);
         }
       } catch (err) {
          onLogMessage("Profile Engine: Failed to parse JSON file.");

@@ -135,12 +135,25 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
         const ly = axes[1] !== undefined ? axes[1] : 0;
         const rx = axes[2] !== undefined ? axes[2] : 0;
         const ry = axes[3] !== undefined ? axes[3] : 0;
-        
+
+        // BUG-P13 FIX: Use radial deadzone (magnitude-based) instead of per-axis threshold.
+        // Per-axis deadzone causes "diagonal drift" — when stick is at 45°, both X and Y
+        // are ~0.07 (below 0.08 threshold), so output is (0, 0). But the stick IS moved.
+        // Radial deadzone: if magnitude > deadzone, scale = (mag - dz) / (1 - dz), apply to both.
         const deadzone = 0.08;
-        const filterLX = Math.abs(lx) > deadzone ? lx : 0;
-        const filterLY = Math.abs(ly) > deadzone ? ly : 0;
-        const filterRX = Math.abs(rx) > deadzone ? rx : 0;
-        const filterRY = Math.abs(ry) > deadzone ? ry : 0;
+        const lMag = Math.sqrt(lx * lx + ly * ly);
+        const rMag = Math.sqrt(rx * rx + ry * ry);
+        let filterLX = 0, filterLY = 0, filterRX = 0, filterRY = 0;
+        if (lMag > deadzone) {
+          const scale = Math.min(1, (lMag - deadzone) / (1 - deadzone));
+          filterLX = (lx / lMag) * scale;
+          filterLY = (ly / lMag) * scale;
+        }
+        if (rMag > deadzone) {
+          const scale = Math.min(1, (rMag - deadzone) / (1 - deadzone));
+          filterRX = (rx / rMag) * scale;
+          filterRY = (ry / rMag) * scale;
+        }
         
         if (
           Math.abs(filterLX - lastStateRef.current.lx) > 0.01 ||

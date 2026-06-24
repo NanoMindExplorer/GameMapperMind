@@ -42,4 +42,13 @@ public class InterceptFrameLayout extends FrameLayout {
         }
         return super.dispatchKeyEvent(event);
     }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        super.onDetachedFromWindow();
+        // BUG-P10 FIX: Null out listener to prevent memory leak. Without this, the listener
+        // (which typically holds a reference to Activity or Service) would be retained
+        // by this View even after it's detached, causing the Activity/Service to leak.
+        listener = null;
+    }
 }

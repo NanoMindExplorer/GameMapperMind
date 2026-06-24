@@ -15,12 +15,17 @@ import com.getcapacitor.annotation.CapacitorPlugin
 class GyroPlugin : Plugin(), SensorEventListener {
     private var sensorManager: SensorManager? = null
     private var gyroSensor: Sensor? = null
-    private var isCalibrating = false
-    private var calibrationSamples = mutableListOf<FloatArray>()
-    
-    private var biasX = 0f
-    private var biasY = 0f
-    private var biasZ = 0f
+    @Volatile private var isCalibrating = false
+    // BUG-P3 FIX: Cap calibration samples to prevent memory leak if sensor fires faster than expected.
+    // 100 samples is enough for bias calculation; cap at 200 as safety margin.
+    private val calibrationSamples = mutableListOf<FloatArray>()
+    private val MAX_CALIBRATION_SAMPLES = 200
+
+    // BUG-P8 FIX: Mark bias fields as @Volatile — they're written from sensor thread,
+    // read from notifyListeners (also sensor thread, but defensive against future changes).
+    @Volatile private var biasX = 0f
+    @Volatile private var biasY = 0f
+    @Volatile private var biasZ = 0f
 
     override fun load() {
         super.load()
@@ -41,16 +46,22 @@ class GyroPlugin : Plugin(), SensorEventListener {
     @PluginMethod
     fun stopListening(call: PluginCall) {
         sensorManager?.unregisterListener(this)
+        // BUG-P2 FIX: Cancel any in-progress calibration when stopping listener.
+        // Otherwise, calibrationSamples accumulates indefinitely if user stops listening
+        // mid-calibration, then starts again — old samples contaminate new calibration.
+        synchronized(calibrationSamples) {
+            isCalibrating = false
+            calibrationSamples.clear()
+        }
         call.resolve()
     }
 
     @PluginMethod
     fun calibrate(call: PluginCall) {
-        isCalibrating = true
-        calibrationSamples.clear()
-        
-        // Wait for 100 samples in onSensorChanged
-        // Return immediately to let async process run
+        synchronized(calibrationSamples) {
+            isCalibrating = true
+            calibrationSamples.clear()
+        }
         val ret = JSObject()
         ret.put("message", "Calibration started")
         call.resolve(ret)
@@ -59,22 +70,27 @@ class GyroPlugin : Plugin(), SensorEventListener {
     override fun onSensorChanged(event: SensorEvent?) {
         if (event?.sensor?.type == Sensor.TYPE_GYROSCOPE) {
             if (isCalibrating) {
-                calibrationSamples.add(floatArrayOf(event.values[0], event.values[1], event.values[2]))
-                if (calibrationSamples.size >= 100) {
-                    isCalibrating = false
-                    biasX = calibrationSamples.map { it[0] }.average().toFloat()
-                    biasY = calibrationSamples.map { it[1] }.average().toFloat()
-                    biasZ = calibrationSamples.map { it[2] }.average().toFloat()
-                    
-                    val ret = JSObject()
-                    ret.put("biasX", biasX)
-                    ret.put("biasY", biasY)
-                    ret.put("biasZ", biasZ)
-                    notifyListeners("calibrationComplete", ret)
+                synchronized(calibrationSamples) {
+                    // BUG-P3 FIX: Cap sample count to prevent unbounded memory growth.
+                    if (calibrationSamples.size < MAX_CALIBRATION_SAMPLES) {
+                        calibrationSamples.add(floatArrayOf(event.values[0], event.values[1], event.values[2]))
+                    }
+                    if (calibrationSamples.size >= 100) {
+                        isCalibrating = false
+                        biasX = calibrationSamples.map { it[0] }.average().toFloat()
+                        biasY = calibrationSamples.map { it[1] }.average().toFloat()
+                        biasZ = calibrationSamples.map { it[2] }.average().toFloat()
+                        calibrationSamples.clear()
+
+                        val ret = JSObject()
+                        ret.put("biasX", biasX)
+                        ret.put("biasY", biasY)
+                        ret.put("biasZ", biasZ)
+                        notifyListeners("calibrationComplete", ret)
+                    }
                 }
             } else {
                 val ret = JSObject()
-                // Apply Madgwick-like sensor fusion here implicitly or at least subtract bias
                 ret.put("x", event.values[0] - biasX)
                 ret.put("y", event.values[1] - biasY)
                 ret.put("z", event.values[2] - biasZ)

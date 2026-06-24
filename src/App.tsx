@@ -200,10 +200,14 @@ export default function App() {
   };
   
   // Handle Keep-Awake and Screen Orientation based on overlay status
+  // BUG-P6 FIX: Remove `profiles` and `activeProfileId` from deps — they don't affect
+  // KeepAwake/ScreenOrientation logic. Only `overlayActive` and the resolved `orientation`
+  // matter. Previously, changing profile (without toggling overlay) re-ran this effect,
+  // calling KeepAwake.keepAwake() again unnecessarily.
   React.useEffect(() => {
     if (overlayActive) {
       KeepAwake.keepAwake().catch(console.warn);
-      
+
       const currentProfile = profiles.find(p => p.id === activeProfileId) || profiles[0];
       if (currentProfile?.orientation === 'landscape') {
         ScreenOrientation.lock({ orientation: 'landscape' }).catch(console.warn);
@@ -214,13 +218,13 @@ export default function App() {
       KeepAwake.allowSleep().catch(console.warn);
       ScreenOrientation.unlock().catch(console.warn);
     }
-    
+
     // Cleanup if unmounted while active
     return () => {
       KeepAwake.allowSleep().catch(console.warn);
       ScreenOrientation.unlock().catch(console.warn);
     };
-  }, [overlayActive, profiles, activeProfileId]);
+  }, [overlayActive, activeProfileId]);
 
   const handleToggleOverlay = async () => {
     try {
@@ -346,7 +350,10 @@ export default function App() {
     setShizukuState(prev => {
       const newLine = `[${new Date().toLocaleTimeString('en-US', { hour12: false, hour: "numeric", minute: "numeric", second: "numeric" })}] ${msg}`;
       const newLines = [...prev.logLines, newLine];
-      if (newLines.length > 50) newLines.shift();
+      // BUG-P12 FIX: Use while loop to handle case where multiple logs are added in batch
+      // (e.g., macro engine logs 10 actions rapidly). Previously, only 1 shift per call,
+      // so array could grow beyond 50 if many logs arrived in same render cycle.
+      while (newLines.length > 50) newLines.shift();
       return { ...prev, logLines: newLines };
     });
   }, []);

@@ -360,7 +360,11 @@ class TouchInjectionPlugin : Plugin() {
             }
             val binderAlive = Shizuku.pingBinder()
             val granted = binderAlive && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
-            val touchServiceAlive = touchService != null && touchService!!.asBinder().isBinderAlive
+            // BUG-P9 FIX: Capture touchService reference to local val to avoid race between
+            // null check and isBinderAlive access. If another thread sets touchService = null
+            // between the check and the access, NPE would occur.
+            val ts = touchService
+            val touchServiceAlive = ts != null && ts.asBinder().isBinderAlive
             val data = JSObject()
             data.put("granted", granted)
             data.put("isBound", isBound)

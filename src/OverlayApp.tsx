@@ -86,6 +86,10 @@ export default function OverlayApp() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('message', handleMessage);
+      // BUG-P5 FIX: Clean up global injectConfig to prevent memory leak and
+      // stale handler if OverlayApp unmounts and remounts (e.g., HMR in dev).
+      // Without this, the old closure (with stale setProfile) remains attached.
+      delete window.injectConfig;
     };
   }, []);
 

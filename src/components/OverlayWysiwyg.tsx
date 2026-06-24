@@ -42,10 +42,13 @@ export default function OverlayWysiwyg(props: OverlayWysiwygProps) {
             }}
             onMouseDown={(e) => {
               h.setIsDraggingNexion(true);
+              // BUG-W1 FIX: Also set ref so handleDragMove sees correct state immediately.
+              if (h.isDraggingNexionRef) h.isDraggingNexionRef.current = true;
               h.nexionDragHasMoved.current = false;
             }}
             onTouchStart={(e) => {
               h.setIsDraggingNexion(true);
+              if (h.isDraggingNexionRef) h.isDraggingNexionRef.current = true;
               h.nexionDragHasMoved.current = false;
             }}
             onClick={(e) => {

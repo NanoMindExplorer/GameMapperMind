@@ -1,12 +1,13 @@
 import React from 'react';
 import { Trash2 } from 'lucide-react';
 import { OverlayWysiwygHook } from './OverlayTypes';
+import { VirtualButton } from '../types';
 
 export default function ButtonPropertyPanel({ h }: { h: OverlayWysiwygHook }) {
   if (h.isNativeOverlay) return null;
-  
+
   const { selectedButton } = h;
-  
+
   return (
     <div className="w-full lg:w-80 p-6 bg-slate-950/40 flex flex-col justify-between shrink-0 overflow-y-auto custom-scrollbar" style={{ maxHeight: '100%' }}>
       <div className="space-y-6">
@@ -49,52 +50,53 @@ export default function ButtonPropertyPanel({ h }: { h: OverlayWysiwygHook }) {
                       value={selectedButton.mappedKey}
                       onChange={(e) => {
                         const val = e.target.value;
-                        h.handleUpdateBtnProperty('mappedKey', val);
+                        // BUG-PP1 FIX: Batch all related property updates into a single profile update.
+                        // Previously, multiple handleUpdateBtnProperty calls read stale profileRef.current
+                        // between calls, causing only the LAST update to persist (e.g., SWIPE_UP would
+                        // lose mappedKey/type/label changes).
+                        const updates: Partial<VirtualButton> = { mappedKey: val as any };
                         if (val === 'R_STICK_UP' || val === 'SWIPE_UP') {
-                          h.handleUpdateBtnProperty('type', 'swipe');
-                          h.handleUpdateBtnProperty('androidEventCode', 201);
-                          h.handleUpdateBtnProperty('label', 'Swipe Atas (UP)');
+                          Object.assign(updates, { type: 'swipe', androidEventCode: 201, label: 'Swipe Atas (UP)', swipeDirection: 'UP' });
                         } else if (val === 'R_STICK_DOWN' || val === 'SWIPE_DOWN') {
-                          h.handleUpdateBtnProperty('type', 'swipe');
-                          h.handleUpdateBtnProperty('androidEventCode', 202);
-                          h.handleUpdateBtnProperty('label', 'Swipe Bawah (DOWN)');
+                          Object.assign(updates, { type: 'swipe', androidEventCode: 202, label: 'Swipe Bawah (DOWN)', swipeDirection: 'DOWN' });
                         } else if (val === 'R_STICK_LEFT' || val === 'SWIPE_LEFT') {
-                          h.handleUpdateBtnProperty('type', 'swipe');
-                          h.handleUpdateBtnProperty('androidEventCode', 203);
-                          h.handleUpdateBtnProperty('label', 'Swipe Kiri (LEFT)');
+                          Object.assign(updates, { type: 'swipe', androidEventCode: 203, label: 'Swipe Kiri (LEFT)', swipeDirection: 'LEFT' });
                         } else if (val === 'R_STICK_RIGHT' || val === 'SWIPE_RIGHT') {
-                          h.handleUpdateBtnProperty('type', 'swipe');
-                          h.handleUpdateBtnProperty('androidEventCode', 204);
-                          h.handleUpdateBtnProperty('label', 'Swipe Kanan (RIGHT)');
+                          Object.assign(updates, { type: 'swipe', androidEventCode: 204, label: 'Swipe Kanan (RIGHT)', swipeDirection: 'RIGHT' });
                         } else if (val === 'A') {
-                          h.handleUpdateBtnProperty('androidEventCode', 96);
+                          updates.androidEventCode = 96;
                         } else if (val === 'B') {
-                          h.handleUpdateBtnProperty('androidEventCode', 97);
+                          updates.androidEventCode = 97;
                         } else if (val === 'X') {
-                          h.handleUpdateBtnProperty('androidEventCode', 99);
+                          updates.androidEventCode = 99;
                         } else if (val === 'Y') {
-                          h.handleUpdateBtnProperty('androidEventCode', 100);
+                          updates.androidEventCode = 100;
                         } else if (val === 'LB') {
-                          h.handleUpdateBtnProperty('androidEventCode', 101);
+                          updates.androidEventCode = 102;
                         } else if (val === 'RB') {
-                          h.handleUpdateBtnProperty('androidEventCode', 102);
+                          updates.androidEventCode = 103;
                         } else if (val === 'LT') {
-                          h.handleUpdateBtnProperty('androidEventCode', 104);
+                          updates.androidEventCode = 104;
                         } else if (val === 'RT') {
-                          h.handleUpdateBtnProperty('androidEventCode', 105);
+                          updates.androidEventCode = 105;
                         } else if (val === 'L3') {
-                          h.handleUpdateBtnProperty('androidEventCode', 103);
+                          updates.androidEventCode = 106;
                         } else if (val === 'R3') {
-                          h.handleUpdateBtnProperty('androidEventCode', 106);
+                          updates.androidEventCode = 107;
                         } else if (val === 'DPAD_UP') {
-                          h.handleUpdateBtnProperty('androidEventCode', 106);
+                          updates.androidEventCode = 19;
                         } else if (val === 'DPAD_DOWN') {
-                          h.handleUpdateBtnProperty('androidEventCode', 107);
+                          updates.androidEventCode = 20;
                         } else if (val === 'DPAD_LEFT') {
-                          h.handleUpdateBtnProperty('androidEventCode', 108);
+                          updates.androidEventCode = 21;
                         } else if (val === 'DPAD_RIGHT') {
-                          h.handleUpdateBtnProperty('androidEventCode', 109);
+                          updates.androidEventCode = 22;
+                        } else if (val === 'SELECT') {
+                          updates.androidEventCode = 109;
+                        } else if (val === 'START') {
+                          updates.androidEventCode = 108;
                         }
+                        h.handleUpdateBtnProperties(updates);
                       }}
                     >
                       <optgroup label="Buttons">
@@ -166,7 +168,7 @@ export default function ButtonPropertyPanel({ h }: { h: OverlayWysiwygHook }) {
                   </div>
                 </div>
               )}
-              
+
               {selectedButton.type === 'swipe' && (
                 <div className="p-3.5 bg-slate-950 rounded-lg border border-slate-800 space-y-3 shadow-inner">
                   <h5 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Swipe Macro Properties</h5>

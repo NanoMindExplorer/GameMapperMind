@@ -34,16 +34,16 @@ export default function ButtonPalette({ h }: { h: OverlayWysiwygHook }) {
             <h4 className="text-[10px] uppercase font-bold text-slate-500 mb-2">D-Pad</h4>
             <div className="w-20 h-20 relative bg-slate-900 rounded-full border border-slate-800 flex items-center justify-center">
               <div className="absolute top-1 left-1/2 -translate-x-1/2">
-                <button onClick={() => h.handleAddSpecificButton('UP', 'DPAD_UP', 106, 50)} className="w-6 h-6 rounded-t bg-slate-800 hover:bg-indigo-500 text-[10px] text-white flex items-center justify-center">↑</button>
+                <button onClick={() => h.handleAddSpecificButton('UP', 'DPAD_UP', 19, 50)} className="w-6 h-6 rounded-t bg-slate-800 hover:bg-indigo-500 text-[10px] text-white flex items-center justify-center">↑</button>
               </div>
               <div className="absolute left-1 top-1/2 -translate-y-1/2">
-                <button onClick={() => h.handleAddSpecificButton('LEFT', 'DPAD_LEFT', 108, 50)} className="w-6 h-6 rounded-l bg-slate-800 hover:bg-indigo-500 text-[10px] text-white flex items-center justify-center">←</button>
+                <button onClick={() => h.handleAddSpecificButton('LEFT', 'DPAD_LEFT', 21, 50)} className="w-6 h-6 rounded-l bg-slate-800 hover:bg-indigo-500 text-[10px] text-white flex items-center justify-center">←</button>
               </div>
               <div className="absolute right-1 top-1/2 -translate-y-1/2">
-                <button onClick={() => h.handleAddSpecificButton('RIGHT', 'DPAD_RIGHT', 109, 50)} className="w-6 h-6 rounded-r bg-slate-800 hover:bg-indigo-500 text-[10px] text-white flex items-center justify-center">→</button>
+                <button onClick={() => h.handleAddSpecificButton('RIGHT', 'DPAD_RIGHT', 22, 50)} className="w-6 h-6 rounded-r bg-slate-800 hover:bg-indigo-500 text-[10px] text-white flex items-center justify-center">→</button>
               </div>
               <div className="absolute bottom-1 left-1/2 -translate-x-1/2">
-                <button onClick={() => h.handleAddSpecificButton('DOWN', 'DPAD_DOWN', 107, 50)} className="w-6 h-6 rounded-b bg-slate-800 hover:bg-indigo-500 text-[10px] text-white flex items-center justify-center">↓</button>
+                <button onClick={() => h.handleAddSpecificButton('DOWN', 'DPAD_DOWN', 20, 50)} className="w-6 h-6 rounded-b bg-slate-800 hover:bg-indigo-500 text-[10px] text-white flex items-center justify-center">↓</button>
               </div>
               <div className="w-5 h-5 bg-slate-700 rounded-sm"></div>
             </div>
@@ -52,8 +52,8 @@ export default function ButtonPalette({ h }: { h: OverlayWysiwygHook }) {
           <div className="flex-1">
             <h4 className="text-[10px] uppercase font-bold text-slate-500 mb-2">Special & Sticks</h4>
             <div className="flex flex-wrap gap-2 mb-2">
-              <button onClick={() => h.handleAddSpecificButton('L3', 'L3', 103)} className="w-10 h-10 rounded-full border-2 border-dashed border-slate-600 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold shadow flex items-center justify-center">L3</button>
-              <button onClick={() => h.handleAddSpecificButton('R3', 'R3', 106)} className="w-10 h-10 rounded-full border-2 border-dashed border-slate-600 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold shadow flex items-center justify-center">R3</button>
+              <button onClick={() => h.handleAddSpecificButton('L3', 'L3', 104)} className="w-10 h-10 rounded-full border-2 border-dashed border-slate-600 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold shadow flex items-center justify-center">L3</button>
+              <button onClick={() => h.handleAddSpecificButton('R3', 'R3', 105)} className="w-10 h-10 rounded-full border-2 border-dashed border-slate-600 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold shadow flex items-center justify-center">R3</button>
               <button onClick={() => h.handleAddSpecificButton('SELECT', 'SELECT', 109, 45)} className="w-12 h-6 rounded-full bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 font-bold text-[9px] shadow transition-colors flex items-center justify-center">SELECT</button>
               <button onClick={() => h.handleAddSpecificButton('START', 'START', 108, 45)} className="w-12 h-6 rounded-full bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 font-bold text-[9px] shadow transition-colors flex items-center justify-center">START</button>
               <button onClick={() => h.handleAddSpecificButton('M1', 'M1', 0, 45)} className="w-12 h-6 rounded bg-indigo-900/40 hover:bg-indigo-600 border border-indigo-700/50 text-indigo-300 font-bold text-[9px] shadow transition-colors flex items-center justify-center">M1</button>

@@ -44,6 +44,11 @@ export default function ScreenshotBackground({ h, children }: { h: OverlayWysiwy
                   onChange={(e) => {
                     const file = e.target.files?.[0];
                     if (file) {
+                      // BUG-S1 FIX: Revoke previous blob URL to prevent memory leak.
+                      const prev = h.customScreenshotUrl;
+                      if (prev && prev.startsWith('blob:')) {
+                        try { URL.revokeObjectURL(prev); } catch (_) {}
+                      }
                       // Try FileReader first (data URL), fallback to blob URL
                       const reader = new FileReader();
                       reader.onload = () => {
@@ -56,6 +61,8 @@ export default function ScreenshotBackground({ h, children }: { h: OverlayWysiwy
                       };
                       reader.readAsDataURL(file);
                     }
+                    // BUG-S1 FIX: Reset input value so same file can be re-selected.
+                    e.target.value = '';
                   }}
                 />
                 <button 

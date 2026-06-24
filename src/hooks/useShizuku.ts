@@ -24,8 +24,19 @@ export const useShizuku = () => {
             try {
               await bindAndStart();
             } finally {
-              // Reset after 10 seconds to allow bind to complete
-              setTimeout(() => { isBindingRef.current = false; }, 10000);
+              setTimeout(() => { isBindingRef.current = false; }, 5000);
+            }
+        }
+
+        // BUG-FIX: If service is alive but GamepadListener not running, start it.
+        // This happens when daemon(true) service survives but foreground service
+        // (GamepadListenerService) was killed. Without foreground service, app
+        // process can be killed by OS → binder dies → app disappears from Shizuku.
+        if (granted && touchServiceAlive && !daemonRunning) {
+            try {
+              await TouchInjection.startGamepadListener();
+            } catch(e) {
+              console.warn("Auto-start gamepad listener failed:", e);
             }
         }
 
@@ -52,11 +63,11 @@ export const useShizuku = () => {
   const bindAndStart = async () => {
     if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
         try {
-          // CRITICAL FIX: Wait for bindService to complete BEFORE starting listener
-          // bindService resolves after onServiceConnected callback fires
           await TouchInjection.bindService();
-          // Small delay to ensure service is fully initialized
-          await new Promise(r => setTimeout(r, 500));
+          // BUG-FIX: Reduced delay from 500ms to 200ms. 500ms was too long,
+          // causing slow re-bind when app resumes from background.
+          // 200ms is enough for service to initialize after onServiceConnected.
+          await new Promise(r => setTimeout(r, 200));
           await TouchInjection.startGamepadListener();
           return true;
         } catch(e) {
@@ -82,7 +93,19 @@ export const useShizuku = () => {
   const requestShizukuPermission = async (): Promise<{ success: boolean; error?: string }> => {
     try {
         const { granted, requested } = await TouchInjection.requestPermission();
-        if (granted) return { success: true };
+        if (granted) {
+          // BUG-FIX: Auto-start daemon immediately after permission granted.
+          // Without GamepadListenerService (foreground service) running, app process
+          // can be killed by OS when backgrounded → binder connection dies →
+          // app disappears from Shizuku management.
+          // With foreground service running, app process stays alive → binder persists.
+          try {
+            await bindAndStart();
+          } catch (e) {
+            console.warn("Auto-start daemon after permission grant failed:", e);
+          }
+          return { success: true };
+        }
         if (requested) return { success: false, error: "Permission requested, waiting for user response." };
         return { success: false, error: "Permission denied" };
     } catch (e: any) {

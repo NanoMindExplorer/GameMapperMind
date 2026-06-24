@@ -63,8 +63,10 @@ jobs:
 
       - name: Upload Release-Test APK Artifact
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: GameMapperMind-releaseTest-apk
           path: android/app/build/outputs/apk/releaseTest/app-releaseTest.apk
           retention-days: 30
-          if-no-files-found: false
+          # BUG FIX: 'false' is not valid for upload-artifact@v4. Use 'ignore' to skip upload if file not found.
+          if-no-files-found: ignore

@@ -263,7 +263,21 @@ class GamepadListenerService : Service() {
                                             val half = span / 2f
 
                                             var finalVal = 0f
-                                            if (axisType == "ABS_Z" || axisType == "ABS_RZ") {
+                                            // CACAT #4 FIX: ABS_GAS/ABS_BRAKE (dan ABS_THROTTLE/ABS_RUDDER) adalah
+                                            // trigger analog yang range-nya [0, max], bukan [-max, max].
+                                            // Sebelumnya hanya ABS_Z/ABS_RZ yang masuk cabang trigger [0,1];
+                                            // ABS_GAS/ABS_BRAKE jatuh ke cabang analog stick [-1,1] lalu disimpan
+                                            // ke l2Trigger/r2Trigger — akibatnya trigger pada controller yang pakai
+                                            // GAS/BRAKE (banyak Xbox via Bluetooth) tidak responsif di setengah tekan.
+                                            //
+                                            // Trigger axis list (semua di-map ke [0, 1]):
+                                            //   ABS_Z, ABS_RZ       — Xbox/standar modern
+                                            //   ABS_GAS, ABS_BRAKE  — Xbox via Bluetooth, beberapa generic
+                                            //   ABS_THROTTLE, ABS_RUDDER — joystick/HOTAS (defensive)
+                                            val isTriggerAxis = axisType == "ABS_Z" || axisType == "ABS_RZ" ||
+                                                                axisType == "ABS_GAS" || axisType == "ABS_BRAKE" ||
+                                                                axisType == "ABS_THROTTLE" || axisType == "ABS_RUDDER"
+                                            if (isTriggerAxis) {
                                                 // Triggers: map [min, max] → [0, 1]
                                                 finalVal = if (half > 0f) ((rawVal - min).toFloat() / span).coerceIn(0f, 1f) else 0f
                                             } else {
@@ -281,8 +295,8 @@ class GamepadListenerService : Service() {
                                                 "ABS_Y"  -> { lStickY = finalVal; hasAxisChange = true }
                                                 "ABS_RX" -> { rStickX = finalVal; hasAxisChange = true }
                                                 "ABS_RY" -> { rStickY = finalVal; hasAxisChange = true }
-                                                "ABS_Z", "ABS_GAS"   -> { l2Trigger = finalVal; hasAxisChange = true }
-                                                "ABS_RZ", "ABS_BRAKE"-> { r2Trigger = finalVal; hasAxisChange = true }
+                                                "ABS_Z", "ABS_GAS", "ABS_THROTTLE"   -> { l2Trigger = finalVal; hasAxisChange = true }
+                                                "ABS_RZ", "ABS_BRAKE", "ABS_RUDDER"  -> { r2Trigger = finalVal; hasAxisChange = true }
                                             }
                                         }
                                     }

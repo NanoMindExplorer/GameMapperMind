@@ -147,3 +147,24 @@
     background-color: transparent !important;
   }
 }
+/* BUG-FIX: Suppress WebView zoom/scroll/bounce when overlay editor is dragging.
+   data-overlay-editing attribute is set on <html> by OverlayCanvas during drag. */
+[data-overlay-editing="true"] {
+  touch-action: none !important;
+  overscroll-behavior: none !important;
+  -webkit-user-select: none !important;
+  -webkit-touch-callout: none !important;
+}
+
+[data-overlay-editing="true"] body {
+  overflow: hidden !important;
+  touch-action: none !important;
+}
+
+/* Canvas container — always suppress zoom/scroll, even when not dragging */
+#canvas-container {
+  touch-action: none;
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}

@@ -7,6 +7,19 @@ export default function OverlayCanvas({ h }: { h: OverlayWysiwygHook }) {
   const isDataUrl = bgUrl && (bgUrl.startsWith('data:') || bgUrl.startsWith('blob:'));
   const isGradient = bgUrl && bgUrl.startsWith('linear-gradient');
 
+  // BUG-FIX: Set data-overlay-editing on document when dragging to suppress WebView zoom.
+  React.useEffect(() => {
+    if (typeof document === 'undefined') return;
+    if (h.isDragging || h.isDraggingNexion) {
+      document.documentElement.setAttribute('data-overlay-editing', 'true');
+    } else {
+      document.documentElement.removeAttribute('data-overlay-editing');
+    }
+    return () => {
+      document.documentElement.removeAttribute('data-overlay-editing');
+    };
+  }, [h.isDragging, h.isDraggingNexion]);
+
   return (
     <div className={`${h.isNativeOverlay ? "w-screen h-screen" : "flex-1"} relative overflow-hidden bg-slate-950 select-none`} style={{ minHeight: 0 }}>
       
@@ -19,11 +32,14 @@ export default function OverlayCanvas({ h }: { h: OverlayWysiwygHook }) {
         onMouseLeave={h.handleDragEnd}
         onTouchMove={h.handleDragMove}
         onTouchEnd={h.handleDragEnd}
-        style={isGradient ? {
-          backgroundImage: bgUrl,
-          backgroundColor: '#0f172a'
-        } : {
-          backgroundColor: '#0f172a'
+        style={{
+          ...(isGradient ? { backgroundImage: bgUrl, backgroundColor: '#0f172a' } : { backgroundColor: '#0f172a' }),
+          // BUG-FIX: touch-action: none + overscroll-behavior: none to suppress WebView pinch-zoom
+          // and scroll bounce during drag. Prevents canvas "membesar/mengecil" on touch.
+          touchAction: 'none',
+          overscrollBehavior: 'none',
+          WebkitUserSelect: 'none',
+          WebkitTouchCallout: 'none',
         }}
         id="canvas-container"
       >

@@ -56,42 +56,55 @@ export function useOverlayWysiwyg({
     if (showPalette) setShowPalette(false);
   };
 
+  // BUG-FIX: Cache canvas rect at drag START so reflow during drag doesn't shift positions.
+  // Previously, getBoundingClientRect() was called on every handleDragMove event.
+  // When dragging caused layout reflow (panel/HUD/flex changes), rect changed,
+  // causing all percentage-based positions to shift → buttons "jumped".
+  const cachedRectRef = React.useRef<DOMRect | null>(null);
+
   const handleDragStart = (btnId: string, e: React.MouseEvent | React.TouchEvent) => {
     e.stopPropagation();
     if (e.preventDefault) e.preventDefault();
 
-    // BUG-O1/O4 FIX: Set refs synchronously so first mousemove event sees correct state.
+    // BUG-FIX: Cache rect ONCE at drag start — stable coordinate space for entire drag.
+    cachedRectRef.current = document.getElementById('canvas-container')?.getBoundingClientRect() ?? null;
+
     isDraggingRef.current = true;
     selectedButtonIdRef.current = btnId;
     setIsDragging(true);
     setSelectedButtonId(btnId);
 
     // BUG-O5 FIX: Capture initial offset between pointer and button center.
-    // This allows drag to follow pointer smoothly even if pointer moves fast.
     const current = profileRef.current;
     const btn = current?.buttons.find(b => b.id === btnId);
-    if (btn) {
+    if (btn && cachedRectRef.current) {
       const clientX = 'touches' in e ? (e.touches[0]?.clientX ?? 0) : e.clientX;
       const clientY = 'touches' in e ? (e.touches[0]?.clientY ?? 0) : e.clientY;
-      const rect = document.getElementById('canvas-container')?.getBoundingClientRect();
-      if (rect) {
-        const btnScreenX = rect.left + (btn.x / 100) * rect.width;
-        const btnScreenY = rect.top + (btn.y / 100) * rect.height;
-        dragOffsetRef.current = {
-          dx: clientX - btnScreenX,
-          dy: clientY - btnScreenY,
-        };
-      }
+      const rect = cachedRectRef.current;
+      const btnScreenX = rect.left + (btn.x / 100) * rect.width;
+      const btnScreenY = rect.top + (btn.y / 100) * rect.height;
+      dragOffsetRef.current = {
+        dx: clientX - btnScreenX,
+        dy: clientY - btnScreenY,
+      };
     }
   };
 
   const handleDragMove = (e: any) => {
+    // BUG-FIX: preventDefault EARLY (before any early-return) to suppress WebView zoom/scroll
+    // during touch drag. Previously, preventDefault was called AFTER the isDragging check,
+    // so non-drag touches (e.g., pinch-zoom) were not suppressed → canvas "membesar/mengecil".
+    if (e.cancelable && (e.type === 'touchmove' || e.touches)) {
+      e.preventDefault?.();
+    }
+
     // BUG-O2 FIX: Use ref for isDraggingNexion.
     if (isDraggingNexionRef.current) {
       nexionDragHasMoved.current = true;
       const clientX = e.touches ? e.touches[0].clientX : e.clientX;
       const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-      const rect = document.getElementById('canvas-container')?.getBoundingClientRect();
+      // BUG-FIX: Use cached rect for stable coordinate space.
+      const rect = cachedRectRef.current ?? document.getElementById('canvas-container')?.getBoundingClientRect();
       if (rect) {
         let x = ((clientX - rect.left) / rect.width) * 100;
         let y = ((clientY - rect.top) / rect.height) * 100;
@@ -106,10 +119,9 @@ export function useOverlayWysiwyg({
     // BUG-O1/O4 FIX: Use refs instead of stale state closure.
     if (!isDraggingRef.current || !selectedButtonIdRef.current) return;
 
-    // preventDefault to stop scroll/zoom on touch
-    if (e.touches) e.preventDefault?.();
-
-    const rect = document.getElementById('canvas-container')?.getBoundingClientRect();
+    // BUG-FIX: Use cached rect (set at drag start) — stable coordinate space.
+    // Fallback to live rect only if cache is null (defensive).
+    const rect = cachedRectRef.current ?? document.getElementById('canvas-container')?.getBoundingClientRect();
     if (!rect) return;
 
     const clientX = e.touches ? e.touches[0].clientX : e.clientX;
@@ -138,13 +150,12 @@ export function useOverlayWysiwyg({
   const handleDragEnd = () => {
     isDraggingRef.current = false;
     setIsDragging(false);
+    // BUG-FIX: Clear cached rect so next drag re-captures fresh layout.
+    cachedRectRef.current = null;
     if (isDraggingNexionRef.current) {
-      // BUG-O3 FIX: Reset nexionDragHasMoved AFTER click event fires (200ms delay).
-      // This allows onClick handler to see that drag happened and skip toggle.
       setTimeout(() => {
         setIsDraggingNexion(false);
         isDraggingNexionRef.current = false;
-        // Reset after click event has had a chance to fire and check the flag.
         setTimeout(() => { nexionDragHasMoved.current = false; }, 100);
       }, 50);
     }

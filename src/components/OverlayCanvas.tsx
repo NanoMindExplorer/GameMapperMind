@@ -21,7 +21,7 @@ export default function OverlayCanvas({ h }: { h: OverlayWysiwygHook }) {
   }, [h.isDragging, h.isDraggingNexion]);
 
   return (
-    <div className={`${h.isNativeOverlay ? "w-screen h-screen" : "flex-1"} relative overflow-hidden bg-slate-950 select-none`} style={{ minHeight: 0 }}>
+    <div className={`${h.isNativeOverlay ? "w-screen h-screen" : "flex-1 h-full"} relative overflow-hidden bg-slate-950 select-none`} style={{ minHeight: 0 }}>
       
       {/* Canvas stage — absolute fill, screenshot rendered as object-contain inside.
           BUG-FIX: Previously tried to set aspect-ratio on container which caused it

@@ -4,7 +4,7 @@ import { OverlayWysiwygHook } from './OverlayTypes';
 
 export default function ScreenshotBackground({ h, children }: { h: OverlayWysiwygHook, children?: React.ReactNode }) {
   return (
-    <div className={`${h.isNativeOverlay ? "w-screen h-screen overflow-hidden" : "bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xl flex h-full relative"}`}>
+    <div className={`${h.isNativeOverlay ? "w-screen h-screen overflow-hidden" : "bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xl flex flex-col h-full relative"}`}>
       {/* Layout Settings Panel — collapsible, tidak menghalangi canvas.
           BUG-FIX: Sebelumnya panel mengambil 25% lebar (lg:w-1/4) dan selalu visible,
           menghalangi canvas. Sekarang panel bisa di-toggle (show/hide) dengan tombol

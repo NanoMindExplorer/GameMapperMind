@@ -9,6 +9,35 @@ export const useShizuku = () => {
   const [retryCount, setRetryCount] = React.useState(0);
   const isBindingRef = React.useRef(false);
 
+  // BUG-FIX: Listen for onShizukuPermissionResult event.
+  // Saat user grant permission via dialog Shizuku, native emit event ini.
+  // Sebelumnya JS TIDAK mendengarkan → daemon tidak auto-start →
+  // app hilang dari Shizuku management saat di-background.
+  React.useEffect(() => {
+    if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== 'android') return;
+    let listener: any;
+    TouchInjection.addListener('onShizukuPermissionResult', async (data: { granted: boolean }) => {
+      if (data.granted) {
+        // Permission granted via dialog — auto-start daemon.
+        // Tunggu 1 detik agar Shizuku binder siap.
+        await new Promise(r => setTimeout(r, 1000));
+        if (!isBindingRef.current) {
+          isBindingRef.current = true;
+          try {
+            await bindAndStart();
+          } catch(e) {
+            console.warn("Auto-start after permission dialog failed:", e);
+          } finally {
+            setTimeout(() => { isBindingRef.current = false; }, 5000);
+          }
+        }
+      }
+    }).then(l => { listener = l; });
+    return () => {
+      if (listener && listener.remove) listener.remove();
+    };
+  }, []);
+
   const checkShizukuStatus = async (currentState: ShizukuState): Promise<ShizukuState> => {
     if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
       try {

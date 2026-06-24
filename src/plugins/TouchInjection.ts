@@ -35,6 +35,11 @@ export interface TouchInjectionPluginType {
     eventName: 'onGamepadFeedback', 
     listenerFunc: (data: { type: string, intensity: number, duration: number }) => void
   ): Promise<PluginListenerHandle>;
+
+  addListener(
+    eventName: 'onShizukuPermissionResult',
+    listenerFunc: (data: { granted: boolean }) => void
+  ): Promise<PluginListenerHandle>;
 }
 
 const TouchInjection = registerPlugin<TouchInjectionPluginType>('TouchInjection');

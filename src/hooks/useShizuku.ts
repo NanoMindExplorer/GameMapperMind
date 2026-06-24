@@ -7,6 +7,7 @@ import { ShizukuState } from '../types';
 export const useShizuku = () => {
   const [recoveryState, setRecoveryState] = React.useState<'INSTALLED' | 'RUNNING' | 'PERMISSION' | 'BOUND' | 'DAEMON_ALIVE'>('INSTALLED');
   const [retryCount, setRetryCount] = React.useState(0);
+  const isBindingRef = React.useRef(false);
 
   const checkShizukuStatus = async (currentState: ShizukuState): Promise<ShizukuState> => {
     if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
@@ -14,10 +15,18 @@ export const useShizuku = () => {
         const { granted, touchServiceAlive, isBound } = await TouchInjection.checkPermission();
         const { daemonRunning } = await TouchInjection.checkDaemonRunning();
         
-        // BUG FIX: Proper state machine based on ACTUAL service status, not assumptions
-        // Only try to rebind if permission is granted but service is NOT alive
-        if (granted && !touchServiceAlive) {
-            await bindAndStart();
+        // CRITICAL FIX: Only rebind if:
+        // 1. Permission granted
+        // 2. Service NOT alive
+        // 3. NOT already binding (prevent concurrent bind attempts)
+        if (granted && !touchServiceAlive && !isBindingRef.current) {
+            isBindingRef.current = true;
+            try {
+              await bindAndStart();
+            } finally {
+              // Reset after 10 seconds to allow bind to complete
+              setTimeout(() => { isBindingRef.current = false; }, 10000);
+            }
         }
 
         let newState: 'INSTALLED' | 'RUNNING' | 'PERMISSION' | 'BOUND' | 'DAEMON_ALIVE' = 'INSTALLED';
@@ -43,11 +52,16 @@ export const useShizuku = () => {
   const bindAndStart = async () => {
     if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
         try {
+          // CRITICAL FIX: Wait for bindService to complete BEFORE starting listener
+          // bindService resolves after onServiceConnected callback fires
           await TouchInjection.bindService();
+          // Small delay to ensure service is fully initialized
+          await new Promise(r => setTimeout(r, 500));
           await TouchInjection.startGamepadListener();
           return true;
         } catch(e) {
           console.error("Bind failed", e);
+          return false;
         }
     }
     return false;

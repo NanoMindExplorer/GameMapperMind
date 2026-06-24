@@ -139,11 +139,13 @@ class TouchInjectionPlugin : Plugin() {
     fun unbindService(call: PluginCall) {
         try {
             if (isBound) {
-                try {
-                    touchService?.destroy()
-                } catch (e: Exception) {
-                    // ignore
-                }
+                // CRITICAL FIX: Do NOT call touchService?.destroy() directly!
+                // destroy() calls System.exit(0) which kills the process immediately.
+                // unbindUserService(..., true) will send the destroy transaction
+                // (code 16777114) to the service, which calls destroy() internally.
+                // Calling destroy() directly here kills the process BEFORE
+                // unbindUserService can clean up, causing the app to disappear
+                // from Shizuku management.
                 Shizuku.unbindUserService(USER_SERVICE_ARGS, serviceConnection, true)
                 touchService = null
                 isBound = false

@@ -32,6 +32,9 @@ export default function MacroEngineComponent({ macros, onUpdateMacros, onLogMess
   const [recPointer, setRecPointer] = React.useState(1);
 
   const playbackIntervalRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  // BUG-N4/N6 FIX: Use refs for isPlaying and active pointers to avoid stale state in async callbacks.
+  const isPlayingRef = React.useRef(false);
+  const activePlaybackPointersRef = React.useRef<Set<number>>(new Set());
 
   const macrosRef = React.useRef(macros);
   const onUpdateMacrosRef = React.useRef(onUpdateMacros);
@@ -42,12 +45,27 @@ export default function MacroEngineComponent({ macros, onUpdateMacros, onLogMess
   }, [macros, onUpdateMacros]);
 
   React.useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
+
+  React.useEffect(() => {
     const handleKill = () => {
       if (playbackIntervalRef.current) {
         clearTimeout(playbackIntervalRef.current);
         playbackIntervalRef.current = null;
       }
       setIsPlaying(false);
+      isPlayingRef.current = false;
+      // BUG-N6 FIX: Release any active playback pointers before clearing macros.
+      // Previously, if user killed mid-playback, pointers stayed "down" → ghost touches.
+      if (activePlaybackPointersRef.current.size > 0) {
+        const pointersToRelease = Array.from(activePlaybackPointersRef.current);
+        activePlaybackPointersRef.current.clear();
+        pointersToRelease.forEach(pid => {
+          injectInput('up', undefined, undefined, pid).catch(() => {});
+        });
+        onLogMessage(`[KILL-SWITCH] Released ${pointersToRelease.length} active pointer(s).`);
+      }
       setIsRecording(false);
       onUpdateMacrosRef.current(macrosRef.current.map(m => ({ ...m, actions: [] })));
       onLogMessage(`[KILL-SWITCH] Macro playback terminated and macro buffers cleared.`);
@@ -60,47 +78,74 @@ export default function MacroEngineComponent({ macros, onUpdateMacros, onLogMess
         clearTimeout(playbackIntervalRef.current);
       }
     };
-  }, [onLogMessage]);
+  }, [onLogMessage, injectInput]);
 
   const selectedMacro = macros.find(m => m.id === selectedMacroId);
 
   const handleTriggerPlayback = async () => {
     if (isPlaying || !selectedMacro || selectedMacro.actions.length === 0) return;
     setIsPlaying(true);
+    isPlayingRef.current = true;
     onLogMessage(`Macro Engine: Initializing playback sequence [${selectedMacro.name}] at speed: ${playbackSpeed.toFixed(1)}x`);
-    
-    // Execute each action with configured delay between steps
+
+    // BUG-N5 FIX: Guard against playbackSpeed <= 0 to prevent division by zero.
+    // If playbackSpeed is 0, nextDelay would be Infinity → setTimeout(Infinity) hangs forever.
+    const effectiveSpeed = playbackSpeed > 0 ? playbackSpeed : 1.0;
+    if (playbackSpeed <= 0) {
+      onLogMessage(`[WARN] playbackSpeed was ${playbackSpeed}, clamped to 1.0 to prevent hang.`);
+    }
+
+    // BUG-N14 FIX: Snapshot actions at playback start to avoid race condition
+    // where macros array is mutated during playback (e.g., user adds new action).
+    const actionsToPlay = [...selectedMacro.actions];
     let tickCount = 0;
-    
+
     const playNext = async () => {
-       if (tickCount >= selectedMacro.actions.length) {
+       if (tickCount >= actionsToPlay.length) {
          setIsPlaying(false);
-         onLogMessage(`Macro Engine: Sequence [${selectedMacro.name}] executed completely. Dispatched ${selectedMacro.actions.length} evdev touch coordinates.`);
+         isPlayingRef.current = false;
+         // BUG-N6 FIX: Release any remaining active pointers at end of playback.
+         if (activePlaybackPointersRef.current.size > 0) {
+           const pointersToRelease = Array.from(activePlaybackPointersRef.current);
+           activePlaybackPointersRef.current.clear();
+           for (const pid of pointersToRelease) {
+             await injectInput('up', undefined, undefined, pid).catch(() => {});
+           }
+         }
+         onLogMessage(`Macro Engine: Sequence [${selectedMacro.name}] executed completely. Dispatched ${actionsToPlay.length} evdev touch coordinates.`);
          return;
        }
-       if (!isPlaying) return; // user killed it
+       // BUG-N4 FIX: Use ref instead of state — state is stale inside async callback.
+       if (!isPlayingRef.current) return;
 
-       const action = selectedMacro.actions[tickCount];
+       const action = actionsToPlay[tickCount];
        onLogMessage(`[EVDEV INJECTION] Type: ${action.type} | Pointer: ${action.pointerId} | X: ${action.x || 0} | Y: ${action.y || 0}`);
-       
+
        let parsedAction: 'down' | 'move' | 'up' | 'tap' | null = null;
        if (action.type === 'touch_down') parsedAction = 'down';
        else if (action.type === 'touch_move') parsedAction = 'move';
        else if (action.type === 'touch_up') parsedAction = 'up';
-       
+
        if (parsedAction) {
+         // BUG-N6 FIX: Track active pointers for cleanup on kill.
+         if (parsedAction === 'down') {
+           activePlaybackPointersRef.current.add(action.pointerId);
+         } else if (parsedAction === 'up') {
+           activePlaybackPointersRef.current.delete(action.pointerId);
+         }
          try {
            await injectInput(parsedAction, action.x, action.y, action.pointerId);
          } catch (e) {
            onLogMessage(`Macro Engine Error: Native execution failed.`);
          }
        }
-       
+
        tickCount++;
-       const nextDelay = (action.delayMs || 33) / playbackSpeed;
+       // BUG-N5 FIX: Use effectiveSpeed (guaranteed > 0) for delay calculation.
+       const nextDelay = (action.delayMs || 33) / effectiveSpeed;
        playbackIntervalRef.current = setTimeout(playNext, nextDelay);
     };
-    
+
     playNext();
   };
 

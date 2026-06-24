@@ -11,12 +11,20 @@ object GamepadJniPlugin {
 
     private val frameCallback = object : Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) {
-            isFramePending = false
+            // BUG-N9 FIX: Snapshot events BEFORE clearing, then process outside synchronized.
+            // Previously, isFramePending was set to false inside synchronized, but if a new
+            // event was queued between isFramePending=false and batchedEvents.clear(),
+            // that event would be lost (cleared without being processed).
+            val toProcess: List<() -> Unit>
             synchronized(batchedEvents) {
-                if (batchedEvents.isNotEmpty()) {
-                    batchedEvents.forEach { it.invoke() }
-                    batchedEvents.clear()
-                }
+                isFramePending = false
+                toProcess = batchedEvents.toList()
+                batchedEvents.clear()
+            }
+            // Process events OUTSIDE synchronized to avoid holding lock during
+            // potentially long-running NativeGamepadMapper.handleAxes/handleButton.
+            if (toProcess.isNotEmpty()) {
+                toProcess.forEach { it.invoke() }
             }
         }
     }

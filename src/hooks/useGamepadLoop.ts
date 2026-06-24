@@ -3,12 +3,17 @@ import TouchInjection from '../plugins/TouchInjection';
 import { GamepadProfile } from '../types';
 
 export function useGamepadLoop(mapProfile: GamepadProfile | null, connected: boolean, injectActive: boolean) {
-  // BUG-H1 FIX: Track previous injectActive to detect toggle without re-running setup effect.
+  // BUG-N2/N3 FIX: Use refs for all values accessed inside closures (listeners, callbacks).
+  // React state captured in closures is stale after the first render because effect with []
+  // deps only runs once. Without refs, listeners always see initial values.
+  const mapProfileRef = useRef(mapProfile);
+  const injectActiveRef = useRef(injectActive);
   const prevInjectActiveRef = useRef(injectActive);
-  
+
+  useEffect(() => { mapProfileRef.current = mapProfile; }, [mapProfile]);
+  useEffect(() => { injectActiveRef.current = injectActive; }, [injectActive]);
+
   // Effect 1: Set up listeners ONCE (no re-run on toggle).
-  // These listeners receive events from both Shizuku getevent (when connected)
-  // and Android native input (via GamepadPlugin.dispatchKeyEvent) — works WITHOUT Shizuku.
   useEffect(() => {
     let isCleanedUp = false;
     let btnListener: any = null;
@@ -22,18 +27,18 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, connected: boo
             window.dispatchEvent(new CustomEvent('native-gamepad-button', { detail: data }));
           }
         });
-        
+
         axisListener = await TouchInjection.addListener('onGamepadAxis', (data: any) => {
           if (!isCleanedUp) {
             window.dispatchEvent(new CustomEvent('native-gamepad-axis', { detail: data }));
           }
         });
-        
-        // H13: Haptics listener
+
+        // H13: Haptics listener — BUG-N2 FIX: read from refs to avoid stale closure.
         feedbackListener = await TouchInjection.addListener('onGamepadFeedback', async (data: any) => {
-           if (!isCleanedUp && injectActive && mapProfile?.hapticIntensity) {
+           if (!isCleanedUp && injectActiveRef.current && mapProfileRef.current?.hapticIntensity) {
               const { Haptics, ImpactStyle } = await import('@capacitor/haptics');
-              if (mapProfile.hapticIntensity > 0.5) {
+              if (mapProfileRef.current.hapticIntensity > 0.5) {
                  await Haptics.impact({ style: ImpactStyle.Heavy }).catch(()=>{});
               } else {
                  await Haptics.impact({ style: ImpactStyle.Light }).catch(()=>{});
@@ -53,10 +58,13 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, connected: boo
       if (axisListener && axisListener.remove) axisListener.remove();
       if (feedbackListener && feedbackListener.remove) feedbackListener.remove();
     };
-  }, []); // BUG-H1 FIX: Empty dependency — listeners set up ONCE.
+  }, []);
 
-  // Effect 2: Manage Shizuku bind + profile update (re-runs only when connected/profile change).
-  // injectActive changes only update the profile JSON, NOT re-bind the service.
+  // Effect 2: Manage Shizuku bind + profile update.
+  // BUG-N3 FIX: Include injectActive in deps so ref updates correctly when it changes.
+  // Previously, injectActive was excluded from deps, so prevInjectActiveRef was never
+  // updated when injectActive changed — the "only injectActive changed" branch never
+  // triggered because the comparison always showed "not changed" (both stale).
   useEffect(() => {
     let isCleanedUp = false;
 
@@ -67,7 +75,7 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, connected: boo
         if (isCleanedUp) return;
         await TouchInjection.startGamepadListener().catch(() => {});
         if (isCleanedUp) return;
-        
+
         const profileStr = injectActive ? JSON.stringify(mapProfile) : "{}";
         await TouchInjection.updateActiveProfile({ profileJson: profileStr });
       } catch (err) {
@@ -75,26 +83,22 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, connected: boo
       }
     };
 
-    // BUG-H1 FIX: If only injectActive changed (not connected or mapProfile),
-    // just update the profile JSON without re-binding the service.
-    const onlyInjectActiveChanged = 
-      prevInjectActiveRef.current !== injectActive;
-    
+    // If only injectActive changed (not connected or mapProfile), just update profile JSON.
+    const onlyInjectActiveChanged = prevInjectActiveRef.current !== injectActive;
+
     if (onlyInjectActiveChanged && connected && mapProfile) {
-      // Just update profile, no re-bind
       const profileStr = injectActive ? JSON.stringify(mapProfile) : "{}";
       TouchInjection.updateActiveProfile({ profileJson: profileStr }).catch(() => {});
     } else {
       setupShizuku();
     }
-    
+
     prevInjectActiveRef.current = injectActive;
 
     return () => {
       isCleanedUp = true;
-      // BUG-H2 FIX: Always reset profile on cleanup, regardless of `connected` state.
-      // Stale profile in GamepadListenerService.activeProfileJson can persist across reconnects.
+      // Always reset profile on cleanup, regardless of `connected` state.
       TouchInjection.updateActiveProfile({ profileJson: "{}" }).catch(() => {});
     };
-  }, [mapProfile, connected]); // BUG-H1 FIX: injectActive removed from deps (handled via ref).
+  }, [mapProfile, connected, injectActive]);
 }

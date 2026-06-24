@@ -132,9 +132,28 @@ public class FloatingOverlayService extends Service {
             currentConfigJson = intent.getStringExtra("config");
             if (webView != null) {
                 new Handler(Looper.getMainLooper()).post(() -> {
-                    // BUG-R9 FIX: Use injectConfig instead of MessageEvent (origin check fails in WebView)
-                    webView.evaluateJavascript(
-                        "if(window.injectConfig) window.injectConfig(" + currentConfigJson + ");",
+                    // BUG-N7 FIX: Escape currentConfigJson before injecting into JS to prevent
+                    // script injection. If JSON contains </script> or backslashes, raw injection
+                    // breaks JS parsing. Use JSON.stringify equivalent: wrap in single quotes
+                    // and escape special chars.
+                    final WebView wv = webView; // capture for null-safe access
+                    if (wv == null) return;
+                    String safeJson;
+                    try {
+                        // Re-parse and re-stringify to ensure valid JSON, then escape for JS string.
+                        org.json.JSONObject parsed = new org.json.JSONObject(currentConfigJson);
+                        safeJson = parsed.toString()
+                            .replace("\\", "\\\\")
+                            .replace("'", "\\'")
+                            .replace("\n", "\\n")
+                            .replace("\r", "\\r")
+                            .replace("</", "<\\/");
+                    } catch (Exception e) {
+                        Log.e("GameMapper", "Failed to sanitize config JSON", e);
+                        return;
+                    }
+                    wv.evaluateJavascript(
+                        "if(window.injectConfig) window.injectConfig('" + safeJson + "');",
                         null
                     );
                 });
@@ -182,11 +201,23 @@ public class FloatingOverlayService extends Service {
                     @Override
                     public void onPageFinished(WebView view, String url) {
                         super.onPageFinished(view, url);
+                        // BUG-N8 FIX: Capture webView in local final to avoid NPE if onDestroy sets field to null.
                         if (currentConfigJson != null && !currentConfigJson.isEmpty()) {
-                            view.evaluateJavascript(
-                                "if(window.injectConfig) window.injectConfig(" + currentConfigJson + ");",
-                                null
-                            );
+                            try {
+                                org.json.JSONObject parsed = new org.json.JSONObject(currentConfigJson);
+                                String safeJson = parsed.toString()
+                                    .replace("\\", "\\\\")
+                                    .replace("'", "\\'")
+                                    .replace("\n", "\\n")
+                                    .replace("\r", "\\r")
+                                    .replace("</", "<\\/");
+                                view.evaluateJavascript(
+                                    "if(window.injectConfig) window.injectConfig('" + safeJson + "');",
+                                    null
+                                );
+                            } catch (Exception e) {
+                                Log.e("GameMapper", "Failed to inject config on page finished", e);
+                            }
                         }
                     }
                 });
@@ -246,11 +277,25 @@ public class FloatingOverlayService extends Service {
         public void onReactReady() {
             Log.d("GameMapper", "React is ready in Overlay");
             new Handler(Looper.getMainLooper()).post(() -> {
+                // BUG-N8 FIX: Capture webView in local final — field may be null after onDestroy.
+                final WebView wv = webView;
+                if (wv == null) return;
                 if (currentConfigJson != null && !currentConfigJson.isEmpty()) {
-                    webView.evaluateJavascript(
-                        "if(window.injectConfig) window.injectConfig(" + currentConfigJson + ");",
-                        null
-                    );
+                    try {
+                        org.json.JSONObject parsed = new org.json.JSONObject(currentConfigJson);
+                        String safeJson = parsed.toString()
+                            .replace("\\", "\\\\")
+                            .replace("'", "\\'")
+                            .replace("\n", "\\n")
+                            .replace("\r", "\\r")
+                            .replace("</", "<\\/");
+                        wv.evaluateJavascript(
+                            "if(window.injectConfig) window.injectConfig('" + safeJson + "');",
+                            null
+                        );
+                    } catch (Exception e) {
+                        Log.e("GameMapper", "Failed to inject config on React ready", e);
+                    }
                 }
             });
         }

@@ -340,13 +340,23 @@ async function startServer() {
     });
     
     // Graceful shutdown
-    process.on("SIGTERM", () => {
-        console.log("SIGTERM received, shutting down gracefully");
+    // BUG-N10 FIX: Handle both SIGTERM and SIGINT (Ctrl+C).
+    // Previously only SIGTERM was handled — Ctrl+C in dev mode killed the process
+    // without saving state, causing data loss.
+    const gracefulShutdown = (signal: string) => {
+        console.log(`${signal} received, shutting down gracefully`);
         server.close(async () => {
            await StateStore.save();
            process.exit(0);
         });
-    });
+        // Fallback: if server.close() hangs (e.g., keep-alive connections), force exit after 5s.
+        setTimeout(() => {
+            console.error("Graceful shutdown timed out, forcing exit.");
+            process.exit(1);
+        }, 5000);
+    };
+    process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+    process.on("SIGINT", () => gracefulShutdown("SIGINT"));
   } catch (err) {
     console.error("❌ FATAL: Server gagal start:", err);
     process.exit(1);

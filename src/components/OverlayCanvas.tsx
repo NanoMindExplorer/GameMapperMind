@@ -21,11 +21,16 @@ export default function OverlayCanvas({ h }: { h: OverlayWysiwygHook }) {
   }, [h.isDragging, h.isDraggingNexion]);
 
   return (
-    <div className={`${h.isNativeOverlay ? "w-screen h-screen" : "flex-1"} relative overflow-hidden bg-slate-950 select-none`} style={{ minHeight: 0 }}>
+    <div className={`${h.isNativeOverlay ? "w-screen h-screen" : "flex-1"} relative overflow-hidden bg-slate-950 select-none flex items-center justify-center`} style={{ minHeight: 0 }}>
       
-      {/* Visual Canvas stage Area — absolute positioned to prevent ANY resize */}
+      {/* Visual Canvas stage Area — aspect-ratio aware to match screenshot dimensions.
+          BUG-FIX: Previously, canvas-container filled the entire flex area with no aspect
+          ratio constraint. When a custom screenshot was loaded with object-cover, the image
+          was cropped → button positions (percentages) didn't match the game screen.
+          Fix: Set aspectRatio on canvas-container to match screenshot natural dimensions.
+          For gradient backgrounds, use 16:9 as default (most games are landscape). */}
       <div 
-        className="absolute inset-0 overflow-hidden touch-none"
+        className="relative overflow-hidden touch-none"
         onClick={h.handleContainerClick}
         onMouseMove={h.handleDragMove}
         onMouseUp={h.handleDragEnd}
@@ -34,8 +39,20 @@ export default function OverlayCanvas({ h }: { h: OverlayWysiwygHook }) {
         onTouchEnd={h.handleDragEnd}
         style={{
           ...(isGradient ? { backgroundImage: bgUrl, backgroundColor: '#0f172a' } : { backgroundColor: '#0f172a' }),
-          // BUG-FIX: touch-action: none + overscroll-behavior: none to suppress WebView pinch-zoom
-          // and scroll bounce during drag. Prevents canvas "membesar/mengecil" on touch.
+          // BUG-FIX: If custom screenshot loaded, match its aspect ratio.
+          // This ensures object-contain shows full image without cropping,
+          // and button positions (percentages) map correctly to the game screen.
+          ...(h.screenshotDimensions ? {
+            aspectRatio: `${h.screenshotDimensions.w} / ${h.screenshotDimensions.h}`,
+            maxWidth: '100%',
+            maxHeight: '100%',
+            width: 'auto',
+            height: 'auto',
+          } : {
+            // Default: fill container (for gradients and no-screenshot mode)
+            position: 'absolute' as const,
+            inset: 0,
+          }),
           touchAction: 'none',
           overscrollBehavior: 'none',
           WebkitUserSelect: 'none',
@@ -43,14 +60,26 @@ export default function OverlayCanvas({ h }: { h: OverlayWysiwygHook }) {
         }}
         id="canvas-container"
       >
-        {/* Render screenshot as <img> tag — more reliable than CSS backgroundImage in Capacitor WebView */}
+        {/* Render screenshot as <img> tag — object-contain preserves full image.
+            BUG-FIX: Changed from object-cover to object-contain. With matching aspect-ratio
+            on the container, contain = fill (no letterboxing, no cropping).
+            Without matching aspect-ratio (gradient mode), contain is irrelevant since
+            gradients fill any shape. */}
         {isDataUrl && (
           <img 
             src={bgUrl} 
             alt="Screenshot background" 
-            className="absolute inset-0 w-full h-full object-cover"
+            className="absolute inset-0 w-full h-full object-contain"
             style={{ pointerEvents: 'none' }}
             onError={(e) => console.error('Screenshot image failed to load', e)}
+            onLoad={(e) => {
+              // BUG-FIX: Detect natural dimensions when image loads.
+              // Store in hook state so canvas-container can match aspect ratio.
+              const img = e.currentTarget;
+              if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+                h.setScreenshotDimensions({ w: img.naturalWidth, h: img.naturalHeight });
+              }
+            }}
           />
         )}
         <div className="absolute inset-0 bg-black pointer-events-none transition-opacity" style={{ opacity: h.bgDimLevel / 100 }}></div>

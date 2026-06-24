@@ -32,6 +32,20 @@ export function useOverlayWysiwyg({
   const [bgDimLevel, setBgDimLevel] = React.useState(30);
   const [globalNodeOpacity, setGlobalNodeOpacity] = React.useState(80);
 
+  // BUG-FIX: Track screenshot natural dimensions for aspect-ratio-aware canvas.
+  // When user uploads a custom screenshot, the canvas-container must match the
+  // screenshot's aspect ratio. Otherwise, object-cover crops the image and
+  // button positions (percentages) don't map correctly to the game screen.
+  const [screenshotDimensions, setScreenshotDimensions] = React.useState<{w: number, h: number} | null>(null);
+
+  // BUG-FIX: Clear screenshot dimensions when switching away from custom mode.
+  // Otherwise, canvas-container keeps old aspect ratio from previous screenshot.
+  React.useEffect(() => {
+    if (screenshotMode !== 'custom') {
+      setScreenshotDimensions(null);
+    }
+  }, [screenshotMode]);
+
   const selectedButton = activeProfile.buttons.find(b => b.id === selectedButtonId);
 
   // Keep a ref to latest profile to avoid stale state in callbacks
@@ -324,6 +338,7 @@ export function useOverlayWysiwyg({
     isDraggingNexion, setIsDraggingNexion, isDraggingNexionRef, nexionDragHasMoved, showPalette, setShowPalette,
     activePlayer, setActivePlayer, hideGrid, setHideGrid, hideAllNodes, setHideAllNodes,
     bgDimLevel, setBgDimLevel, globalNodeOpacity, setGlobalNodeOpacity, selectedButton,
+    screenshotDimensions, setScreenshotDimensions,
     handleContainerClick, handleDragStart, handleDragMove, handleDragEnd, handleUpdateBtnProperty,
     handleUpdateBtnProperties, relocateButtonOffset, handleAddSpecificButton, handleAddNewButton, handleRemoveButton, getBackgroundUrl
   };

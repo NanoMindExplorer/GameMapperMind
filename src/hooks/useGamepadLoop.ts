@@ -65,6 +65,14 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, connected: boo
   // Previously, injectActive was excluded from deps, so prevInjectActiveRef was never
   // updated when injectActive changed — the "only injectActive changed" branch never
   // triggered because the comparison always showed "not changed" (both stale).
+  //
+  // CACAT #2 FIX: Profile SELALU dikirim ke daemon saat connected=true, terlepas dari
+  // injectActive (overlay on/off). Sebelumnya, profile dikirim sebagai "{}" saat
+  // injectActive=false (overlay off) — akibatnya buildMapCache di NativeGamepadMapper
+  // kosong, findButtonMapping selalu null, dan TIDAK ADA INJEKSI sama sekali.
+  //
+  // injectActive sekarang hanya mengontrol haptic feedback (di Effect 1 listener).
+  // Injection aktif selama Shizuku connected + profile loaded.
   useEffect(() => {
     let isCleanedUp = false;
 
@@ -76,19 +84,23 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, connected: boo
         await TouchInjection.startGamepadListener().catch(() => {});
         if (isCleanedUp) return;
 
-        const profileStr = injectActive ? JSON.stringify(mapProfile) : "{}";
+        // CACAT #2 FIX: Always send profile JSON (not "{}") when connected.
+        // Profile must be loaded into NativeGamepadMapper.buttonMapCache for
+        // findButtonMapping to work. Without this, no touch injection occurs.
+        const profileStr = JSON.stringify(mapProfile);
         await TouchInjection.updateActiveProfile({ profileJson: profileStr });
       } catch (err) {
         console.error("Failed to setup Shizuku gamepad listener", err);
       }
     };
 
-    // If only injectActive changed (not connected or mapProfile), just update profile JSON.
+    // If only injectActive changed (not connected or mapProfile), no re-bind needed.
+    // injectActive no longer affects profile JSON (always sent when connected).
     const onlyInjectActiveChanged = prevInjectActiveRef.current !== injectActive;
 
     if (onlyInjectActiveChanged && connected && mapProfile) {
-      const profileStr = injectActive ? JSON.stringify(mapProfile) : "{}";
-      TouchInjection.updateActiveProfile({ profileJson: profileStr }).catch(() => {});
+      // injectActive changed but profile is already loaded — no action needed.
+      // Profile JSON is always the same regardless of injectActive now.
     } else {
       setupShizuku();
     }
@@ -97,7 +109,8 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, connected: boo
 
     return () => {
       isCleanedUp = true;
-      // Always reset profile on cleanup, regardless of `connected` state.
+      // CACAT #2 FIX: Reset profile to "{}" on cleanup (component unmount or profile change).
+      // This clears buttonMapCache so stale mappings don't persist.
       TouchInjection.updateActiveProfile({ profileJson: "{}" }).catch(() => {});
     };
   }, [mapProfile, connected, injectActive]);

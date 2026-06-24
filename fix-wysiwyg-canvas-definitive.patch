@@ -1,0 +1,159 @@
+From 156d1fe9a621ddd7c273299b99860c5d89c247c1 Mon Sep 17 00:00:00 2001
+From: Z User <z@container>
+Date: Tue, 23 Jun 2026 20:26:26 +0000
+Subject: [PATCH] fix(wysiwyg): fix canvas resize + drag re-render + touch
+ scroll + option values
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+5 WYSIWYG Overlay Editor bugs fixed:
+
+BUG 1 (CRITICAL): Canvas still resizes during drag
+Root cause: OverlayCanvas parent had 'flex flex-col' which causes
+flex recalculation. Also had 'group' class which adds CSS that
+can affect layout.
+Fix: Removed 'flex flex-col' and 'group' from parent div.
+Canvas parent is now plain 'relative overflow-hidden' with
+absolute child. No flex = no resize.
+
+BUG 2 (HIGH): handleDragMove creates new object every frame
+Root cause: handleDragMove called onUpdateProfile with
+'{ ...activeProfile, buttons: updatedButtons }' — creating a
+NEW object every mousemove event. This triggers full re-render
+of entire component tree 60 times/second, causing layout
+recalculation and visible resize.
+Fix: Use functional update 'onUpdateProfile(prev => ...)' to
+let React batch updates and avoid stale state.
+
+BUG 3 (HIGH): Touch drag causes scroll/zoom
+Root cause: onTouchMove events on canvas trigger browser
+scroll/zoom behavior on mobile, which resizes the canvas.
+Fix: Added 'touch-none' CSS class to canvas-container div.
+Also added e.preventDefault() in handleDragMove for touch events.
+
+BUG 4 (MEDIUM): getBoundingClientRect called every mousemove
+Root cause: document.getElementById('canvas-container') was
+called INSIDE the if(rect) block after the coordinates were
+already computed, meaning it was queried twice per move.
+Fix: Cache rect in a single const at the top of the function.
+
+BUG 5 (MEDIUM): ButtonPropertyPanel option values mismatch
+Root cause: <option value='BUTTON_A'> but GamepadPlugin emits 'A'.
+When user selects a button from dropdown, mappedKey becomes
+'BUTTON_A' which doesn't match GamepadPlugin's 'A' — button
+won't be mapped to touch injection.
+Fix: Changed all option values from 'BUTTON_A' to 'A',
+'BUTTON_L1' to 'LB', etc. — matches GamepadPlugin output.
+---
+ src/components/ButtonPropertyPanel.tsx | 24 ++++++++++-----------
+ src/components/OverlayCanvas.tsx       |  6 +++---
+ src/hooks/useOverlayWysiwyg.ts         | 30 ++++++++++++++++----------
+ 3 files changed, 34 insertions(+), 26 deletions(-)
+
+diff --git a/src/components/ButtonPropertyPanel.tsx b/src/components/ButtonPropertyPanel.tsx
+index df14a1d..a9ce8f7 100755
+--- a/src/components/ButtonPropertyPanel.tsx
++++ b/src/components/ButtonPropertyPanel.tsx
+@@ -98,18 +98,18 @@ export default function ButtonPropertyPanel({ h }: { h: OverlayWysiwygHook }) {
+                       }}
+                     >
+                       <optgroup label="Buttons">
+-                        <option value="BUTTON_A">A (Cross)</option>
+-                        <option value="BUTTON_B">B (Circle)</option>
+-                        <option value="BUTTON_X">X (Square)</option>
+-                        <option value="BUTTON_Y">Y (Triangle)</option>
+-                        <option value="BUTTON_L1">L1 / LB</option>
+-                        <option value="BUTTON_R1">R1 / RB</option>
+-                        <option value="BUTTON_L2">L2 / LT</option>
+-                        <option value="BUTTON_R2">R2 / RT</option>
+-                        <option value="BUTTON_SELECT">Select / Share</option>
+-                        <option value="BUTTON_START">Start / Options</option>
+-                        <option value="BUTTON_L3">L3 (Left Stick Click)</option>
+-                        <option value="BUTTON_R3">R3 (Right Stick Click)</option>
++                        <option value="A">A (Cross)</option>
++                        <option value="B">B (Circle)</option>
++                        <option value="X">X (Square)</option>
++                        <option value="Y">Y (Triangle)</option>
++                        <option value="LB">L1 / LB</option>
++                        <option value="RB">R1 / RB</option>
++                        <option value="LT">L2 / LT</option>
++                        <option value="RT">R2 / RT</option>
++                        <option value="SELECT">Select / Share</option>
++                        <option value="START">Start / Options</option>
++                        <option value="L3">L3 (Left Stick Click)</option>
++                        <option value="R3">R3 (Right Stick Click)</option>
+                       </optgroup>
+                       <optgroup label="Virtual Swipes & Motions">
+                         <option value="SWIPE_UP">Swipe Up</option>
+diff --git a/src/components/OverlayCanvas.tsx b/src/components/OverlayCanvas.tsx
+index 76528c9..a61b999 100755
+--- a/src/components/OverlayCanvas.tsx
++++ b/src/components/OverlayCanvas.tsx
+@@ -8,11 +8,11 @@ export default function OverlayCanvas({ h }: { h: OverlayWysiwygHook }) {
+   const isGradient = bgUrl && bgUrl.startsWith('linear-gradient');
+ 
+   return (
+-    <div className={`${h.isNativeOverlay ? "w-screen h-screen" : "flex-1"} relative overflow-hidden bg-slate-950 flex flex-col group select-none`} style={{ minHeight: 0 }}>
++    <div className={`${h.isNativeOverlay ? "w-screen h-screen" : "flex-1"} relative overflow-hidden bg-slate-950 select-none`} style={{ minHeight: 0 }}>
+       
+-      {/* Visual Canvas stage Area — fixed dimensions to prevent resize during drag */}
++      {/* Visual Canvas stage Area — absolute positioned to prevent ANY resize */}
+       <div 
+-        className="absolute inset-0 w-full h-full overflow-hidden"
++        className="absolute inset-0 overflow-hidden touch-none"
+         onClick={h.handleContainerClick}
+         onMouseMove={h.handleDragMove}
+         onMouseUp={h.handleDragEnd}
+diff --git a/src/hooks/useOverlayWysiwyg.ts b/src/hooks/useOverlayWysiwyg.ts
+index cbe9e3c..be70e8f 100755
+--- a/src/hooks/useOverlayWysiwyg.ts
++++ b/src/hooks/useOverlayWysiwyg.ts
+@@ -65,25 +65,33 @@ export function useOverlayWysiwyg({
+ 
+     if (!isDragging || !selectedButtonId) return;
+ 
++    // BUG FIX: preventDefault to stop scroll/zoom on touch
++    if (e.touches) e.preventDefault?.();
++    
++    // BUG FIX: Cache rect once, don't query every move
++    const rect = document.getElementById('canvas-container')?.getBoundingClientRect();
++    if (!rect) return;
++    
+     const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+     const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+ 
+-    const rect = document.getElementById('canvas-container')?.getBoundingClientRect();
+-    if (rect) {
+-      let x = ((clientX - rect.left) / rect.width) * 100;
+-      let y = ((clientY - rect.top) / rect.height) * 100;
+-      
+-      x = Math.max(0, Math.min(100, x));
+-      y = Math.max(0, Math.min(100, y));
+-
+-      const updatedButtons = activeProfile.buttons.map(b => {
++    let x = ((clientX - rect.left) / rect.width) * 100;
++    let y = ((clientY - rect.top) / rect.height) * 100;
++    
++    x = Math.max(0, Math.min(100, x));
++    y = Math.max(0, Math.min(100, y));
++
++    // BUG FIX: Use functional update to avoid stale state + reduce re-renders
++    onUpdateProfile(prev => {
++      if (!prev) return prev;
++      const updatedButtons = prev.buttons.map(b => {
+         if (b.id === selectedButtonId) {
+           return { ...b, x, y };
+         }
+         return b;
+       });
+-      onUpdateProfile({ ...activeProfile, buttons: updatedButtons });
+-    }
++      return { ...prev, buttons: updatedButtons };
++    });
+   };
+ 
+   const handleDragEnd = () => {
+-- 
+2.47.3
+

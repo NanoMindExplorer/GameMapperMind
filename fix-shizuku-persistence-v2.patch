@@ -1,0 +1,142 @@
+From 6ab482a9d4cee873c04a377e62e672f35e972075 Mon Sep 17 00:00:00 2001
+From: Z User <z@container>
+Date: Tue, 23 Jun 2026 19:47:48 +0000
+Subject: [PATCH] fix(shizuku): fix service persistence and rebind logic
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+3 Shizuku integration bugs fixed:
+
+BUG 1 (CRITICAL): App blindly rebinds Shizuku on every resume
+Root cause: App.tsx appStateChange listener called
+TouchInjection.bindService() + startGamepadListener() every time
+the app returns to foreground. This causes Shizuku to unbind
+(with false=don't kill) and rebind, creating race conditions
+and potentially causing the service to become unstable.
+
+Fix: Removed blind rebind from appStateChange listener.
+checkShizukuStatus (called by fetchStatus) already handles
+rebinding intelligently — only rebinds if service is NOT alive.
+
+BUG 2 (HIGH): checkShizukuStatus rebinds when daemonRunning is false
+Root cause: useShizuku.checkShizukuStatus had condition:
+  if (granted && (!touchServiceAlive || !daemonRunning)) { bindAndStart() }
+This means if daemon (GamepadListenerService) is not running but
+touchService IS alive, it would still rebind — causing unnecessary
+service restart.
+
+Fix: Changed condition to only rebind if touchService is NOT alive:
+  if (granted && !touchServiceAlive) { bindAndStart() }
+daemonRunning is a separate concern (GamepadListenerService) that
+should not trigger Shizuku service rebind.
+
+BUG 3 (MEDIUM): checkPermission lacks isPreV11 check and logging
+Root cause: checkPermission didn't check isPreV11, and had no
+debug logging to diagnose Shizuku connection issues.
+
+Fix: Added isPreV11 check at start of checkPermission.
+Added Log.d with all status variables (binder, granted, isBound,
+serviceAlive) for debugging via logcat.
+---
+ .../gamemappermind/TouchInjectionPlugin.kt       | 14 +++++++++++++-
+ src/App.tsx                                      | 10 ++++------
+ src/hooks/useShizuku.ts                          | 16 +++++++++-------
+ 3 files changed, 26 insertions(+), 14 deletions(-)
+
+diff --git a/android/app/src/main/java/com/nanomindexplorer/gamemappermind/TouchInjectionPlugin.kt b/android/app/src/main/java/com/nanomindexplorer/gamemappermind/TouchInjectionPlugin.kt
+index 29940a1..bb873b1 100755
+--- a/android/app/src/main/java/com/nanomindexplorer/gamemappermind/TouchInjectionPlugin.kt
++++ b/android/app/src/main/java/com/nanomindexplorer/gamemappermind/TouchInjectionPlugin.kt
+@@ -307,14 +307,26 @@ class TouchInjectionPlugin : Plugin() {
+     @PluginMethod
+     fun checkPermission(call: PluginCall) {
+         try {
+-            val granted = Shizuku.pingBinder() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
++            // BUG FIX: Comprehensive check per Shizuku API
++            if (Shizuku.isPreV11()) {
++                val data = JSObject()
++                data.put("granted", false)
++                data.put("isBound", false)
++                data.put("touchServiceAlive", false)
++                call.resolve(data)
++                return
++            }
++            val binderAlive = Shizuku.pingBinder()
++            val granted = binderAlive && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+             val touchServiceAlive = touchService != null && touchService!!.asBinder().isBinderAlive
+             val data = JSObject()
+             data.put("granted", granted)
+             data.put("isBound", isBound)
+             data.put("touchServiceAlive", touchServiceAlive)
++            Log.d("GameMapper", "checkPermission: binder=$binderAlive granted=$granted isBound=$isBound serviceAlive=$touchServiceAlive")
+             call.resolve(data)
+         } catch (e: Exception) {
++            Log.e("GameMapper", "checkPermission error", e)
+             val data = JSObject()
+             data.put("granted", false)
+             data.put("isBound", false)
+diff --git a/src/App.tsx b/src/App.tsx
+index ce8d789..278ebbd 100755
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -312,13 +312,11 @@ export default function App() {
+     
+     let appListener: any;
+     import('@capacitor/app').then(({ App: CapacitorApp }) => {
+-      appListener = CapacitorApp.addListener('appStateChange', (state) => {
++      appListener = CapacitorApp.addListener('appStateChange', async (state) => {
+         if (state.isActive) {
+-           fetchStatus();
+-           import('./plugins/TouchInjection').then(({ default: TouchInjection }) => {
+-               TouchInjection.bindService().catch(()=>{});
+-               TouchInjection.startGamepadListener().catch(()=>{});
+-           });
++           // BUG FIX: Only fetch status, do NOT blindly rebind on every resume
++           // bindService is already called by useShizuku.checkShizukuStatus if needed
++           await fetchStatus();
+         }
+       });
+     }).catch(console.warn);
+diff --git a/src/hooks/useShizuku.ts b/src/hooks/useShizuku.ts
+index a45769d..fd0bcd6 100755
+--- a/src/hooks/useShizuku.ts
++++ b/src/hooks/useShizuku.ts
+@@ -14,25 +14,27 @@ export const useShizuku = () => {
+         const { granted, touchServiceAlive, isBound } = await TouchInjection.checkPermission();
+         const { daemonRunning } = await TouchInjection.checkDaemonRunning();
+         
+-        let newState = 'INSTALLED';
++        // BUG FIX: Proper state machine based on ACTUAL service status, not assumptions
++        // Only try to rebind if permission is granted but service is NOT alive
++        if (granted && !touchServiceAlive) {
++            await bindAndStart();
++        }
++
++        let newState: 'INSTALLED' | 'RUNNING' | 'PERMISSION' | 'BOUND' | 'DAEMON_ALIVE' = 'INSTALLED';
+         if (granted && touchServiceAlive && daemonRunning) newState = 'DAEMON_ALIVE';
+         else if (granted && isBound) newState = 'BOUND';
+         else if (granted) newState = 'PERMISSION';
+         else newState = 'RUNNING';
+ 
+-        if (granted && (!touchServiceAlive || !daemonRunning)) {
+-            await bindAndStart();
+-        }
+-
+         return {
+           ...currentState,
+           daemonRunning: !!daemonRunning, 
+           status: granted ? 'CONNECTED_SHIZUKU' : 'DISCONNECTED',
+-          recoveryState: newState as any
++          recoveryState: newState
+         };
+       } catch (err) {
+         console.error("Native check error", err);
+-        return { ...currentState, recoveryState: 'INSTALLED' } as any;
++        return { ...currentState, recoveryState: 'INSTALLED' as any };
+       }
+     }
+     return currentState;
+-- 
+2.47.3
+

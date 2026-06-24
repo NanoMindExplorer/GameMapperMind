@@ -1,0 +1,127 @@
+From 7f5f1bd36b31e28deb38f3b8fa3de60597785a2d Mon Sep 17 00:00:00 2001
+From: Z User <z@container>
+Date: Tue, 23 Jun 2026 15:29:15 +0000
+Subject: [PATCH] fix(kotlin): fix handleButtonBatched signature mismatch +
+ gpIdx scope
+
+GamepadListenerService.kt:
+- Fix handleButtonBatched calls to use correct 3-arg signature:
+  handleButtonBatched(gamepadIndex: Int, buttonName: String, isDown: Boolean)
+- Previous fix used 2-arg (String, Boolean) which doesn't match the
+  actual GamepadJniPlugin.handleButtonBatched signature
+- Added gpIdx definition in EV_ABS block scope (was only in EV_KEY block)
+- All 13 call sites now pass (gpIdx, buttonName, isDown) correctly
+
+ShizukuPlugin.kt:
+- Fix unresolved reference: GamepadDaemonService -> TouchDaemonService
+
+Fixes: Kotlin compilation errors in Gradle assembleDebug
+---
+ .../gamemappermind/GamepadListenerService.kt  | 27 ++++++++++---------
+ .../gamemappermind/ShizukuPlugin.kt           |  6 ++---
+ 2 files changed, 17 insertions(+), 16 deletions(-)
+
+diff --git a/android/app/src/main/java/com/nanomindexplorer/gamemappermind/GamepadListenerService.kt b/android/app/src/main/java/com/nanomindexplorer/gamemappermind/GamepadListenerService.kt
+index 8669229..1f73473 100644
+--- a/android/app/src/main/java/com/nanomindexplorer/gamemappermind/GamepadListenerService.kt
++++ b/android/app/src/main/java/com/nanomindexplorer/gamemappermind/GamepadListenerService.kt
+@@ -172,7 +172,7 @@ class GamepadListenerService : Service() {
+                                     
+                                     val btnMap = mapEvdevToButton(btnRaw)
+                                     if (btnMap != "UNKNOWN") {
+-                                        GamepadJniPlugin.handleButtonBatched(gpIdx, , )
++                                        GamepadJniPlugin.handleButtonBatched(gpIdx, btnMap, isDown == 1)
+                                         TouchInjectionPlugin.emitGamepadButton(btnMap, isDown, 1.0f)
+                                     }
+                                 }
+@@ -185,6 +185,7 @@ class GamepadListenerService : Service() {
+                             if (parts.size >= 3) {
+                                 val isPrefixed = parts[0].startsWith("/dev/input/")
+                                 val evIdx = if (isPrefixed) 1 else 0
++                                val gpIdx = if (isPrefixed) Math.max(0, gamepadDevices.indexOf(parts[0])) else 0
+                                 if (parts.size > evIdx + 2) {
+                                     val axisType = parts[evIdx + 1]
+                                     val valueHex = parts[evIdx + 2]
+@@ -195,20 +196,20 @@ class GamepadListenerService : Service() {
+                                         "ABS_HAT0Y" -> {
+                                             when (rawVal) {
+                                                 -1 -> { 
+-                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, , )
+-                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, , )
++                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, "DPAD_UP", true)
++                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, "DPAD_DOWN", false)
+                                                     TouchInjectionPlugin.emitGamepadButton("DPAD_UP", 1, 1f)
+                                                     TouchInjectionPlugin.emitGamepadButton("DPAD_DOWN", 0, 0f) 
+                                                 }
+                                                 1  -> { 
+-                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, , )
+-                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, , )
++                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, "DPAD_DOWN", true)
++                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, "DPAD_UP", false)
+                                                     TouchInjectionPlugin.emitGamepadButton("DPAD_DOWN", 1, 1f)
+                                                     TouchInjectionPlugin.emitGamepadButton("DPAD_UP", 0, 0f) 
+                                                 }
+                                                 0  -> { 
+-                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, , )
+-                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, , )
++                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, "DPAD_UP", false)
++                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, "DPAD_DOWN", false)
+                                                     TouchInjectionPlugin.emitGamepadButton("DPAD_UP", 0, 0f)
+                                                     TouchInjectionPlugin.emitGamepadButton("DPAD_DOWN", 0, 0f) 
+                                                 }
+@@ -217,20 +218,20 @@ class GamepadListenerService : Service() {
+                                         "ABS_HAT0X" -> {
+                                             when (rawVal) {
+                                                 -1 -> { 
+-                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, , )
+-                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, , )
++                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, "DPAD_LEFT", true)
++                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, "DPAD_RIGHT", false)
+                                                     TouchInjectionPlugin.emitGamepadButton("DPAD_LEFT", 1, 1f)
+                                                     TouchInjectionPlugin.emitGamepadButton("DPAD_RIGHT", 0, 0f) 
+                                                 }
+                                                 1  -> { 
+-                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, , )
+-                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, , )
++                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, "DPAD_RIGHT", true)
++                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, "DPAD_LEFT", false)
+                                                     TouchInjectionPlugin.emitGamepadButton("DPAD_RIGHT", 1, 1f)
+                                                     TouchInjectionPlugin.emitGamepadButton("DPAD_LEFT", 0, 0f) 
+                                                 }
+                                                 0  -> { 
+-                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, , )
+-                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, , )
++                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, "DPAD_LEFT", false)
++                                                    GamepadJniPlugin.handleButtonBatched(gpIdx, "DPAD_RIGHT", false)
+                                                     TouchInjectionPlugin.emitGamepadButton("DPAD_LEFT", 0, 0f)
+                                                     TouchInjectionPlugin.emitGamepadButton("DPAD_RIGHT", 0, 0f) 
+                                                 }
+diff --git a/android/app/src/main/java/com/nanomindexplorer/gamemappermind/ShizukuPlugin.kt b/android/app/src/main/java/com/nanomindexplorer/gamemappermind/ShizukuPlugin.kt
+index 11f688a..71c887b 100644
+--- a/android/app/src/main/java/com/nanomindexplorer/gamemappermind/ShizukuPlugin.kt
++++ b/android/app/src/main/java/com/nanomindexplorer/gamemappermind/ShizukuPlugin.kt
+@@ -53,10 +53,10 @@ class ShizukuPlugin : Plugin() {
+     
+     @PluginMethod
+     fun startDaemon(call: PluginCall) {
+-        val intent = android.content.Intent("com.nanomindexplorer.gamemappermind.GamepadDaemonService")
++        val intent = android.content.Intent("com.nanomindexplorer.gamemappermind.TouchDaemonService")
+         intent.setPackage(context.packageName)
+         try {
+-            Shizuku.bindUserService(Shizuku.UserServiceArgs(ComponentName(context.packageName, GamepadDaemonService::class.java.name)).daemon(false), connection)
++            Shizuku.bindUserService(Shizuku.UserServiceArgs(ComponentName(context.packageName, TouchDaemonService::class.java.name)).daemon(false), connection)
+             call.resolve()
+         } catch (e: Exception) {
+             call.reject("Failed to bind Shizuku user service", e)
+@@ -65,7 +65,7 @@ class ShizukuPlugin : Plugin() {
+ 
+     @PluginMethod
+     fun stopDaemon(call: PluginCall) {
+-        Shizuku.unbindUserService(Shizuku.UserServiceArgs(ComponentName(context.packageName, GamepadDaemonService::class.java.name)), connection, true)
++        Shizuku.unbindUserService(Shizuku.UserServiceArgs(ComponentName(context.packageName, TouchDaemonService::class.java.name)), connection, true)
+         call.resolve()
+     }
+ }
+-- 
+2.47.3
+

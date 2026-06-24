@@ -1,0 +1,177 @@
+From 93350a0b73ccfffee8e584d5699a7bb5a1422689 Mon Sep 17 00:00:00 2001
+From: Z User <z@container>
+Date: Tue, 23 Jun 2026 20:33:55 +0000
+Subject: [PATCH] fix(wysiwyg): fix stale state in all handlers + BUTTON_A
+ remnant
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+4 bugs found in deep audit of all WYSIWYG code:
+
+BUG 1 (CRITICAL): handleUpdateBtnProperty uses stale activeProfile
+Root cause: Used 'activeProfile.buttons.map()' which reads from
+closure state — during rapid drag, state is stale, causing buttons
+to jump back to old positions.
+Fix: Use functional update 'onUpdateProfile(prev => ...)'.
+
+BUG 2 (CRITICAL): relocateButtonOffset uses stale activeProfile
+Same root cause as BUG 1. Arrow buttons relocate based on stale
+state — pressing ↑ multiple times fast causes incorrect positions.
+Fix: Use functional update.
+
+BUG 3 (HIGH): handleAddSpecificButton and handleRemoveButton
+use stale activeProfile
+Adding/removing buttons reads stale state, can cause race condition
+where button appears then disappears.
+Fix: Use functional update for both.
+
+BUG 4 (HIGH): handleAddNewButton still uses 'BUTTON_A'
+handleAddNewButton (used for swipe/gyro) passed 'BUTTON_A' as
+mappedKey, but GamepadPlugin emits 'A'. Swipe/gyro buttons would
+never be mapped.
+Fix: Changed to 'A'.
+
+BUG 5 (MEDIUM): ButtonPropertyPanel onChange checks 'BUTTON_A'
+After option values were fixed to 'A', the onChange handler still
+checked for 'BUTTON_A' — androidEventCode was never set when user
+selected a button from dropdown.
+Fix: Changed all checks from 'BUTTON_A' to 'A', 'BUTTON_L1' to
+'LB', etc.
+---
+ src/components/ButtonPropertyPanel.tsx | 20 ++++-----
+ src/hooks/useOverlayWysiwyg.ts         | 57 +++++++++++++++-----------
+ 2 files changed, 44 insertions(+), 33 deletions(-)
+
+diff --git a/src/components/ButtonPropertyPanel.tsx b/src/components/ButtonPropertyPanel.tsx
+index a9ce8f7..34e1c56 100755
+--- a/src/components/ButtonPropertyPanel.tsx
++++ b/src/components/ButtonPropertyPanel.tsx
+@@ -66,25 +66,25 @@ export default function ButtonPropertyPanel({ h }: { h: OverlayWysiwygHook }) {
+                           h.handleUpdateBtnProperty('type', 'swipe');
+                           h.handleUpdateBtnProperty('androidEventCode', 204);
+                           h.handleUpdateBtnProperty('label', 'Swipe Kanan (RIGHT)');
+-                        } else if (val === 'BUTTON_A') {
++                        } else if (val === 'A') {
+                           h.handleUpdateBtnProperty('androidEventCode', 96);
+-                        } else if (val === 'BUTTON_B') {
++                        } else if (val === 'B') {
+                           h.handleUpdateBtnProperty('androidEventCode', 97);
+-                        } else if (val === 'BUTTON_X') {
++                        } else if (val === 'X') {
+                           h.handleUpdateBtnProperty('androidEventCode', 99);
+-                        } else if (val === 'BUTTON_Y') {
++                        } else if (val === 'Y') {
+                           h.handleUpdateBtnProperty('androidEventCode', 100);
+-                        } else if (val === 'BUTTON_L1') {
++                        } else if (val === 'LB') {
+                           h.handleUpdateBtnProperty('androidEventCode', 101);
+-                        } else if (val === 'BUTTON_R1') {
++                        } else if (val === 'RB') {
+                           h.handleUpdateBtnProperty('androidEventCode', 102);
+-                        } else if (val === 'BUTTON_L2') {
++                        } else if (val === 'LT') {
+                           h.handleUpdateBtnProperty('androidEventCode', 104);
+-                        } else if (val === 'BUTTON_R2') {
++                        } else if (val === 'RT') {
+                           h.handleUpdateBtnProperty('androidEventCode', 105);
+-                        } else if (val === 'BUTTON_L3') {
++                        } else if (val === 'L3') {
+                           h.handleUpdateBtnProperty('androidEventCode', 103);
+-                        } else if (val === 'BUTTON_R3') {
++                        } else if (val === 'R3') {
+                           h.handleUpdateBtnProperty('androidEventCode', 106);
+                         } else if (val === 'DPAD_UP') {
+                           h.handleUpdateBtnProperty('androidEventCode', 106);
+diff --git a/src/hooks/useOverlayWysiwyg.ts b/src/hooks/useOverlayWysiwyg.ts
+index be70e8f..2f9852d 100755
+--- a/src/hooks/useOverlayWysiwyg.ts
++++ b/src/hooks/useOverlayWysiwyg.ts
+@@ -101,27 +101,35 @@ export function useOverlayWysiwyg({
+ 
+   const handleUpdateBtnProperty = (key: keyof VirtualButton, value: any) => {
+     if (!selectedButtonId) return;
+-    const updatedButtons = activeProfile.buttons.map(b => {
+-      if (b.id === selectedButtonId) {
+-        return { ...b, [key]: value };
+-      }
+-      return b;
++    // BUG FIX: Use functional update to avoid stale state
++    onUpdateProfile(prev => {
++      if (!prev) return prev;
++      const updatedButtons = prev.buttons.map(b => {
++        if (b.id === selectedButtonId) {
++          return { ...b, [key]: value };
++        }
++        return b;
++      });
++      return { ...prev, buttons: updatedButtons };
+     });
+-    onUpdateProfile({ ...activeProfile, buttons: updatedButtons });
+   };
+ 
+   const relocateButtonOffset = (id: string, dx: number, dy: number) => {
+-    const updatedButtons = activeProfile.buttons.map(b => {
+-      if (b.id === id) {
+-        return { 
+-          ...b, 
+-          x: Math.max(0, Math.min(100, b.x + dx)), 
+-          y: Math.max(0, Math.min(100, b.y + dy)) 
+-        };
+-      }
+-      return b;
++    // BUG FIX: Use functional update to avoid stale state
++    onUpdateProfile(prev => {
++      if (!prev) return prev;
++      const updatedButtons = prev.buttons.map(b => {
++        if (b.id === id) {
++          return { 
++            ...b, 
++            x: Math.max(0, Math.min(100, b.x + dx)), 
++            y: Math.max(0, Math.min(100, b.y + dy)) 
++          };
++        }
++        return b;
++      });
++      return { ...prev, buttons: updatedButtons };
+     });
+-    onUpdateProfile({ ...activeProfile, buttons: updatedButtons });
+   };
+ 
+   const handleAddSpecificButton = (label: string, mappedKey: string, androidEventCode: number, defaultSize: number = 56, type: VirtualButton['type'] = 'button') => {
+@@ -143,22 +151,25 @@ export function useOverlayWysiwyg({
+       sensitivity: type === 'analog_stick' ? 1.0 : undefined,
+       tapDuration: type === 'swipe' ? 30 : undefined
+     };
+-    onUpdateProfile({
+-      ...activeProfile,
+-      buttons: [...activeProfile.buttons, newBtn]
++    // BUG FIX: Use functional update
++    onUpdateProfile(prev => {
++      if (!prev) return prev;
++      return { ...prev, buttons: [...prev.buttons, newBtn] };
+     });
+     setSelectedButtonId(freshId);
+     setShowPalette(false);
+   };
+ 
+   const handleAddNewButton = (type: VirtualButton['type'] = 'button', defaultLabel: string = 'New', eventCode: number = 0) => {
+-    handleAddSpecificButton(defaultLabel, 'BUTTON_A', eventCode, type === 'swipe' ? 80 : 56, type);
++    // BUG FIX: Use 'A' instead of 'BUTTON_A'
++    handleAddSpecificButton(defaultLabel, 'A', eventCode, type === 'swipe' ? 80 : 56, type);
+   };
+ 
+   const handleRemoveButton = (id: string) => {
+-    onUpdateProfile({
+-      ...activeProfile,
+-      buttons: activeProfile.buttons.filter(b => b.id !== id)
++    // BUG FIX: Use functional update
++    onUpdateProfile(prev => {
++      if (!prev) return prev;
++      return { ...prev, buttons: prev.buttons.filter(b => b.id !== id) };
+     });
+     setSelectedButtonId(null);
+   };
+-- 
+2.47.3
+

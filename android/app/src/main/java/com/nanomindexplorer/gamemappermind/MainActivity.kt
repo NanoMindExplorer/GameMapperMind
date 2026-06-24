@@ -28,16 +28,15 @@ class MainActivity : BridgeActivity() {
             webView.isVerticalScrollBarEnabled = false
             webView.isHorizontalScrollBarEnabled = false
         }
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            window.decorView.setOnCapturedPointerListener { view, event ->
-                GamepadPlugin.instance?.handleGenericMotionEvent(event)
-                true
-            }
-        }
+        // BUG-E1 FIX: Removed setOnCapturedPointerListener (dead code — requestPointerCapture()
+        // is never called anywhere in codebase, so this listener was never triggered).
+        // To re-enable: implement requestPointerCapture() for mouse-capture mode if needed.
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // BUG-E2 NOTE: This intercepts gamepad events before WebView can see them, so Web Gamepad API
+        // (navigator.getGamepads()) will NOT receive them. This is by design — events are routed via
+        // Capacitor plugin channel (onGamepadButton/onGamepadAxis) to useGamepadLoop.
         if ((event.source and InputDevice.SOURCE_GAMEPAD) != 0 ||
             (event.source and InputDevice.SOURCE_JOYSTICK) != 0 ||
             (event.source and InputDevice.SOURCE_DPAD) != 0) {
@@ -71,29 +70,10 @@ class MainActivity : BridgeActivity() {
         return super.dispatchKeyEvent(event)
     }
 
-    // BUG FIX: Also override onKeyDown/onKeyUp as fallback
-    // Capacitor WebView may intercept key events before dispatchKeyEvent.
-    // onKeyDown/onKeyUp are called by the system if dispatchKeyEvent returns false
-    // or if the WebView doesn't consume the event.
-    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
-        if (KeyEvent.isGamepadButton(keyCode) || keyCode == KeyEvent.KEYCODE_DPAD_UP ||
-            keyCode == KeyEvent.KEYCODE_DPAD_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_LEFT ||
-            keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
-            GamepadPlugin.instance?.handleKeyDown(keyCode, event)
-            return true
-        }
-        return super.onKeyDown(keyCode, event)
-    }
-
-    override fun onKeyUp(keyCode: Int, event: KeyEvent?): Boolean {
-        if (KeyEvent.isGamepadButton(keyCode) || keyCode == KeyEvent.KEYCODE_DPAD_UP ||
-            keyCode == KeyEvent.KEYCODE_DPAD_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_LEFT ||
-            keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
-            GamepadPlugin.instance?.handleKeyUp(keyCode, event)
-            return true
-        }
-        return super.onKeyUp(keyCode, event)
-    }
+    // BUG-E3 FIX: Removed onKeyDown/onKeyUp overrides — they were dead code.
+    // dispatchKeyEvent always returns true for gamepad events, so onKeyDown/onKeyUp
+    // are never called by the system. To re-enable as fallback, dispatchKeyEvent must
+    // return false for some gamepad events first.
 
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
         if ((event.source and InputDevice.SOURCE_GAMEPAD) != 0 ||

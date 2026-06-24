@@ -25,3 +25,35 @@
 -keep interface rikka.shizuku.** { *; }
 -keep class com.nanomindexplorer.gamemappermind.** { *; }
 -keep class com.getcapacitor.** { *; }
+
+# BUG-K3 FIX: Reflection targets used in TouchDaemonService (InputManager.getInstance, injectInputEvent)
+# Without these rules, R8 may strip/rename these methods and touch injection will fail at runtime.
+-keep class android.view.InputManager { *; }
+-keep class android.view.InputEvent { *; }
+-keep class android.view.MotionEvent { *; }
+-keep class android.view.MotionEvent$PointerProperties { *; }
+-keep class android.view.MotionEvent$PointerCoords { *; }
+
+# Choreographer used in GamepadJniPlugin
+-keep class android.view.Choreographer { *; }
+-keep class android.view.Choreographer$FrameCallback { *; }
+
+# AIDL generated classes (must be kept for Shizuku IPC)
+-keep class com.nanomindexplorer.gamemappermind.ITouchService { *; }
+-keep class com.nanomindexplorer.gamemappermind.ITouchService$Stub { *; }
+-keep class com.nanomindexplorer.gamemappermind.ICommandOutputListener { *; }
+-keep class com.nanomindexplorer.gamemappermind.ICommandOutputListener$Stub { *; }
+
+# Keep @Keep annotated classes
+-keep,allowobfuscation @interface androidx.annotation.Keep
+-keep @androidx.annotation.Keep class * { *; }
+
+# BUG-LOG1 FIX: Strip debug logs in release builds to reduce APK size and prevent info leakage.
+-assumenosideeffects class android.util.Log {
+    public static *** d(...);
+    public static *** v(...);
+}
+
+# Keep line numbers for crash reports
+-keepattributes SourceFile,LineNumberTable
+-renamesourcefileattribute SourceFile

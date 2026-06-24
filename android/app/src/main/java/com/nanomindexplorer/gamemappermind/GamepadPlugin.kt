@@ -27,7 +27,10 @@ class GamepadPlugin : Plugin() {
             // even WITHOUT Shizuku (Android native input works without Shizuku).
             emitButtonEvent(keyCode, "PRESSED", event)
             val buttonName = mapKeyCodeToButtonName(keyCode)
-            TouchInjectionPlugin.emitGamepadButton(buttonName, 1, 1.0f)
+            // BUG-D2 FIX: Only emit if button is recognized.
+            if (buttonName != "UNKNOWN") {
+                TouchInjectionPlugin.emitGamepadButton(buttonName, 1, 1.0f)
+            }
             return true
         }
         return false
@@ -37,7 +40,9 @@ class GamepadPlugin : Plugin() {
         if (isGamepadButton(keyCode)) {
             emitButtonEvent(keyCode, "RELEASED", event)
             val buttonName = mapKeyCodeToButtonName(keyCode)
-            TouchInjectionPlugin.emitGamepadButton(buttonName, 0, 0.0f)
+            if (buttonName != "UNKNOWN") {
+                TouchInjectionPlugin.emitGamepadButton(buttonName, 0, 0.0f)
+            }
             return true
         }
         return false
@@ -56,6 +61,20 @@ class GamepadPlugin : Plugin() {
             val l2Trigger = event.getAxisValue(MotionEvent.AXIS_BRAKE)
             val r2Trigger = event.getAxisValue(MotionEvent.AXIS_GAS)
 
+            // BUG-D1 FIX: Only emit if values changed significantly (avoid 60Hz flood when stick is idle).
+            val EPSILON = 0.01f
+            val changed =
+                Math.abs(axisX - lastAxis[0]) > EPSILON ||
+                Math.abs(axisY - lastAxis[1]) > EPSILON ||
+                Math.abs(axisZ - lastAxis[2]) > EPSILON ||
+                Math.abs(axisRZ - lastAxis[3]) > EPSILON ||
+                Math.abs(hatX - lastAxis[4]) > EPSILON ||
+                Math.abs(hatY - lastAxis[5]) > EPSILON ||
+                Math.abs(l2Trigger - lastAxis[6]) > EPSILON ||
+                Math.abs(r2Trigger - lastAxis[7]) > EPSILON
+            if (!changed) return true
+            lastAxis = floatArrayOf(axisX, axisY, axisZ, axisRZ, hatX, hatY, l2Trigger, r2Trigger)
+            
             val ret = JSObject()
             ret.put("type", "AXIS")
             ret.put("axisX", axisX)
@@ -99,6 +118,9 @@ class GamepadPlugin : Plugin() {
         }
         return false
     }
+    
+    // BUG-D1 FIX: Cache last axis values to detect significant change.
+    private var lastAxis = FloatArray(8)
 
     private fun isGamepadButton(keyCode: Int): Boolean {
         return KeyEvent.isGamepadButton(keyCode) ||
@@ -127,7 +149,8 @@ class GamepadPlugin : Plugin() {
             KeyEvent.KEYCODE_DPAD_DOWN -> "DPAD_DOWN"
             KeyEvent.KEYCODE_DPAD_LEFT -> "DPAD_LEFT"
             KeyEvent.KEYCODE_DPAD_RIGHT -> "DPAD_RIGHT"
-            else -> "BTN_${keyCode}"
+            // BUG-D2 FIX: Return UNKNOWN instead of "BTN_${keyCode}" to avoid polluting mapping cache.
+            else -> "UNKNOWN"
         }
     }
 

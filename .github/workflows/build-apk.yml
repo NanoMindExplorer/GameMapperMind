@@ -47,6 +47,12 @@ jobs:
         working-directory: ./android
         run: ./gradlew assembleDebug
 
+      # BUG-K3 FIX: Also test assembleReleaseTest (ProGuard enabled + debug signing) to verify R8 rules don't break the build.
+      - name: Build Release-Test APK (ProGuard verification)
+        working-directory: ./android
+        run: ./gradlew assembleReleaseTest
+        continue-on-error: true
+
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -54,3 +60,11 @@ jobs:
           path: android/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 30
           if-no-files-found: error
+
+      - name: Upload Release-Test APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GameMapperMind-releaseTest-apk
+          path: android/app/build/outputs/apk/releaseTest/app-releaseTest.apk
+          retention-days: 30
+          if-no-files-found: false

@@ -1,14 +1,15 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import TouchInjection from '../plugins/TouchInjection';
 import { GamepadProfile } from '../types';
 
 export function useGamepadLoop(mapProfile: GamepadProfile | null, connected: boolean, injectActive: boolean) {
+  // BUG-H1 FIX: Track previous injectActive to detect toggle without re-running setup effect.
+  const prevInjectActiveRef = useRef(injectActive);
+  
+  // Effect 1: Set up listeners ONCE (no re-run on toggle).
+  // These listeners receive events from both Shizuku getevent (when connected)
+  // and Android native input (via GamepadPlugin.dispatchKeyEvent) — works WITHOUT Shizuku.
   useEffect(() => {
-    // BUG FIX: ALWAYS set up listeners — they receive events from BOTH:
-    // 1. Shizuku getevent (via GamepadListenerService) when connected
-    // 2. Android native input (via GamepadPlugin.dispatchKeyEvent) — works WITHOUT Shizuku
-    // Previously, listeners were only set up when connected=true, causing gamepad
-    // to be invisible in GamepadTester when Shizuku was not running.
     let isCleanedUp = false;
     let btnListener: any = null;
     let axisListener: any = null;
@@ -44,8 +45,22 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, connected: boo
       }
     };
 
+    setupListeners();
+
+    return () => {
+      isCleanedUp = true;
+      if (btnListener && btnListener.remove) btnListener.remove();
+      if (axisListener && axisListener.remove) axisListener.remove();
+      if (feedbackListener && feedbackListener.remove) feedbackListener.remove();
+    };
+  }, []); // BUG-H1 FIX: Empty dependency — listeners set up ONCE.
+
+  // Effect 2: Manage Shizuku bind + profile update (re-runs only when connected/profile change).
+  // injectActive changes only update the profile JSON, NOT re-bind the service.
+  useEffect(() => {
+    let isCleanedUp = false;
+
     const setupShizuku = async () => {
-      // Only bind Shizuku service when connected
       if (!connected || !mapProfile) return;
       try {
         await TouchInjection.bindService().catch(() => {});
@@ -60,19 +75,26 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, connected: boo
       }
     };
 
-    // Always set up listeners first (for native Android gamepad input)
-    setupListeners();
-    // Then set up Shizuku if connected (for getevent-based input + touch injection)
-    setupShizuku();
+    // BUG-H1 FIX: If only injectActive changed (not connected or mapProfile),
+    // just update the profile JSON without re-binding the service.
+    const onlyInjectActiveChanged = 
+      prevInjectActiveRef.current !== injectActive;
+    
+    if (onlyInjectActiveChanged && connected && mapProfile) {
+      // Just update profile, no re-bind
+      const profileStr = injectActive ? JSON.stringify(mapProfile) : "{}";
+      TouchInjection.updateActiveProfile({ profileJson: profileStr }).catch(() => {});
+    } else {
+      setupShizuku();
+    }
+    
+    prevInjectActiveRef.current = injectActive;
 
     return () => {
       isCleanedUp = true;
-      if (btnListener && btnListener.remove) btnListener.remove();
-      if (axisListener && axisListener.remove) axisListener.remove();
-      if (feedbackListener && feedbackListener.remove) feedbackListener.remove();
-      if (connected) {
-        TouchInjection.updateActiveProfile({ profileJson: "{}" }).catch(() => {});
-      }
+      // BUG-H2 FIX: Always reset profile on cleanup, regardless of `connected` state.
+      // Stale profile in GamepadListenerService.activeProfileJson can persist across reconnects.
+      TouchInjection.updateActiveProfile({ profileJson: "{}" }).catch(() => {});
     };
-  }, [mapProfile, connected, injectActive]);
+  }, [mapProfile, connected]); // BUG-H1 FIX: injectActive removed from deps (handled via ref).
 }

@@ -1,0 +1,236 @@
+From 3a5ce6920b80df166c151e038c6463d0c82244c0 Mon Sep 17 00:00:00 2001
+From: Z User <z@container>
+Date: Tue, 23 Jun 2026 17:07:47 +0000
+Subject: [PATCH] fix(critical): fix gamepad not detected + Shizuku service
+ disappearing
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Three root cause bugs fixed end-to-end:
+
+BUG 1 (CRITICAL): Gamepad not detected in GamepadTester
+Root cause: GamepadPlugin (Android native KeyEvent/MotionEvent handler)
+emitted events on 'gamepadEvent' channel, but NO frontend code listened
+to that channel. Only Shizuku-based events ('onGamepadButton') were used.
+Since Android WebView does NOT support navigator.getGamepads() Web API,
+gamepad was invisible when Shizuku getevent was not running.
+
+Fix: GamepadPlugin now emits on BOTH channels:
+- 'gamepadEvent' (legacy, for backward compat)
+- 'onGamepadButton'/'onGamepadAxis' (via TouchInjectionPlugin companion)
+This means native Android gamepad input (which works WITHOUT Shizuku)
+is now forwarded to the frontend.
+
+BUG 2 (CRITICAL): Shizuku service disappears from management
+Root cause: TouchInjectionPlugin.bindService() called
+Shizuku.unbindUserService(USER_SERVICE_ARGS, serviceConnection, true)
+with third parameter 'true' (removeUserService=true). This KILLS the
+service process every time re-binding occurs (e.g., on app resume).
+Every app background → resume cycle killed and re-created the service,
+causing it to disappear from Shizuku management.
+
+Fix: Changed third parameter to 'false' (removeUserService=false) in
+bindService(). Only unbindService() (explicit user action) uses 'true'.
+
+BUG 3 (CRITICAL): useGamepadLoop only set up listeners when Shizuku connected
+Root cause: useGamepadLoop useEffect returned early if !connected,
+skipping listener setup entirely. Even though GamepadPlugin now emits
+on 'onGamepadButton', no listener was registered to receive it.
+
+Fix: Split into setupListeners() (always runs) and setupShizuku() (only
+when connected). Listeners are always active so native Android gamepad
+events are received regardless of Shizuku status.
+
+Combined effect: Gamepad now works in GamepadTester even WITHOUT Shizuku
+(via Android native input). Shizuku service persists across app lifecycle.
+Touch injection still requires Shizuku for getevent + MotionEvent injection.
+---
+ .../gamemappermind/GamepadPlugin.kt           | 37 +++++++++++++++
+ .../gamemappermind/TouchInjectionPlugin.kt    |  5 +-
+ src/hooks/useGamepadLoop.ts                   | 47 ++++++++++++-------
+ 3 files changed, 72 insertions(+), 17 deletions(-)
+
+diff --git a/android/app/src/main/java/com/nanomindexplorer/gamemappermind/GamepadPlugin.kt b/android/app/src/main/java/com/nanomindexplorer/gamemappermind/GamepadPlugin.kt
+index fe3bbf4..41cd06b 100644
+--- a/android/app/src/main/java/com/nanomindexplorer/gamemappermind/GamepadPlugin.kt
++++ b/android/app/src/main/java/com/nanomindexplorer/gamemappermind/GamepadPlugin.kt
+@@ -22,7 +22,12 @@ class GamepadPlugin : Plugin() {
+ 
+     fun handleKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+         if (isGamepadButton(keyCode)) {
++            // BUG FIX: Emit on BOTH "gamepadEvent" (legacy) AND "onGamepadButton" (standard)
++            // so that useGamepadLoop and GamepadTester receive native Android gamepad events
++            // even WITHOUT Shizuku (Android native input works without Shizuku).
+             emitButtonEvent(keyCode, "PRESSED", event)
++            val buttonName = mapKeyCodeToButtonName(keyCode)
++            TouchInjectionPlugin.emitGamepadButton(buttonName, 1, 1.0f)
+             return true
+         }
+         return false
+@@ -31,6 +36,8 @@ class GamepadPlugin : Plugin() {
+     fun handleKeyUp(keyCode: Int, event: KeyEvent?): Boolean {
+         if (isGamepadButton(keyCode)) {
+             emitButtonEvent(keyCode, "RELEASED", event)
++            val buttonName = mapKeyCodeToButtonName(keyCode)
++            TouchInjectionPlugin.emitGamepadButton(buttonName, 0, 0.0f)
+             return true
+         }
+         return false
+@@ -46,6 +53,7 @@ class GamepadPlugin : Plugin() {
+             val hatX = event.getAxisValue(MotionEvent.AXIS_HAT_X)
+             val hatY = event.getAxisValue(MotionEvent.AXIS_HAT_Y)
+ 
++            // Emit legacy event
+             val ret = JSObject()
+             ret.put("type", "AXIS")
+             ret.put("axisX", axisX)
+@@ -56,6 +64,12 @@ class GamepadPlugin : Plugin() {
+             ret.put("hatY", hatY)
+             ret.put("timestamp", event.eventTime)
+             notifyListeners("gamepadEvent", ret)
++
++            // BUG FIX: Also emit on standard "onGamepadAxis" channel
++            // so useGamepadLoop and GamepadTester receive native Android joystick events
++            // even WITHOUT Shizuku.
++            val axes = floatArrayOf(axisX, axisY, axisZ, axisRZ, hatX, hatY)
++            TouchInjectionPlugin.emitGamepadAxis(axes)
+             return true
+         }
+         return false
+@@ -69,6 +83,29 @@ class GamepadPlugin : Plugin() {
+                 keyCode == KeyEvent.KEYCODE_DPAD_RIGHT
+     }
+ 
++    private fun mapKeyCodeToButtonName(keyCode: Int): String {
++        return when (keyCode) {
++            KeyEvent.KEYCODE_BUTTON_A -> "A"
++            KeyEvent.KEYCODE_BUTTON_B -> "B"
++            KeyEvent.KEYCODE_BUTTON_X -> "X"
++            KeyEvent.KEYCODE_BUTTON_Y -> "Y"
++            KeyEvent.KEYCODE_BUTTON_L1 -> "LB"
++            KeyEvent.KEYCODE_BUTTON_R1 -> "RB"
++            KeyEvent.KEYCODE_BUTTON_L2 -> "LT"
++            KeyEvent.KEYCODE_BUTTON_R2 -> "RT"
++            KeyEvent.KEYCODE_BUTTON_THUMBL -> "L3"
++            KeyEvent.KEYCODE_BUTTON_THUMBR -> "R3"
++            KeyEvent.KEYCODE_BUTTON_START -> "START"
++            KeyEvent.KEYCODE_BUTTON_SELECT -> "SELECT"
++            KeyEvent.KEYCODE_BUTTON_MODE -> "HOME"
++            KeyEvent.KEYCODE_DPAD_UP -> "DPAD_UP"
++            KeyEvent.KEYCODE_DPAD_DOWN -> "DPAD_DOWN"
++            KeyEvent.KEYCODE_DPAD_LEFT -> "DPAD_LEFT"
++            KeyEvent.KEYCODE_DPAD_RIGHT -> "DPAD_RIGHT"
++            else -> "BTN_${keyCode}"
++        }
++    }
++
+     private fun emitButtonEvent(keyCode: Int, action: String, event: KeyEvent?) {
+         val ret = JSObject()
+         ret.put("type", "BUTTON")
+diff --git a/android/app/src/main/java/com/nanomindexplorer/gamemappermind/TouchInjectionPlugin.kt b/android/app/src/main/java/com/nanomindexplorer/gamemappermind/TouchInjectionPlugin.kt
+index 203c366..cb3aa28 100644
+--- a/android/app/src/main/java/com/nanomindexplorer/gamemappermind/TouchInjectionPlugin.kt
++++ b/android/app/src/main/java/com/nanomindexplorer/gamemappermind/TouchInjectionPlugin.kt
+@@ -105,7 +105,10 @@ class TouchInjectionPlugin : Plugin() {
+                     pendingBindCalls.add(call)
+                     try {
+                         if (isBound) {
+-                            Shizuku.unbindUserService(USER_SERVICE_ARGS, serviceConnection, true)
++                            // BUG FIX: Use false (don't remove) instead of true (remove).
++                            // unbindUserService with true KILLS the service process,
++                            // causing app to disappear from Shizuku management.
++                            Shizuku.unbindUserService(USER_SERVICE_ARGS, serviceConnection, false)
+                         }
+                     } catch (e: Exception) {}
+                     Shizuku.bindUserService(USER_SERVICE_ARGS, serviceConnection)
+diff --git a/src/hooks/useGamepadLoop.ts b/src/hooks/useGamepadLoop.ts
+index bbb9943..5668e5f 100644
+--- a/src/hooks/useGamepadLoop.ts
++++ b/src/hooks/useGamepadLoop.ts
+@@ -4,24 +4,18 @@ import { GamepadProfile } from '../types';
+ 
+ export function useGamepadLoop(mapProfile: GamepadProfile | null, connected: boolean, injectActive: boolean) {
+   useEffect(() => {
+-    if (!connected || !mapProfile) return;
+-
++    // BUG FIX: ALWAYS set up listeners — they receive events from BOTH:
++    // 1. Shizuku getevent (via GamepadListenerService) when connected
++    // 2. Android native input (via GamepadPlugin.dispatchKeyEvent) — works WITHOUT Shizuku
++    // Previously, listeners were only set up when connected=true, causing gamepad
++    // to be invisible in GamepadTester when Shizuku was not running.
+     let isCleanedUp = false;
+     let btnListener: any = null;
+     let axisListener: any = null;
+     let feedbackListener: any = null;
+ 
+-    const setupNative = async () => {
++    const setupListeners = async () => {
+       try {
+-        await TouchInjection.bindService().catch(() => {});
+-        if (isCleanedUp) return;
+-        await TouchInjection.startGamepadListener().catch(() => {});
+-        if (isCleanedUp) return;
+-        
+-        const profileStr = injectActive ? JSON.stringify(mapProfile) : "{}";
+-        await TouchInjection.updateActiveProfile({ profileJson: profileStr });
+-        if (isCleanedUp) return;
+-
+         btnListener = await TouchInjection.addListener('onGamepadButton', (data: any) => {
+           if (!isCleanedUp) {
+             window.dispatchEvent(new CustomEvent('native-gamepad-button', { detail: data }));
+@@ -34,7 +28,7 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, connected: boo
+           }
+         });
+         
+-        // H13: Haptics listener — save handle for cleanup
++        // H13: Haptics listener
+         feedbackListener = await TouchInjection.addListener('onGamepadFeedback', async (data: any) => {
+            if (!isCleanedUp && injectActive && mapProfile?.hapticIntensity) {
+               const { Haptics, ImpactStyle } = await import('@capacitor/haptics');
+@@ -46,18 +40,39 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, connected: boo
+            }
+         });
+       } catch (err) {
+-        console.error("Failed to setup native gamepad listener", err);
++        console.error("Failed to setup gamepad listeners", err);
+       }
+     };
+ 
+-    setupNative();
++    const setupShizuku = async () => {
++      // Only bind Shizuku service when connected
++      if (!connected || !mapProfile) return;
++      try {
++        await TouchInjection.bindService().catch(() => {});
++        if (isCleanedUp) return;
++        await TouchInjection.startGamepadListener().catch(() => {});
++        if (isCleanedUp) return;
++        
++        const profileStr = injectActive ? JSON.stringify(mapProfile) : "{}";
++        await TouchInjection.updateActiveProfile({ profileJson: profileStr });
++      } catch (err) {
++        console.error("Failed to setup Shizuku gamepad listener", err);
++      }
++    };
++
++    // Always set up listeners first (for native Android gamepad input)
++    setupListeners();
++    // Then set up Shizuku if connected (for getevent-based input + touch injection)
++    setupShizuku();
+ 
+     return () => {
+       isCleanedUp = true;
+       if (btnListener && btnListener.remove) btnListener.remove();
+       if (axisListener && axisListener.remove) axisListener.remove();
+       if (feedbackListener && feedbackListener.remove) feedbackListener.remove();
+-      TouchInjection.updateActiveProfile({ profileJson: "{}" }).catch(() => {});
++      if (connected) {
++        TouchInjection.updateActiveProfile({ profileJson: "{}" }).catch(() => {});
++      }
+     };
+   }, [mapProfile, connected, injectActive]);
+ }
+-- 
+2.47.3
+

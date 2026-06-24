@@ -82,7 +82,8 @@ class GamepadListenerService : Service() {
             try {
                 // Get min/max first using getevent -p
                 val absRanges = mutableMapOf<String, Pair<Int, Int>>()
-                val gamepadDevices = mutableSetOf<String>()
+                // BUG-C6 FIX: Use MutableList instead of MutableSet so indexOf() actually works.
+                val gamepadDevices = mutableListOf<String>()
                 
                 try {
                     val pJson = TouchInjectionPlugin.touchService?.executeShellCommand("getevent -lp") ?: "{}"
@@ -94,8 +95,11 @@ class GamepadListenerService : Service() {
                     
                     for (line in lines) {
                         if (line.contains("add device")) {
-                            if (currentDeviceIsGamepad && currentDevicePath != null) {
-                                gamepadDevices.add(currentDevicePath!!)
+                            if (currentDeviceIsGamepad && currentDevicePath != null &&
+                                !gamepadDevices.contains(currentDevicePath)) {
+                                gamepadDevices.add(currentDevicePath)
+                                // BUG-LOG2 FIX: Log detected gamepad for debugging.
+                                Log.i("GameMapper", "Gamepad detected: $currentDevicePath (index=${gamepadDevices.size - 1})")
                             }
                             val pathMatch = Regex("/dev/input/event\\d+").find(line)
                             currentDevicePath = pathMatch?.value
@@ -122,8 +126,10 @@ class GamepadListenerService : Service() {
                             }
                         }
                     }
-                    if (currentDeviceIsGamepad && currentDevicePath != null) {
+                    if (currentDeviceIsGamepad && currentDevicePath != null &&
+                        !gamepadDevices.contains(currentDevicePath)) {
                         gamepadDevices.add(currentDevicePath)
+                        Log.i("GameMapper", "Gamepad detected: $currentDevicePath (index=${gamepadDevices.size - 1})")
                     }
                 } catch (e: Exception) {
                     Log.e("GameMapper", "Failed to parse getevent -lp", e)
@@ -150,10 +156,21 @@ class GamepadListenerService : Service() {
                 val streamListener = object : ICommandOutputListener.Stub() {
                     override fun onOutputLine(it: String?) {
                         if (!isListening || it == null) return
+                        // BUG-C1 FIX: Parse getevent line correctly.
+                        // Format: "[   12345.678901] /dev/input/event4: EV_KEY BTN_SOUTH DOWN"
+                        // Or:     "/dev/input/event4: EV_KEY BTN_SOUTH DOWN"
+                        val deviceMatch = Regex("(/dev/input/event\\d+)").find(it)
+                        val isPrefixed = deviceMatch != null
+                        val gpIdx = if (isPrefixed) {
+                            val devPath = deviceMatch!!.value
+                            val idx = gamepadDevices.indexOf(devPath)
+                            // BUG-C1 FIX: If device not found in list, default to 0 (don't crash).
+                            if (idx < 0) 0 else idx
+                        } else 0
+                        
                         if (it.contains("EV_SYN")) {
                             if (it.contains("SYN_REPORT")) {
                                 if (hasAxisChange) {
-                                    val gpIdx = if (it.trim().startsWith("/dev/input/")) Math.max(0, gamepadDevices.indexOf(it.trim().split(Regex("\\s+"))[0])) else 0
                                     GamepadJniPlugin.handleAxisBatched(gpIdx, lStickX, lStickY, rStickX, rStickY, l2Trigger, r2Trigger)
                                     TouchInjectionPlugin.emitGamepadAxis(floatArrayOf(lStickX, lStickY, rStickX, rStickY, l2Trigger, r2Trigger))
                                     hasAxisChange = false
@@ -161,20 +178,17 @@ class GamepadListenerService : Service() {
                             }
                         } else if (it.contains("EV_KEY")) {
                             val parts = it.trim().split(Regex("\\s+"))
-                            if (parts.size >= 3) {
-                                val isPrefixed = parts[0].startsWith("/dev/input/")
-                                val evIdx = if (isPrefixed) 1 else 0
-                                val gpIdx = if (isPrefixed) Math.max(0, gamepadDevices.indexOf(parts[0])) else 0
-                                if (parts.size > evIdx + 2) {
-                                    val btnRaw = parts[evIdx + 1]
-                                    val stateStr = parts[evIdx + 2]
-                                    val isDown = if (stateStr == "DOWN") 1 else 0
-                                    
-                                    val btnMap = mapEvdevToButton(btnRaw)
-                                    if (btnMap != "UNKNOWN") {
-                                        GamepadJniPlugin.handleButtonBatched(gpIdx, btnMap, isDown == 1)
-                                        TouchInjectionPlugin.emitGamepadButton(btnMap, isDown, 1.0f)
-                                    }
+                            // Find BTN_ token (skip timestamp/device path)
+                            val btnIdx = parts.indexOfFirst { p -> p.startsWith("BTN_") }
+                            val stateIdx = parts.indexOfLast { p -> p == "DOWN" || p == "UP" }
+                            if (btnIdx >= 0 && stateIdx > btnIdx) {
+                                val btnRaw = parts[btnIdx]
+                                val isDown = parts[stateIdx] == "DOWN"
+                                
+                                val btnMap = mapEvdevToButton(btnRaw)
+                                if (btnMap != "UNKNOWN") {
+                                    GamepadJniPlugin.handleButtonBatched(gpIdx, btnMap, isDown)
+                                    TouchInjectionPlugin.emitGamepadButton(btnMap, if (isDown) 1 else 0, 1.0f)
                                 }
                             }
                         } else if (it.contains("EV_FF")) {
@@ -182,13 +196,11 @@ class GamepadListenerService : Service() {
                             TouchInjectionPlugin.emitGamepadFeedback("RUMBLE", 1.0f, 200L)
                         } else if (it.contains("EV_ABS")) {
                             val parts = it.trim().split(Regex("\\s+"))
-                            if (parts.size >= 3) {
-                                val isPrefixed = parts[0].startsWith("/dev/input/")
-                                val evIdx = if (isPrefixed) 1 else 0
-                                val gpIdx = if (isPrefixed) Math.max(0, gamepadDevices.indexOf(parts[0])) else 0
-                                if (parts.size > evIdx + 2) {
-                                    val axisType = parts[evIdx + 1]
-                                    val valueHex = parts[evIdx + 2]
+                            // Find ABS_ token
+                            val absIdx = parts.indexOfFirst { p -> p.startsWith("ABS_") }
+                            if (absIdx >= 0 && absIdx + 1 < parts.size) {
+                                val axisType = parts[absIdx]
+                                val valueHex = parts[absIdx + 1]
                                 try {
                                     val hexNum = valueHex.toLong(16)
                                     val rawVal = if (hexNum > 0x7FFFFFFF) (hexNum - 0x100000000L).toInt() else hexNum.toInt()
@@ -269,7 +281,6 @@ class GamepadListenerService : Service() {
                                         }
                                     }
                                 } catch (e: NumberFormatException) { }
-                                }
                             }
                         }
                     }
@@ -294,10 +305,9 @@ class GamepadListenerService : Service() {
             evdevName.contains("BTN_B") || evdevName.contains("BTN_EAST") -> "B"
             evdevName.contains("BTN_X") || evdevName.contains("BTN_NORTH") -> "X"
             evdevName.contains("BTN_Y") || evdevName.contains("BTN_WEST") -> "Y"
-            evdevName.contains("BTN_C") -> "C"
-            evdevName.contains("BTN_Z") -> "Z"
-            evdevName.contains("BTN_TL2") || evdevName.contains("BTN_L2") -> "LT"
-            evdevName.contains("BTN_TR2") || evdevName.contains("BTN_R2") -> "RT"
+            // BUG-C5 FIX: Removed BTN_TL2/BTN_TR2 mapping — analog triggers (ABS_Z/ABS_RZ) are the
+            // single source of truth for LT/RT in NativeGamepadMapper.handleAxes (line 281-291).
+            // Digital BTN_TL2/BTN_TR2 caused trigger flicker when both event types fired simultaneously.
             evdevName.contains("BTN_TL") || evdevName.contains("BTN_L1") -> "LB"
             evdevName.contains("BTN_TR") || evdevName.contains("BTN_R1") -> "RB"
             evdevName.contains("BTN_THUMBL") -> "L3"
@@ -305,6 +315,7 @@ class GamepadListenerService : Service() {
             evdevName.contains("BTN_START") -> "START"
             evdevName.contains("BTN_SELECT") -> "SELECT"
             evdevName.contains("BTN_MODE") -> "HOME"
+            // BUG-C4 FIX: Removed BTN_C/BTN_Z (legacy N64 codes, never emitted by modern gamepads).
             else -> "UNKNOWN"
         }
     }

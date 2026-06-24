@@ -52,20 +52,29 @@ class TouchInjectionPlugin : Plugin() {
         ComponentName("com.nanomindexplorer.gamemappermind", TouchDaemonService::class.java.name)
     ).tag("touch_daemon_v1").daemon(false).processNameSuffix("touch_daemon").version(1)
 
-    private var pendingBindCalls = mutableListOf<PluginCall>()
+    // BUG-B1/B2 FIX: pendingBindCalls must be cleaned up on error / disconnect.
+    private val pendingBindCalls = mutableListOf<PluginCall>()
+    private val pendingLock = Any()
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(componentName: ComponentName, binder: IBinder) {
             touchService = ITouchService.Stub.asInterface(binder)
             Log.d("GameMapper", "Shizuku Touch Service connected")
-            pendingBindCalls.forEach { it.resolve() }
-            pendingBindCalls.clear()
+            synchronized(pendingLock) {
+                pendingBindCalls.forEach { it.resolve() }
+                pendingBindCalls.clear()
+            }
         }
 
         override fun onServiceDisconnected(componentName: ComponentName) {
             touchService = null
             isBound = false
             Log.d("GameMapper", "Shizuku Touch Service disconnected")
+            // BUG-B2 FIX: Reject all pending calls on disconnect.
+            synchronized(pendingLock) {
+                pendingBindCalls.forEach { it.reject("Service disconnected") }
+                pendingBindCalls.clear()
+            }
         }
     }
 
@@ -112,7 +121,7 @@ class TouchInjectionPlugin : Plugin() {
             if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
                 val serviceAlive = touchService != null && touchService!!.asBinder().isBinderAlive
                 if (!isBound || !serviceAlive) {
-                    pendingBindCalls.add(call)
+                    synchronized(pendingLock) { pendingBindCalls.add(call) }
                     try {
                         if (isBound) {
                             // BUG FIX: Use false (don't remove) instead of true (remove).
@@ -121,8 +130,16 @@ class TouchInjectionPlugin : Plugin() {
                             Shizuku.unbindUserService(USER_SERVICE_ARGS, serviceConnection, false)
                         }
                     } catch (e: Exception) {}
-                    Shizuku.bindUserService(USER_SERVICE_ARGS, serviceConnection)
-                    isBound = true
+                    try {
+                        Shizuku.bindUserService(USER_SERVICE_ARGS, serviceConnection)
+                        isBound = true
+                    } catch (e: Exception) {
+                        // BUG-B1 FIX: Remove from pending and reject on error.
+                        synchronized(pendingLock) {
+                            pendingBindCalls.remove(call)
+                        }
+                        call.reject("Failed to bind Shizuku service: ${e.message}")
+                    }
                 } else {
                     call.resolve()
                 }
@@ -131,6 +148,7 @@ class TouchInjectionPlugin : Plugin() {
             }
         } catch (e: Exception) {
             Log.e("GameMapper", "Failed to bind Shizuku user service", e)
+            synchronized(pendingLock) { pendingBindCalls.remove(call) }
             call.reject("Failed to bind Shizuku service: ${e.message}")
         }
     }
@@ -138,6 +156,17 @@ class TouchInjectionPlugin : Plugin() {
     @PluginMethod
     fun unbindService(call: PluginCall) {
         try {
+            // BUG-B4 FIX: Stop GamepadListenerService FIRST so it can release pointers
+            // and stop getevent stream while touchService is still alive.
+            try {
+                val intent = Intent(context, GamepadListenerService::class.java)
+                context.stopService(intent)
+            } catch (e: Exception) {
+                Log.w("GameMapper", "Failed to stop GamepadListenerService before unbind", e)
+            }
+            // Brief delay to allow service onDestroy to release pointers
+            try { Thread.sleep(100) } catch (e: InterruptedException) {}
+            
             if (isBound) {
                 // CRITICAL FIX: Do NOT call touchService?.destroy() directly!
                 // destroy() calls System.exit(0) which kills the process immediately.
@@ -158,6 +187,11 @@ class TouchInjectionPlugin : Plugin() {
 
     @PluginMethod
     fun startGamepadListener(call: PluginCall) {
+        // BUG-B5 FIX: Skip if already running.
+        if (GamepadListenerService.isRunning) {
+            call.resolve()
+            return
+        }
         val intent = Intent(context, GamepadListenerService::class.java)
         try {
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
@@ -237,12 +271,18 @@ class TouchInjectionPlugin : Plugin() {
     fun executeShizukuCommand(call: PluginCall) {
         val command = call.getString("command") ?: ""
         
-        // Anti-Regression: Fix BUG-N01 via whitelist
-        val ALLOWED_PREFIXES = listOf("getevent -lp", "getevent -l", "dumpsys input", "pm list packages", "input tap", "input swipe", "input keyevent")
+        // BUG-B3 / SEC1 FIX: Stricter whitelist — removed `input tap/swipe/keyevent` (RCE risk via `;`/`&&`/`|`).
+        // Touch injection is handled by touchDown/Move/Up plugin methods; no need for shell `input` commands.
+        val ALLOWED_PREFIXES = listOf("getevent -lp", "getevent -l", "dumpsys input", "pm list packages")
         
         val isAllowed = ALLOWED_PREFIXES.any { command.startsWith(it) }
         if (!isAllowed) {
             call.reject("Command not allowed")
+            return
+        }
+        // BUG-B3 FIX: Reject commands with shell metacharacters.
+        if (Regex("[;|&\n<>`$]").containsMatchIn(command)) {
+            call.reject("Command contains forbidden shell metacharacters")
             return
         }
 

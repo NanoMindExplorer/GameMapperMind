@@ -8,7 +8,9 @@ android {
         applicationId "com.nanomindexplorer.gamemappermind"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
+        // BUG-K2 FIX: Auto-increment versionCode from CI run number. Falls back to 1 for local builds.
+        // This ensures every CI build has a unique, monotonically increasing versionCode for Play Store updates.
+        versionCode System.getenv("GITHUB_RUN_NUMBER")?.toInt() ?: 1
         versionName "1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
@@ -19,10 +21,25 @@ android {
     }
     signingConfigs {
         release {
-            storeFile file(System.getenv("KEYSTORE_FILE") ?: "keystore.jks")
-            storePassword System.getenv("KEYSTORE_PASSWORD") ?: ""
-            keyAlias System.getenv("KEY_ALIAS") ?: ""
-            keyPassword System.getenv("KEY_PASSWORD") ?: ""
+            // BUG-K1 FIX: Only configure release signing if keystore env vars are set.
+            // Previously, storeFile defaulted to "keystore.jks" (which doesn't exist) and
+            // storePassword defaulted to "", causing assembleRelease to fail.
+            // Now: if env vars are absent, release build uses debug signing (for local testing).
+            // For production: set KEYSTORE_FILE, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD
+            // as GitHub Actions secrets and the release build will use them.
+            def keystoreFile = System.getenv("KEYSTORE_FILE")
+            if (keystoreFile != null && new File(keystoreFile).exists()) {
+                storeFile file(keystoreFile)
+                storePassword System.getenv("KEYSTORE_PASSWORD") ?: ""
+                keyAlias System.getenv("KEY_ALIAS") ?: ""
+                keyPassword System.getenv("KEY_PASSWORD") ?: ""
+            } else {
+                // Fall back to debug signing for local builds without keystore configured
+                storeFile new File(System.getProperty("user.home"), ".android/debug.keystore")
+                storePassword "android"
+                keyAlias "androiddebugkey"
+                keyPassword "android"
+            }
         }
     }
     buildTypes {
@@ -31,6 +48,15 @@ android {
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             signingConfig signingConfigs.release
+        }
+        // BUG-K3 FIX: Add a release-test build type that uses debug signing but with ProGuard enabled,
+        // so CI can verify R8/ProGuard rules don't break the build.
+        releaseTest {
+            initWith release
+            minifyEnabled true
+            shrinkResources true
+            signingConfig signingConfigs.debug
+            matchingFallbacks = ['release']
         }
     }
     buildFeatures {

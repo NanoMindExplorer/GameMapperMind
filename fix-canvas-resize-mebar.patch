@@ -1,0 +1,108 @@
+From 18745d9459fd01311165fd99230817f534244c45 Mon Sep 17 00:00:00 2001
+From: Z User <z@container>
+Date: Tue, 23 Jun 2026 19:59:27 +0000
+Subject: [PATCH] fix(ui): fix canvas resize/mebar during drag with absolute
+ positioning
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+CRITICAL FIX: Canvas membesar/mengecil saat drag tombol
+
+Root cause: Canvas container used flex-1 + min-h-[400px] which
+causes the flex item to auto-resize (grow/shrink) when content
+(buttons being dragged) changes position. Each drag update triggers
+React re-render → flex recalculate → canvas size changes → buttons
+appear to jump/shift position.
+
+Fix: Use absolute positioning (absolute inset-0) instead of flex-1
+for the canvas stage. Absolute positioning anchors the canvas to
+its parent dimensions and does NOT recalculate on content change.
+Also added minHeight: 0 to parent to prevent flex overflow.
+
+Additional fixes:
+- ScreenshotBackground: Removed max-h-[600px] (caused layout shift),
+  replaced with h-full + maxHeight: 100% for proper flex behavior
+- OverlayWysiwyg: Added overflow-hidden to parent containers
+- ButtonPropertyPanel: Changed from grid col-span-4 to fixed width
+  (lg:w-80) with shrink-0 to prevent flex resize
+
+Combined effect: Canvas is now ROCK SOLID during drag operations.
+No more mebar/mengecil/position shift when moving buttons or analog
+sticks.
+---
+ src/components/ButtonPropertyPanel.tsx  | 2 +-
+ src/components/OverlayCanvas.tsx        | 6 +++---
+ src/components/OverlayWysiwyg.tsx       | 4 ++--
+ src/components/ScreenshotBackground.tsx | 4 ++--
+ 4 files changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/src/components/ButtonPropertyPanel.tsx b/src/components/ButtonPropertyPanel.tsx
+index 68e9a70..df14a1d 100755
+--- a/src/components/ButtonPropertyPanel.tsx
++++ b/src/components/ButtonPropertyPanel.tsx
+@@ -8,7 +8,7 @@ export default function ButtonPropertyPanel({ h }: { h: OverlayWysiwygHook }) {
+   const { selectedButton } = h;
+   
+   return (
+-    <div className="lg:col-span-4 p-6 bg-slate-950/40 flex flex-col justify-between">
++    <div className="w-full lg:w-80 p-6 bg-slate-950/40 flex flex-col justify-between shrink-0 overflow-y-auto custom-scrollbar" style={{ maxHeight: '100%' }}>
+       <div className="space-y-6">
+         <div>
+           <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Overlay Node Inspector</h4>
+diff --git a/src/components/OverlayCanvas.tsx b/src/components/OverlayCanvas.tsx
+index 5ffb8cd..76528c9 100755
+--- a/src/components/OverlayCanvas.tsx
++++ b/src/components/OverlayCanvas.tsx
+@@ -8,11 +8,11 @@ export default function OverlayCanvas({ h }: { h: OverlayWysiwygHook }) {
+   const isGradient = bgUrl && bgUrl.startsWith('linear-gradient');
+ 
+   return (
+-    <div className={`${h.isNativeOverlay ? "w-screen h-screen" : "flex-1 min-h-[400px]"} relative overflow-hidden bg-slate-950 flex flex-col group select-none`}>
++    <div className={`${h.isNativeOverlay ? "w-screen h-screen" : "flex-1"} relative overflow-hidden bg-slate-950 flex flex-col group select-none`} style={{ minHeight: 0 }}>
+       
+-      {/* Visual Canvas stage Area */}
++      {/* Visual Canvas stage Area — fixed dimensions to prevent resize during drag */}
+       <div 
+-        className="flex-1 w-full h-full relative overflow-hidden"
++        className="absolute inset-0 w-full h-full overflow-hidden"
+         onClick={h.handleContainerClick}
+         onMouseMove={h.handleDragMove}
+         onMouseUp={h.handleDragEnd}
+diff --git a/src/components/OverlayWysiwyg.tsx b/src/components/OverlayWysiwyg.tsx
+index 98a1d17..b7a584c 100755
+--- a/src/components/OverlayWysiwyg.tsx
++++ b/src/components/OverlayWysiwyg.tsx
+@@ -20,10 +20,10 @@ export default function OverlayWysiwyg(props: OverlayWysiwygProps) {
+   const h = useOverlayWysiwyg(props);
+ 
+   return (
+-    <div className="flex flex-col h-full bg-slate-950 font-sans text-slate-200">
++    <div className="flex flex-col h-full bg-slate-950 font-sans text-slate-200 overflow-hidden">
+       <ProfileToolbar h={h} />
+       
+-      <div className="flex-1 relative min-h-0 container mx-auto px-4 max-w-7xl">
++      <div className="flex-1 relative min-h-0 container mx-auto px-4 max-w-7xl overflow-hidden">
+         <ScreenshotBackground h={h}>
+           <OverlayCanvas h={h} />
+           <ButtonPropertyPanel h={h} />
+diff --git a/src/components/ScreenshotBackground.tsx b/src/components/ScreenshotBackground.tsx
+index f661307..77a9bf9 100755
+--- a/src/components/ScreenshotBackground.tsx
++++ b/src/components/ScreenshotBackground.tsx
+@@ -4,10 +4,10 @@ import { OverlayWysiwygHook } from './OverlayTypes';
+ 
+ export default function ScreenshotBackground({ h, children }: { h: OverlayWysiwygHook, children?: React.ReactNode }) {
+   return (
+-    <div className={`${h.isNativeOverlay ? "w-screen h-screen overflow-hidden" : "bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xl flex flex-col lg:flex-row"}`}>
++    <div className={`${h.isNativeOverlay ? "w-screen h-screen overflow-hidden" : "bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xl flex flex-col lg:flex-row h-full"}`}>
+       {/* Canvas Header / Config (Col 3 or Topbar) */}
+       {!h.isNativeOverlay && h.showConfig && (
+-        <div className="lg:w-1/4 bg-slate-950 border-r border-slate-800 p-5 flex flex-col gap-5 overflow-y-auto max-h-[600px] custom-scrollbar z-10 shrink-0">
++        <div className="lg:w-1/4 bg-slate-950 border-r border-slate-800 p-5 flex flex-col gap-5 overflow-y-auto custom-scrollbar z-10 shrink-0 lg:h-full" style={{ maxHeight: '100%' }}>
+           <div>
+             <h3 className="text-sm font-bold font-sans tracking-tight text-white flex items-center gap-2 mb-2">
+               <Settings className="w-4 h-4 text-indigo-400" /> Layout Settings
+-- 
+2.47.3
+

@@ -1,0 +1,218 @@
+From a8e3ae8098adfea079ac3fc8cb73abaf636ba2ec Mon Sep 17 00:00:00 2001
+From: Z User <z@container>
+Date: Tue, 23 Jun 2026 17:27:23 +0000
+Subject: [PATCH] fix: button mapping, screenshot upload, and game profiles
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Three bug fixes:
+
+BUG 1: A/X/Y/B/R1/L1/R2/L2 not detected, D-pad detected as R2/L2
+Root cause: GamepadPlugin sent axis array as [axisX, axisY, axisZ,
+axisRZ, hatX, hatY] but hatX/hatY (D-pad) were in position [4][5]
+which GamepadTester expected to be L2/R2 triggers.
+
+Fix: Read AXIS_BRAKE (L2) and AXIS_GAS (R2) properly. Array is now
+[axisX, axisY, axisZ, axisRZ, l2Trigger, r2Trigger]. D-pad (HAT axis)
+is now emitted as button events (DPAD_UP/DOWN/LEFT/RIGHT) instead of
+axis values — matches how Android gamepad D-pad actually works.
+
+BUG 2: Screenshot upload not displaying
+Root cause: OverlayCanvas used 'background' shorthand which doesn't
+work with CSS gradient strings (only works with backgroundImage).
+Fix: Changed back to 'backgroundImage' + 'backgroundSize: cover' +
+'backgroundPosition: center'. Both gradient (preset) and blob: URL
+(custom upload) work correctly with backgroundImage.
+
+BUG 3: Game profiles too few (only 1 Genshin)
+Root cause: INITIAL_PROFILES only had 1 profile (Genshin with 2 buttons).
+Fix: Expanded to 5 game profiles with full button layouts:
+- Genshin Impact (10 buttons: A/X/Y/B/RT/LT/START/SELECT + 2 sticks)
+- PUBG Mobile (10 buttons: RT/LT/B/X/A/Y/START/SELECT + 2 sticks)
+- Mobile Legends (7 buttons: A/X/Y/B/START/SELECT + 1 stick)
+- COD Mobile (10 buttons: RT/LT/B/X/A/Y/LB/RB + 2 sticks)
+- Free Fire (8 buttons: RT/LT/B/A/Y/X + 2 sticks)
+---
+ .../gamemappermind/GamepadPlugin.kt           | 26 ++++-
+ src/components/OverlayCanvas.tsx              |  4 +-
+ src/defaults.ts                               | 99 ++++++++++++++++++-
+ 3 files changed, 120 insertions(+), 9 deletions(-)
+
+diff --git a/android/app/src/main/java/com/nanomindexplorer/gamemappermind/GamepadPlugin.kt b/android/app/src/main/java/com/nanomindexplorer/gamemappermind/GamepadPlugin.kt
+index 41cd06b..f9f6e2f 100644
+--- a/android/app/src/main/java/com/nanomindexplorer/gamemappermind/GamepadPlugin.kt
++++ b/android/app/src/main/java/com/nanomindexplorer/gamemappermind/GamepadPlugin.kt
+@@ -52,6 +52,10 @@ class GamepadPlugin : Plugin() {
+             val axisRZ = event.getAxisValue(MotionEvent.AXIS_RZ)
+             val hatX = event.getAxisValue(MotionEvent.AXIS_HAT_X)
+             val hatY = event.getAxisValue(MotionEvent.AXIS_HAT_Y)
++            
++            // Also read trigger values (L2 = AXIS_BRAKE, R2 = AXIS_GAS)
++            val l2Trigger = event.getAxisValue(MotionEvent.AXIS_BRAKE)
++            val r2Trigger = event.getAxisValue(MotionEvent.AXIS_GAS)
+ 
+             // Emit legacy event
+             val ret = JSObject()
+@@ -65,11 +69,25 @@ class GamepadPlugin : Plugin() {
+             ret.put("timestamp", event.eventTime)
+             notifyListeners("gamepadEvent", ret)
+ 
+-            // BUG FIX: Also emit on standard "onGamepadAxis" channel
+-            // so useGamepadLoop and GamepadTester receive native Android joystick events
+-            // even WITHOUT Shizuku.
+-            val axes = floatArrayOf(axisX, axisY, axisZ, axisRZ, hatX, hatY)
++            // Emit on standard "onGamepadAxis" channel
++            // Array format: [lx, ly, rx, ry, l2, r2] — match what GamepadTester expects
++            // axisX/axisY = left stick, axisZ/axisRZ = right stick
++            // l2Trigger/r2Trigger = L2/R2 triggers (AXIS_BRAKE/GAS)
++            val axes = floatArrayOf(axisX, axisY, axisZ, axisRZ, l2Trigger, r2Trigger)
+             TouchInjectionPlugin.emitGamepadAxis(axes)
++            
++            // Also emit D-pad as button events (HAT axis → button press)
++            // This fixes "D-pad detected as R2/L2" bug
++            if (hatY < -0.5f) {
++                TouchInjectionPlugin.emitGamepadButton("DPAD_UP", 1, 1.0f)
++            } else if (hatY > 0.5f) {
++                TouchInjectionPlugin.emitGamepadButton("DPAD_DOWN", 1, 1.0f)
++            }
++            if (hatX < -0.5f) {
++                TouchInjectionPlugin.emitGamepadButton("DPAD_LEFT", 1, 1.0f)
++            } else if (hatX > 0.5f) {
++                TouchInjectionPlugin.emitGamepadButton("DPAD_RIGHT", 1, 1.0f)
++            }
+             return true
+         }
+         return false
+diff --git a/src/components/OverlayCanvas.tsx b/src/components/OverlayCanvas.tsx
+index 2d2702e..ab55a7a 100644
+--- a/src/components/OverlayCanvas.tsx
++++ b/src/components/OverlayCanvas.tsx
+@@ -17,7 +17,9 @@ export default function OverlayCanvas({ h }: { h: OverlayWysiwygHook }) {
+         onTouchMove={h.handleDragMove}
+         onTouchEnd={h.handleDragEnd}
+         style={{
+-          background: h.getBackgroundUrl(),
++          backgroundImage: h.getBackgroundUrl(),
++          backgroundSize: 'cover',
++          backgroundPosition: 'center',
+           backgroundColor: '#0f172a'
+         }}
+         id="canvas-container"
+diff --git a/src/defaults.ts b/src/defaults.ts
+index 4bac7f4..e3c7ac8 100644
+--- a/src/defaults.ts
++++ b/src/defaults.ts
+@@ -5,14 +5,105 @@ export const INITIAL_PROFILES: GamepadProfile[] = [
+     id: 'genshin',
+     name: 'Genshin Impact',
+     packageName: 'com.miHoYo.GenshinImpact',
+-    description: 'Default action mapping',
++    description: 'Default action mapping untuk Genshin Impact',
+     isCustom: false,
+     gyroSensitivity: 1.0,
+     deadzone: 0.15,
+-    smoothing: 0.5,
++    smoothing: 0.3,
+     buttons: [
+-      { id: '1', label: 'Attack', type: 'button', x: 85, y: 75, width: 40, height: 40, mappedKey: 'A', androidEventCode: 96, opacity: 0.8 },
+-      { id: '2', label: 'Movement', type: 'analog_stick', x: 15, y: 70, width: 140, height: 140, mappedKey: 'L_STICK', androidEventCode: 0, opacity: 0.5, deadzone: 0.1 }
++      { id: 'g1', label: 'Attack', type: 'button', x: 85, y: 75, width: 56, height: 56, mappedKey: 'A', androidEventCode: 96, opacity: 0.8 },
++      { id: 'g2', label: 'Skill', type: 'button', x: 78, y: 85, width: 56, height: 56, mappedKey: 'X', androidEventCode: 99, opacity: 0.8 },
++      { id: 'g3', label: 'Burst', type: 'button', x: 90, y: 65, width: 56, height: 56, mappedKey: 'Y', androidEventCode: 100, opacity: 0.8 },
++      { id: 'g4', label: 'Jump', type: 'button', x: 72, y: 78, width: 56, height: 56, mappedKey: 'B', androidEventCode: 97, opacity: 0.8 },
++      { id: 'g5', label: 'Sprint', type: 'button', x: 60, y: 50, width: 56, height: 56, mappedKey: 'RT', androidEventCode: 111, opacity: 0.8 },
++      { id: 'g6', label: 'Aim', type: 'button', x: 40, y: 50, width: 56, height: 56, mappedKey: 'LT', androidEventCode: 110, opacity: 0.8 },
++      { id: 'g7', label: 'Menu', type: 'button', x: 50, y: 15, width: 48, height: 48, mappedKey: 'START', androidEventCode: 108, opacity: 0.7 },
++      { id: 'g8', label: 'Map', type: 'button', x: 10, y: 15, width: 48, height: 48, mappedKey: 'SELECT', androidEventCode: 109, opacity: 0.7 },
++      { id: 'g9', label: 'Movement', type: 'analog_stick', x: 20, y: 70, width: 120, height: 120, mappedKey: 'L_STICK', androidEventCode: 0, opacity: 0.5, deadzone: 0.15 },
++      { id: 'g10', label: 'Camera', type: 'analog_stick', x: 80, y: 40, width: 120, height: 120, mappedKey: 'R_STICK', androidEventCode: 0, opacity: 0.5, deadzone: 0.15 }
++    ]
++  },
++  {
++    id: 'pubg',
++    name: 'PUBG Mobile',
++    packageName: 'com.tencent.ig',
++    description: 'Default mapping untuk PUBG Mobile',
++    isCustom: false,
++    gyroSensitivity: 1.2,
++    deadzone: 0.15,
++    smoothing: 0.2,
++    buttons: [
++      { id: 'p1', label: 'Fire', type: 'button', x: 85, y: 75, width: 64, height: 64, mappedKey: 'RT', androidEventCode: 111, opacity: 0.8 },
++      { id: 'p2', label: 'Aim', type: 'button', x: 20, y: 75, width: 64, height: 64, mappedKey: 'LT', androidEventCode: 110, opacity: 0.8 },
++      { id: 'p3', label: 'Crouch', type: 'button', x: 75, y: 60, width: 48, height: 48, mappedKey: 'B', androidEventCode: 97, opacity: 0.7 },
++      { id: 'p4', label: 'Prone', type: 'button', x: 80, y: 50, width: 48, height: 48, mappedKey: 'X', androidEventCode: 99, opacity: 0.7 },
++      { id: 'p5', label: 'Jump', type: 'button', x: 70, y: 80, width: 48, height: 48, mappedKey: 'A', androidEventCode: 96, opacity: 0.7 },
++      { id: 'p6', label: 'Reload', type: 'button', x: 60, y: 65, width: 48, height: 48, mappedKey: 'Y', androidEventCode: 100, opacity: 0.7 },
++      { id: 'p7', label: 'Inventory', type: 'button', x: 50, y: 15, width: 48, height: 48, mappedKey: 'START', androidEventCode: 108, opacity: 0.7 },
++      { id: 'p8', label: 'Map', type: 'button', x: 10, y: 15, width: 48, height: 48, mappedKey: 'SELECT', androidEventCode: 109, opacity: 0.7 },
++      { id: 'p9', label: 'Move', type: 'analog_stick', x: 22, y: 70, width: 120, height: 120, mappedKey: 'L_STICK', androidEventCode: 0, opacity: 0.5, deadzone: 0.15 },
++      { id: 'p10', label: 'Look', type: 'analog_stick', x: 80, y: 40, width: 120, height: 120, mappedKey: 'R_STICK', androidEventCode: 0, opacity: 0.5, deadzone: 0.15 }
++    ]
++  },
++  {
++    id: 'mlbb',
++    name: 'Mobile Legends',
++    packageName: 'com.mobile.legends',
++    description: 'Default mapping untuk Mobile Legends Bang Bang',
++    isCustom: false,
++    gyroSensitivity: 0.8,
++    deadzone: 0.15,
++    smoothing: 0.3,
++    buttons: [
++      { id: 'm1', label: 'Attack', type: 'button', x: 85, y: 75, width: 56, height: 56, mappedKey: 'A', androidEventCode: 96, opacity: 0.8 },
++      { id: 'm2', label: 'Skill 1', type: 'button', x: 75, y: 85, width: 56, height: 56, mappedKey: 'X', androidEventCode: 99, opacity: 0.8 },
++      { id: 'm3', label: 'Skill 2', type: 'button', x: 90, y: 65, width: 56, height: 56, mappedKey: 'Y', androidEventCode: 100, opacity: 0.8 },
++      { id: 'm4', label: 'Skill 3', type: 'button', x: 70, y: 70, width: 56, height: 56, mappedKey: 'B', androidEventCode: 97, opacity: 0.8 },
++      { id: 'm5', label: 'Recall', type: 'button', x: 50, y: 15, width: 48, height: 48, mappedKey: 'START', androidEventCode: 108, opacity: 0.7 },
++      { id: 'm6', label: 'Shop', type: 'button', x: 10, y: 15, width: 48, height: 48, mappedKey: 'SELECT', androidEventCode: 109, opacity: 0.7 },
++      { id: 'm7', label: 'Move', type: 'analog_stick', x: 22, y: 70, width: 120, height: 120, mappedKey: 'L_STICK', androidEventCode: 0, opacity: 0.5, deadzone: 0.15 }
++    ]
++  },
++  {
++    id: 'codm',
++    name: 'Call of Duty Mobile',
++    packageName: 'com.activision.callofduty.shooter',
++    description: 'Default mapping untuk COD Mobile',
++    isCustom: false,
++    gyroSensitivity: 1.0,
++    deadzone: 0.12,
++    smoothing: 0.2,
++    buttons: [
++      { id: 'c1', label: 'Fire', type: 'button', x: 85, y: 75, width: 64, height: 64, mappedKey: 'RT', androidEventCode: 111, opacity: 0.8 },
++      { id: 'c2', label: 'ADS', type: 'button', x: 20, y: 75, width: 64, height: 64, mappedKey: 'LT', androidEventCode: 110, opacity: 0.8 },
++      { id: 'c3', label: 'Crouch', type: 'button', x: 75, y: 60, width: 48, height: 48, mappedKey: 'B', androidEventCode: 97, opacity: 0.7 },
++      { id: 'c4', label: 'Slide', type: 'button', x: 80, y: 50, width: 48, height: 48, mappedKey: 'X', androidEventCode: 99, opacity: 0.7 },
++      { id: 'c5', label: 'Jump', type: 'button', x: 70, y: 80, width: 48, height: 48, mappedKey: 'A', androidEventCode: 96, opacity: 0.7 },
++      { id: 'c6', label: 'Reload', type: 'button', x: 60, y: 65, width: 48, height: 48, mappedKey: 'Y', androidEventCode: 100, opacity: 0.7 },
++      { id: 'c7', label: 'Grenade', type: 'button', x: 50, y: 50, width: 48, height: 48, mappedKey: 'LB', androidEventCode: 102, opacity: 0.7 },
++      { id: 'c8', label: 'Special', type: 'button', x: 55, y: 60, width: 48, height: 48, mappedKey: 'RB', androidEventCode: 103, opacity: 0.7 },
++      { id: 'c9', label: 'Move', type: 'analog_stick', x: 22, y: 70, width: 120, height: 120, mappedKey: 'L_STICK', androidEventCode: 0, opacity: 0.5, deadzone: 0.12 },
++      { id: 'c10', label: 'Look', type: 'analog_stick', x: 80, y: 40, width: 120, height: 120, mappedKey: 'R_STICK', androidEventCode: 0, opacity: 0.5, deadzone: 0.12 }
++    ]
++  },
++  {
++    id: 'freefire',
++    name: 'Free Fire',
++    packageName: 'com.dts.freefireth',
++    description: 'Default mapping untuk Garena Free Fire',
++    isCustom: false,
++    gyroSensitivity: 1.0,
++    deadzone: 0.15,
++    smoothing: 0.2,
++    buttons: [
++      { id: 'f1', label: 'Fire', type: 'button', x: 85, y: 75, width: 64, height: 64, mappedKey: 'RT', androidEventCode: 111, opacity: 0.8 },
++      { id: 'f2', label: 'Aim', type: 'button', x: 20, y: 75, width: 64, height: 64, mappedKey: 'LT', androidEventCode: 110, opacity: 0.8 },
++      { id: 'f3', label: 'Crouch', type: 'button', x: 75, y: 60, width: 48, height: 48, mappedKey: 'B', androidEventCode: 97, opacity: 0.7 },
++      { id: 'f4', label: 'Jump', type: 'button', x: 70, y: 80, width: 48, height: 48, mappedKey: 'A', androidEventCode: 96, opacity: 0.7 },
++      { id: 'f5', label: 'Grenade', type: 'button', x: 60, y: 65, width: 48, height: 48, mappedKey: 'Y', androidEventCode: 100, opacity: 0.7 },
++      { id: 'f6', label: 'Medkit', type: 'button', x: 55, y: 50, width: 48, height: 48, mappedKey: 'X', androidEventCode: 99, opacity: 0.7 },
++      { id: 'f7', label: 'Move', type: 'analog_stick', x: 22, y: 70, width: 120, height: 120, mappedKey: 'L_STICK', androidEventCode: 0, opacity: 0.5, deadzone: 0.15 },
++      { id: 'f8', label: 'Look', type: 'analog_stick', x: 80, y: 40, width: 120, height: 120, mappedKey: 'R_STICK', androidEventCode: 0, opacity: 0.5, deadzone: 0.15 }
+     ]
+   }
+ ];
+-- 
+2.47.3
+

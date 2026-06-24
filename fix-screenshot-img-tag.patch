@@ -1,0 +1,100 @@
+From 9d4535e60941abad35d767e8540866637b12086c Mon Sep 17 00:00:00 2001
+From: Z User <z@container>
+Date: Tue, 23 Jun 2026 18:17:02 +0000
+Subject: [PATCH] =?UTF-8?q?fix:=20screenshot=20upload=20=E2=80=94=20use=20?=
+ =?UTF-8?q?<img>=20tag=20instead=20of=20CSS=20backgroundImage?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Root cause: CSS backgroundImage with data: URL doesn't render in
+Capacitor WebView on some Android versions. The data URL is too long
+for inline style or WebView blocks it.
+
+Fix: Use <img> tag as background layer instead of CSS backgroundImage.
+- For gradients (preset): still use CSS backgroundImage (works fine)
+- For data:/blob: URLs (custom upload): render as <img> tag with
+  absolute positioning + object-cover
+- Added FileReader.onerror fallback to blob: URL if data: URL fails
+- <img> tag is more reliable in WebView — works with both data: and
+  blob: URLs
+
+Changes:
+1. OverlayCanvas.tsx: Check URL type (gradient vs data/blob).
+   Render <img> for data/blob URLs, CSS for gradients.
+2. ScreenshotBackground.tsx: Add reader.onerror fallback to
+   URL.createObjectURL if FileReader.readAsDataURL fails.
+---
+ src/components/OverlayCanvas.tsx        | 21 +++++++++++++++++----
+ src/components/ScreenshotBackground.tsx |  8 ++++++--
+ 2 files changed, 23 insertions(+), 6 deletions(-)
+
+diff --git a/src/components/OverlayCanvas.tsx b/src/components/OverlayCanvas.tsx
+index ab55a7a..89b15f4 100644
+--- a/src/components/OverlayCanvas.tsx
++++ b/src/components/OverlayCanvas.tsx
+@@ -3,6 +3,9 @@ import { OverlayWysiwygHook } from './OverlayTypes';
+ 
+ export default function OverlayCanvas({ h }: { h: OverlayWysiwygHook }) {
+   const isSelected = (id: string) => h.selectedButtonId === id;
++  const bgUrl = h.getBackgroundUrl();
++  const isDataUrl = bgUrl && (bgUrl.startsWith('data:') || bgUrl.startsWith('blob:'));
++  const isGradient = bgUrl && bgUrl.startsWith('linear-gradient');
+ 
+   return (
+     <div className={`${h.isNativeOverlay ? "w-screen h-screen" : "flex-1 min-h-[400px]"} relative overflow-hidden bg-slate-950 flex flex-col group select-none`}>
+@@ -16,14 +19,24 @@ export default function OverlayCanvas({ h }: { h: OverlayWysiwygHook }) {
+         onMouseLeave={h.handleDragEnd}
+         onTouchMove={h.handleDragMove}
+         onTouchEnd={h.handleDragEnd}
+-        style={{
+-          backgroundImage: h.getBackgroundUrl(),
+-          backgroundSize: 'cover',
+-          backgroundPosition: 'center',
++        style={isGradient ? {
++          backgroundImage: bgUrl,
++          backgroundColor: '#0f172a'
++        } : {
+           backgroundColor: '#0f172a'
+         }}
+         id="canvas-container"
+       >
++        {/* Render screenshot as <img> tag — more reliable than CSS backgroundImage in Capacitor WebView */}
++        {isDataUrl && (
++          <img 
++            src={bgUrl} 
++            alt="Screenshot background" 
++            className="absolute inset-0 w-full h-full object-cover"
++            style={{ pointerEvents: 'none' }}
++            onError={(e) => console.error('Screenshot image failed to load', e)}
++          />
++        )}
+         <div className="absolute inset-0 bg-black pointer-events-none transition-opacity" style={{ opacity: h.bgDimLevel / 100 }}></div>
+         
+         {!h.hideGrid && (
+diff --git a/src/components/ScreenshotBackground.tsx b/src/components/ScreenshotBackground.tsx
+index 67fd800..f661307 100644
+--- a/src/components/ScreenshotBackground.tsx
++++ b/src/components/ScreenshotBackground.tsx
+@@ -44,12 +44,16 @@ export default function ScreenshotBackground({ h, children }: { h: OverlayWysiwy
+                   onChange={(e) => {
+                     const file = e.target.files?.[0];
+                     if (file) {
+-                      // BUG FIX: Convert to data: URL (base64) instead of blob: URL
+-                      // blob: URLs don't work with CSS backgroundImage in Capacitor WebView
++                      // Try FileReader first (data URL), fallback to blob URL
+                       const reader = new FileReader();
+                       reader.onload = () => {
+                         h.setCustomScreenshotUrl(reader.result as string);
+                       };
++                      reader.onerror = () => {
++                        // Fallback: use blob URL (works with <img src> but not CSS backgroundImage)
++                        const url = URL.createObjectURL(file);
++                        h.setCustomScreenshotUrl(url);
++                      };
+                       reader.readAsDataURL(file);
+                     }
+                   }}
+-- 
+2.47.3
+

@@ -1,0 +1,94 @@
+From 80d0fdd1c96199e4de6b0d7ae031b9ccdb4ee786 Mon Sep 17 00:00:00 2001
+From: Z User <z@container>
+Date: Tue, 23 Jun 2026 16:22:51 +0000
+Subject: [PATCH] fix(ui): fix WYSIWYG canvas hidden + screenshot not
+ displaying
+
+Three bugs after OverlayWysiwyg refactor:
+
+1. Canvas WYSIWYG hidden: ScreenshotBackground used CSS grid (grid-cols-12)
+   with col-span classes, but OverlayCanvas col-span didn't match.
+   Fix: Replace grid with flexbox (flex-row), panel = lg:w-1/4 shrink-0,
+   canvas = flex-1 min-h-[400px]. Canvas now always visible.
+
+2. Screenshot not displaying: getBackgroundUrl() returned external URLs
+   (images.unsplash.com) which are blocked by Capacitor WebView CSP.
+   Fix: Replace with CSS gradients (no network needed). Custom upload
+   still works via URL.createObjectURL (blob: URLs are CSP-safe).
+
+3. Background style: Changed from backgroundImage to background shorthand
+   to support both gradient (preset) and url (custom upload) values.
+
+Fixes: 'canvas WYSIWYG untuk mapping hilang' + 'screenshot tidak tampil'
+---
+ src/components/OverlayCanvas.tsx        |  6 ++----
+ src/components/ScreenshotBackground.tsx |  4 ++--
+ src/hooks/useOverlayWysiwyg.ts          | 11 ++++++-----
+ 3 files changed, 10 insertions(+), 11 deletions(-)
+
+diff --git a/src/components/OverlayCanvas.tsx b/src/components/OverlayCanvas.tsx
+index ee1b897..2d2702e 100644
+--- a/src/components/OverlayCanvas.tsx
++++ b/src/components/OverlayCanvas.tsx
+@@ -5,7 +5,7 @@ export default function OverlayCanvas({ h }: { h: OverlayWysiwygHook }) {
+   const isSelected = (id: string) => h.selectedButtonId === id;
+ 
+   return (
+-    <div className={`${h.isNativeOverlay ? "w-screen h-screen" : "lg:col-span-9 xl:col-span-12 2xl:col-span-9"} relative overflow-hidden bg-slate-950 flex flex-col group select-none`}>
++    <div className={`${h.isNativeOverlay ? "w-screen h-screen" : "flex-1 min-h-[400px]"} relative overflow-hidden bg-slate-950 flex flex-col group select-none`}>
+       
+       {/* Visual Canvas stage Area */}
+       <div 
+@@ -17,9 +17,7 @@ export default function OverlayCanvas({ h }: { h: OverlayWysiwygHook }) {
+         onTouchMove={h.handleDragMove}
+         onTouchEnd={h.handleDragEnd}
+         style={{
+-          backgroundImage: h.getBackgroundUrl(),
+-          backgroundSize: 'cover',
+-          backgroundPosition: 'center',
++          background: h.getBackgroundUrl(),
+           backgroundColor: '#0f172a'
+         }}
+         id="canvas-container"
+diff --git a/src/components/ScreenshotBackground.tsx b/src/components/ScreenshotBackground.tsx
+index 30dc47a..00fbfaf 100644
+--- a/src/components/ScreenshotBackground.tsx
++++ b/src/components/ScreenshotBackground.tsx
+@@ -4,10 +4,10 @@ import { OverlayWysiwygHook } from './OverlayTypes';
+ 
+ export default function ScreenshotBackground({ h, children }: { h: OverlayWysiwygHook, children?: React.ReactNode }) {
+   return (
+-    <div className={`${h.isNativeOverlay ? "w-screen h-screen overflow-hidden" : "bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xl grid grid-cols-1 lg:grid-cols-12"}`}>
++    <div className={`${h.isNativeOverlay ? "w-screen h-screen overflow-hidden" : "bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xl flex flex-col lg:flex-row"}`}>
+       {/* Canvas Header / Config (Col 3 or Topbar) */}
+       {!h.isNativeOverlay && h.showConfig && (
+-        <div className="lg:col-span-3 bg-slate-950 border-r border-slate-800 p-5 flex flex-col gap-5 overflow-y-auto max-h-[600px] custom-scrollbar z-10">
++        <div className="lg:w-1/4 bg-slate-950 border-r border-slate-800 p-5 flex flex-col gap-5 overflow-y-auto max-h-[600px] custom-scrollbar z-10 shrink-0">
+           <div>
+             <h3 className="text-sm font-bold font-sans tracking-tight text-white flex items-center gap-2 mb-2">
+               <Settings className="w-4 h-4 text-indigo-400" /> Layout Settings
+diff --git a/src/hooks/useOverlayWysiwyg.ts b/src/hooks/useOverlayWysiwyg.ts
+index 2a0bbaf..cbe9e3c 100644
+--- a/src/hooks/useOverlayWysiwyg.ts
++++ b/src/hooks/useOverlayWysiwyg.ts
+@@ -157,11 +157,12 @@ export function useOverlayWysiwyg({
+ 
+   const getBackgroundUrl = () => {
+     if (screenshotMode === 'custom' && customScreenshotUrl) return customScreenshotUrl;
+-    if (screenshotMode === 'genshin') return 'https://images.unsplash.com/photo-1542751371-adc38448a05e?auto=format&fit=crop&q=80&w=1200';
+-    if (screenshotMode === 'pubg') return 'https://images.unsplash.com/photo-1534423861386-85a16f5d13fd?auto=format&fit=crop&q=80&w=1200';
+-    if (screenshotMode === 'codm') return 'https://images.unsplash.com/photo-1511512578047-dfb367046420?auto=format&fit=crop&q=80&w=1200';
+-    if (screenshotMode === 'efootball') return 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?auto=format&fit=crop&q=80&w=1200'; 
+-    return 'https://images.unsplash.com/photo-1511512578047-dfb367046420?auto=format&fit=crop&q=80&w=1200';
++    // Use CSS gradient as placeholder — no external network needed (Capacitor WebView CSP safe)
++    if (screenshotMode === 'genshin') return 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)';
++    if (screenshotMode === 'pubg') return 'linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 50%, #1a1a1a 100%)';
++    if (screenshotMode === 'codm') return 'linear-gradient(135deg, #0d1b2a 0%, #1b263b 50%, #0d1b2a 100%)';
++    if (screenshotMode === 'efootball') return 'linear-gradient(135deg, #144552 0%, #0d2d3a 50%, #144552 100%)'; 
++    return 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)';
+   };
+ 
+   React.useEffect(() => {
+-- 
+2.47.3
+

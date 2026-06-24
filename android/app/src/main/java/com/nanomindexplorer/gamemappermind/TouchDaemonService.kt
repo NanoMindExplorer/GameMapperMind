@@ -26,15 +26,42 @@ class TouchDaemonService : ITouchService.Stub {
             val output = StringBuilder()
             val errorOutput = StringBuilder()
             
-            var line: String?
-            while (reader.readLine().also { line = it } != null) {
-                output.append(line).append("\n")
+            // BUG-A3 FIX: Read output with timeout. Use background threads to avoid blocking forever.
+            val stdoutThread = Thread {
+                try {
+                    var line: String?
+                    while (reader.readLine().also { line = it } != null) {
+                        output.append(line).append("\n")
+                    }
+                } catch (e: Exception) {}
             }
-            while (errorReader.readLine().also { line = it } != null) {
-                errorOutput.append(line).append("\n")
+            val stderrThread = Thread {
+                try {
+                    var line: String?
+                    while (errorReader.readLine().also { line = it } != null) {
+                        errorOutput.append(line).append("\n")
+                    }
+                } catch (e: Exception) {}
             }
+            stdoutThread.start()
+            stderrThread.start()
             
-            val exitCode = process.waitFor()
+            // BUG-A3 FIX: Wait with 15s timeout
+            val finished = process.waitFor(15, java.util.concurrent.TimeUnit.SECONDS)
+            if (!finished) {
+                process.destroyForcibly()
+                stdoutThread.interrupt()
+                stderrThread.interrupt()
+                val json = org.json.JSONObject()
+                json.put("output", output.toString())
+                json.put("error", errorOutput.toString() + "\n[TIMEOUT: command did not finish in 15s]")
+                json.put("exitCode", -1)
+                return json.toString()
+            }
+            stdoutThread.join(1000)
+            stderrThread.join(1000)
+            
+            val exitCode = process.exitValue()
             val json = org.json.JSONObject()
             json.put("output", output.toString())
             json.put("error", errorOutput.toString())
@@ -49,54 +76,71 @@ class TouchDaemonService : ITouchService.Stub {
         }
     }
 
-    private var streamProcess: Process? = null
-    private var streamThread: Thread? = null
+    @Volatile private var streamProcess: Process? = null
+    @Volatile private var streamThread: Thread? = null
+    private val streamLock = Any()
 
     override fun executeStreamCommand(command: String, listener: ICommandOutputListener) {
-        stopStreamCommand()
-        streamThread = Thread {
-            try {
-                val cmdArray = if (command.startsWith("getevent")) {
-                    command.split(" ").toTypedArray()
-                } else {
-                    arrayOf("sh", "-c", command)
-                }
-                streamProcess = Runtime.getRuntime().exec(cmdArray)
-                val reader = java.io.BufferedReader(java.io.InputStreamReader(streamProcess!!.inputStream))
-                var line: String?
-                while (reader.readLine().also { line = it } != null) {
-                    try {
-                        listener.onOutputLine(line)
-                    } catch (e: Exception) {
-                        break
-                    }
-                }
-                val exitCode = streamProcess?.waitFor() ?: -1
+        synchronized(streamLock) {
+            stopStreamCommandInternal()
+            // BUG-SEC2 FIX: Validate command starts with getevent -l /dev/input/event
+            if (!command.startsWith("getevent -l /dev/input/event")) {
                 try {
-                    listener.onExit(exitCode)
-                } catch (e: Exception) {}
-            } catch (e: Exception) {
-                try {
-                    listener.onOutputLine("ERROR: " + e.localizedMessage)
+                    listener.onOutputLine("ERROR: Only 'getevent -l /dev/input/eventN' commands are allowed")
                     listener.onExit(-1)
-                } catch (ex: Exception) {}
+                } catch (e: Exception) {}
+                return
             }
+            streamThread = Thread {
+                try {
+                    val cmdArray = command.split(" ").toTypedArray()
+                    streamProcess = Runtime.getRuntime().exec(cmdArray)
+                    val reader = java.io.BufferedReader(java.io.InputStreamReader(streamProcess!!.inputStream))
+                    var line: String?
+                    while (!Thread.currentThread().isInterrupted) {
+                        try {
+                            line = reader.readLine() ?: break
+                        } catch (e: java.io.InterruptedIOException) {
+                            break
+                        } catch (e: Exception) {
+                            break
+                        }
+                        try {
+                            listener.onOutputLine(line)
+                        } catch (e: Exception) {
+                            break
+                        }
+                    }
+                    val exitCode = try { streamProcess?.waitFor() ?: -1 } catch (e: Exception) { -1 }
+                    try {
+                        listener.onExit(exitCode)
+                    } catch (e: Exception) {}
+                } catch (e: Exception) {
+                    try {
+                        listener.onOutputLine("ERROR: " + e.localizedMessage)
+                        listener.onExit(-1)
+                    } catch (ex: Exception) {}
+                }
+            }.also { it.isDaemon = true }
+            streamThread?.start()
         }
-        streamThread?.start()
     }
 
     override fun stopStreamCommand() {
-        try {
-            streamProcess?.destroy()
-        } catch (e: Exception) {}
+        synchronized(streamLock) {
+            stopStreamCommandInternal()
+        }
+    }
+    
+    private fun stopStreamCommandInternal() {
+        try { streamProcess?.destroyForcibly() } catch (e: Exception) {}
         streamProcess = null
-        try {
-            streamThread?.interrupt()
-        } catch (e: Exception) {}
+        try { streamThread?.interrupt() } catch (e: Exception) {}
         streamThread = null
     }
 
     override fun destroy() {
+        isInitialized = false
         releaseAllPointers()
         stopStreamCommand()
         // Per Shizuku API documentation:
@@ -299,10 +343,12 @@ class TouchDaemonService : ITouchService.Stub {
                 val action = MotionEvent.ACTION_POINTER_UP or (compactedIdx shl MotionEvent.ACTION_POINTER_INDEX_SHIFT)
                 val res = injectMotionEvent(action, compactedIdx)
                 pointers.remove(pointerId)
+                // BUG-A5 FIX: Only set state.isDown=false in the multi-pointer branch where pointers map still holds it.
+                state.isDown = false
                 res
             }
-            
-            state.isDown = false
+            // Note: in the single-pointer branch, pointers.clear() already removed state from the map,
+            // so setting state.isDown=false there was redundant.
             return result
         }
     }
@@ -336,19 +382,30 @@ class TouchDaemonService : ITouchService.Stub {
         }
     }
 
-    private var nextTapId = 90
+    // BUG-A1 FIX: Use range 100-109 (not 90-99) to avoid collision with gamepad pointers (0-63).
+    private var nextTapId = 100
+    @Volatile private var isInitialized = true
+    
     override fun injectTap(x: Float, y: Float, duration: Long): Boolean {
         val id = nextTapId
         nextTapId++
-        if (nextTapId > 99) nextTapId = 90
+        if (nextTapId > 109) nextTapId = 100
         val downRes = touchDown(id, x, y)
+        // BUG-A2 FIX: Wrap touchUp in try-catch; check service is still alive before calling.
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-            touchUp(id)
+            try {
+                if (isInitialized) {
+                    touchUp(id)
+                }
+            } catch (e: Exception) {
+                Log.w("GameMapper", "injectTap touchUp failed: ${e.message}")
+            }
         }, duration)
         return downRes
     }
 
+    // BUG-AIDL1 FIX: isAlive() now reflects actual initialization state.
     override fun isAlive(): Boolean {
-        return true
+        return isInitialized && pointers.size() >= 0
     }
 }

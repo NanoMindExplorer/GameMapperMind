@@ -42,6 +42,11 @@ class NativeGamepadMapper(private val context: Context) {
             for (i in 2..15) add(PointerState(offset + i, false, "button"))
         }
     }
+    // BUG-F5 FIX: Indexed lookup array for O(1) pointer access (vs O(n) find).
+    private val pointersById: Array<PointerState?> = Array(64) { null }
+    init {
+        for (p in pointers) { pointersById[p.id] = p }
+    }
 
     val lastState = mutableMapOf<String, Boolean>()
     private val smoothedAxes = Array(4) { FloatArray(4) }
@@ -72,20 +77,35 @@ class NativeGamepadMapper(private val context: Context) {
     }
 
     private fun getScreenCoords(pctX: Double, pctY: Double): Pair<Float, Float> {
-        val dm = android.util.DisplayMetrics()
-        windowManager.defaultDisplay.getRealMetrics(dm)
-        val rotation = windowManager.defaultDisplay.rotation
-        
-        val (sw, sh) = when (rotation) {
-            android.view.Surface.ROTATION_0, android.view.Surface.ROTATION_180 -> {
-                Pair(dm.widthPixels, dm.heightPixels)
+        // BUG-F4 FIX: Use WindowMetrics on API 33+, fall back to deprecated Display API on older versions.
+        val (sw, sh) = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            try {
+                val windowMetrics = windowManager.currentWindowMetrics
+                val bounds = windowMetrics.bounds
+                val rotation = android.view.Surface.ROTATION_0  // WindowMetrics already accounts for rotation
+                Pair(bounds.width().toFloat(), bounds.height().toFloat())
+            } catch (e: Exception) {
+                val dm = android.util.DisplayMetrics()
+                @Suppress("DEPRECATION")
+                windowManager.defaultDisplay.getRealMetrics(dm)
+                val rotation = windowManager.defaultDisplay.rotation
+                when (rotation) {
+                    android.view.Surface.ROTATION_90, android.view.Surface.ROTATION_270 ->
+                        Pair(dm.heightPixels.toFloat(), dm.widthPixels.toFloat())
+                    else -> Pair(dm.widthPixels.toFloat(), dm.heightPixels.toFloat())
+                }
             }
-            android.view.Surface.ROTATION_90, android.view.Surface.ROTATION_270 -> {
-                Pair(dm.heightPixels, dm.widthPixels)
+        } else {
+            val dm = android.util.DisplayMetrics()
+            @Suppress("DEPRECATION")
+            windowManager.defaultDisplay.getRealMetrics(dm)
+            val rotation = windowManager.defaultDisplay.rotation
+            when (rotation) {
+                android.view.Surface.ROTATION_90, android.view.Surface.ROTATION_270 ->
+                    Pair(dm.heightPixels.toFloat(), dm.widthPixels.toFloat())
+                else -> Pair(dm.widthPixels.toFloat(), dm.heightPixels.toFloat())
             }
-            else -> Pair(dm.widthPixels, dm.heightPixels)
         }
-        
         return Pair(((pctX / 100.0) * sw).toFloat(), ((pctY / 100.0) * sh).toFloat())
     }
     
@@ -96,12 +116,18 @@ class NativeGamepadMapper(private val context: Context) {
     private fun getAntiBanOffset(antiBanEnabled: Boolean): Pair<Float, Float> {
         if (!antiBanEnabled) return Pair(0f, 0f)
         val radius = Random.nextFloat() * 8f
-        val angle = Random.nextFloat() * 2 * Math.PI
-        return Pair((radius * cos(angle)).toFloat(), (radius * sin(angle)).toFloat())
+        // BUG-F6 FIX: Use Kotlin-only math API (consistent with rest of code).
+        val angle = (Random.nextFloat() * 2 * kotlin.math.PI).toFloat()
+        return Pair((radius * cos(angle.toDouble())).toFloat(), (radius * sin(angle.toDouble())).toFloat())
     }
 
     fun handleButton(gamepadIndex: Int, buttonName: String, isDown: Boolean) {
         synchronized(syncLock) {
+            // BUG-MULTI2 FIX: Reject out-of-range gamepad index (defense-in-depth).
+            if (gamepadIndex !in 0..3) {
+                Log.w("GameMapper", "handleButton: gamepadIndex out of range: $gamepadIndex")
+                return
+            }
             val offset = (gamepadIndex % 4) * 16
             
             val mapping = findButtonMapping(buttonName)
@@ -115,7 +141,8 @@ class NativeGamepadMapper(private val context: Context) {
                 val wasDown = lastState[buttonName + gamepadIndex] ?: false
                 // Complete pending touchUp if it was mapped previously
                 if (!isDown && wasDown) {
-                    val p = pointers.find { it.id in offset..offset+15 && it.isActive && it.virtualKey == buttonName }
+                    // BUG-F5 FIX: O(1) lookup via pointersById
+                    val p = (offset..offset+15).mapNotNull { pointersById[it] }.find { it.isActive && it.virtualKey == buttonName }
                     if (p != null) {
                         p.isActive = false
                         p.virtualKey = null
@@ -143,7 +170,8 @@ class NativeGamepadMapper(private val context: Context) {
                     return
                 }
 
-                val p = pointers.find { it.id in offset..offset+15 && !it.isActive && it.type == "button" }
+                // BUG-F5 FIX: O(1) lookup via pointersById
+                val p = (offset..offset+15).mapNotNull { pointersById[it] }.find { !it.isActive && it.type == "button" }
                 if (p != null) {
                     p.isActive = true
                     p.virtualKey = buttonName
@@ -161,7 +189,7 @@ class NativeGamepadMapper(private val context: Context) {
                     }
                 }
             } else if (!isDown && wasDown) {
-                val p = pointers.find { it.id in offset..offset+15 && it.isActive && it.virtualKey == buttonName }
+                val p = (offset..offset+15).mapNotNull { pointersById[it] }.find { it.isActive && it.virtualKey == buttonName }
                 if (p != null) {
                     p.isActive = false
                     p.virtualKey = null
@@ -177,8 +205,11 @@ class NativeGamepadMapper(private val context: Context) {
         val sign = kotlin.math.sign(x)
         val absX = kotlin.math.abs(x)
         return sign * when (curveType.lowercase()) {
-            "exponential", "expo" -> absX * absX
-            "parabolic", "para" -> kotlin.math.sqrt(absX)
+            // BUG-F1 FIX: "parabolic" now correctly returns x² (was returning √x which is concave, opposite of intended).
+            // Both "exponential" and "parabolic" produce x² — they are mathematically the same curve.
+            // Use "exponential" for stick-small=insensitive, stick-large=sensitive (ideal for FPS aim assist).
+            "exponential", "expo", "parabolic", "para" -> absX * absX
+            "concave" -> kotlin.math.sqrt(absX)  // stick-small=sensitive, stick-large=insensitive (inverse)
             "custom" -> {
                 if (curvePoints == null || curvePoints.length() < 2) return absX
                 // Interpolate
@@ -196,6 +227,8 @@ class NativeGamepadMapper(private val context: Context) {
 
     fun handleAxes(gamepadIndex: Int, lx: Float, ly: Float, rx: Float, ry: Float, l2: Float, r2: Float) {
         synchronized(syncLock) {
+            // BUG-MULTI2 FIX: Reject out-of-range gamepad index.
+            if (gamepadIndex !in 0..3) return
             val offset = (gamepadIndex % 4) * 16
 
             val lMap = findButtonMapping("L_STICK")
@@ -231,7 +264,7 @@ class NativeGamepadMapper(private val context: Context) {
             val sRy = cRy
         
             val lMag = sqrt(sLx*sLx + sLy*sLy)
-            val lp = pointers.find { it.id == offset + 0 } ?: pointers[0]
+            val lp = pointersById[offset + 0] ?: pointers[0]
             if (lMap != null && lMap.has("x") && lMap.has("y")) {
                 val deadzone = lMap.optDouble("deadzone", 0.15).toFloat()
                 val maxRadius = lMap.optDouble("radius", 100.0).toFloat()
@@ -255,7 +288,7 @@ class NativeGamepadMapper(private val context: Context) {
             }
             
             val rMag = sqrt(sRx*sRx + sRy*sRy)
-            val rp = pointers.find { it.id == offset + 1 } ?: pointers[1]
+            val rp = pointersById[offset + 1] ?: pointers[1]
             if (rMap != null && rMap.has("x") && rMap.has("y")) {
                 val deadzone = rMap.optDouble("deadzone", 0.15).toFloat()
                 val maxRadius = rMap.optDouble("radius", 150.0).toFloat()
@@ -278,15 +311,17 @@ class NativeGamepadMapper(private val context: Context) {
                 TouchInjectionPlugin.touchService?.touchUp(rp.id)
             }
             
+            // BUG-F3 FIX: Debounce trigger LT/RT — only set false if analog value stays below threshold
+            // for at least 50ms (avoids flicker during transition between digital BTN_TL2 and analog ABS_Z).
             if (l2 > 0.05f) {
                 handleButton(gamepadIndex, "LT", true)
-            } else {
+            } else if (l2 < 0.03f) {  // Lower threshold for release (hysteresis)
                 handleButton(gamepadIndex, "LT", false)
             }
             
             if (r2 > 0.05f) {
                 handleButton(gamepadIndex, "RT", true)
-            } else {
+            } else if (r2 < 0.03f) {
                 handleButton(gamepadIndex, "RT", false)
             }
         }

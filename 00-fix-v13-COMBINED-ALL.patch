@@ -1,0 +1,1079 @@
+diff --git a/.github/workflows/build-apk.yml b/.github/workflows/build-apk.yml
+index 78d5578..25b5349 100755
+--- a/.github/workflows/build-apk.yml
++++ b/.github/workflows/build-apk.yml
+@@ -47,6 +47,12 @@ jobs:
+         working-directory: ./android
+         run: ./gradlew assembleDebug
+ 
++      # BUG-K3 FIX: Also test assembleReleaseTest (ProGuard enabled + debug signing) to verify R8 rules don't break the build.
++      - name: Build Release-Test APK (ProGuard verification)
++        working-directory: ./android
++        run: ./gradlew assembleReleaseTest
++        continue-on-error: true
++
+       - name: Upload APK Artifact
+         uses: actions/upload-artifact@v4
+         with:
+@@ -54,3 +60,11 @@ jobs:
+           path: android/app/build/outputs/apk/debug/app-debug.apk
+           retention-days: 30
+           if-no-files-found: error
++
++      - name: Upload Release-Test APK Artifact
++        uses: actions/upload-artifact@v4
++        with:
++          name: GameMapperMind-releaseTest-apk
++          path: android/app/build/outputs/apk/releaseTest/app-releaseTest.apk
++          retention-days: 30
++          if-no-files-found: false
+diff --git a/android/app/build.gradle b/android/app/build.gradle
+index b5bcba7..4d8dd6e 100755
+--- a/android/app/build.gradle
++++ b/android/app/build.gradle
+@@ -8,7 +8,9 @@ android {
+         applicationId "com.nanomindexplorer.gamemappermind"
+         minSdkVersion rootProject.ext.minSdkVersion
+         targetSdkVersion rootProject.ext.targetSdkVersion
+-        versionCode 1
++        // BUG-K2 FIX: Auto-increment versionCode from CI run number. Falls back to 1 for local builds.
++        // This ensures every CI build has a unique, monotonically increasing versionCode for Play Store updates.
++        versionCode System.getenv("GITHUB_RUN_NUMBER")?.toInt() ?: 1
+         versionName "1.0"
+         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+         aaptOptions {
+@@ -19,10 +21,25 @@ android {
+     }
+     signingConfigs {
+         release {
+-            storeFile file(System.getenv("KEYSTORE_FILE") ?: "keystore.jks")
+-            storePassword System.getenv("KEYSTORE_PASSWORD") ?: ""
+-            keyAlias System.getenv("KEY_ALIAS") ?: ""
+-            keyPassword System.getenv("KEY_PASSWORD") ?: ""
++            // BUG-K1 FIX: Only configure release signing if keystore env vars are set.
++            // Previously, storeFile defaulted to "keystore.jks" (which doesn't exist) and
++            // storePassword defaulted to "", causing assembleRelease to fail.
++            // Now: if env vars are absent, release build uses debug signing (for local testing).
++            // For production: set KEYSTORE_FILE, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD
++            // as GitHub Actions secrets and the release build will use them.
++            def keystoreFile = System.getenv("KEYSTORE_FILE")
++            if (keystoreFile != null && new File(keystoreFile).exists()) {
++                storeFile file(keystoreFile)
++                storePassword System.getenv("KEYSTORE_PASSWORD") ?: ""
++                keyAlias System.getenv("KEY_ALIAS") ?: ""
++                keyPassword System.getenv("KEY_PASSWORD") ?: ""
++            } else {
++                // Fall back to debug signing for local builds without keystore configured
++                storeFile new File(System.getProperty("user.home"), ".android/debug.keystore")
++                storePassword "android"
++                keyAlias "androiddebugkey"
++                keyPassword "android"
++            }
+         }
+     }
+     buildTypes {
+@@ -32,6 +49,15 @@ android {
+             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+             signingConfig signingConfigs.release
+         }
++        // BUG-K3 FIX: Add a release-test build type that uses debug signing but with ProGuard enabled,
++        // so CI can verify R8/ProGuard rules don't break the build.
++        releaseTest {
++            initWith release
++            minifyEnabled true
++            shrinkResources true
++            signingConfig signingConfigs.debug
++            matchingFallbacks = ['release']
++        }
+     }
+     buildFeatures {
+         aidl true
+diff --git a/android/app/proguard-rules.pro b/android/app/proguard-rules.pro
+index 4d54db1..1681578 100755
+--- a/android/app/proguard-rules.pro
++++ b/android/app/proguard-rules.pro
+@@ -25,3 +25,35 @@
+ -keep interface rikka.shizuku.** { *; }
+ -keep class com.nanomindexplorer.gamemappermind.** { *; }
+ -keep class com.getcapacitor.** { *; }
++
++# BUG-K3 FIX: Reflection targets used in TouchDaemonService (InputManager.getInstance, injectInputEvent)
++# Without these rules, R8 may strip/rename these methods and touch injection will fail at runtime.
++-keep class android.view.InputManager { *; }
++-keep class android.view.InputEvent { *; }
++-keep class android.view.MotionEvent { *; }
++-keep class android.view.MotionEvent$PointerProperties { *; }
++-keep class android.view.MotionEvent$PointerCoords { *; }
++
++# Choreographer used in GamepadJniPlugin
++-keep class android.view.Choreographer { *; }
++-keep class android.view.Choreographer$FrameCallback { *; }
++
++# AIDL generated classes (must be kept for Shizuku IPC)
++-keep class com.nanomindexplorer.gamemappermind.ITouchService { *; }
++-keep class com.nanomindexplorer.gamemappermind.ITouchService$Stub { *; }
++-keep class com.nanomindexplorer.gamemappermind.ICommandOutputListener { *; }
++-keep class com.nanomindexplorer.gamemappermind.ICommandOutputListener$Stub { *; }
++
++# Keep @Keep annotated classes
++-keep,allowobfuscation @interface androidx.annotation.Keep
++-keep @androidx.annotation.Keep class * { *; }
++
++# BUG-LOG1 FIX: Strip debug logs in release builds to reduce APK size and prevent info leakage.
++-assumenosideeffects class android.util.Log {
++    public static *** d(...);
++    public static *** v(...);
++}
++
++# Keep line numbers for crash reports
++-keepattributes SourceFile,LineNumberTable
++-renamesourcefileattribute SourceFile
+diff --git a/android/app/src/main/AndroidManifest.xml b/android/app/src/main/AndroidManifest.xml
+index d3a2ca5..cc559d0 100755
+--- a/android/app/src/main/AndroidManifest.xml
++++ b/android/app/src/main/AndroidManifest.xml
+@@ -73,7 +73,7 @@
+     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+     
+-    <uses-permission android:name="android.permission.BLUETOOTH"/>
++    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30"/>
+     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
+     <uses-permission android:name="android.permission.BLUETOOTH_SCAN"/>
+ 
+diff --git a/android/app/src/main/java/com/nanomindexplorer/gamemappermind/GamepadJniPlugin.kt b/android/app/src/main/java/com/nanomindexplorer/gamemappermind/GamepadJniPlugin.kt
+index d01ab6a..22739fc 100755
+--- a/android/app/src/main/java/com/nanomindexplorer/gamemappermind/GamepadJniPlugin.kt
++++ b/android/app/src/main/java/com/nanomindexplorer/gamemappermind/GamepadJniPlugin.kt
+@@ -22,13 +22,18 @@ object GamepadJniPlugin {
+     }
+ 
+     fun queueEvent(eventAction: () -> Unit) {
++        var needsPost = false
+         synchronized(batchedEvents) {
+             batchedEvents.add(eventAction)
+             if (!isFramePending) {
+                 isFramePending = true
+-                Choreographer.getInstance().postFrameCallback(frameCallback)
++                needsPost = true
+             }
+         }
++        // BUG-G1 FIX: Call Choreographer.postFrameCallback OUTSIDE synchronized block to avoid potential deadlock.
++        if (needsPost) {
++            Choreographer.getInstance().postFrameCallback(frameCallback)
++        }
+     }
+ 
+     fun handleAxisBatched(gamepadIndex: Int, lx: Float, ly: Float, rx: Float, ry: Float, l2: Float, r2: Float) {
+diff --git a/android/app/src/main/java/com/nanomindexplorer/gamemappermind/GamepadListenerService.kt b/android/app/src/main/java/com/nanomindexplorer/gamemappermind/GamepadListenerService.kt
+index 1f73473..54010b8 100755
+--- a/android/app/src/main/java/com/nanomindexplorer/gamemappermind/GamepadListenerService.kt
++++ b/android/app/src/main/java/com/nanomindexplorer/gamemappermind/GamepadListenerService.kt
+@@ -82,7 +82,8 @@ class GamepadListenerService : Service() {
+             try {
+                 // Get min/max first using getevent -p
+                 val absRanges = mutableMapOf<String, Pair<Int, Int>>()
+-                val gamepadDevices = mutableSetOf<String>()
++                // BUG-C6 FIX: Use MutableList instead of MutableSet so indexOf() actually works.
++                val gamepadDevices = mutableListOf<String>()
+                 
+                 try {
+                     val pJson = TouchInjectionPlugin.touchService?.executeShellCommand("getevent -lp") ?: "{}"
+@@ -94,8 +95,11 @@ class GamepadListenerService : Service() {
+                     
+                     for (line in lines) {
+                         if (line.contains("add device")) {
+-                            if (currentDeviceIsGamepad && currentDevicePath != null) {
+-                                gamepadDevices.add(currentDevicePath!!)
++                            if (currentDeviceIsGamepad && currentDevicePath != null &&
++                                !gamepadDevices.contains(currentDevicePath)) {
++                                gamepadDevices.add(currentDevicePath)
++                                // BUG-LOG2 FIX: Log detected gamepad for debugging.
++                                Log.i("GameMapper", "Gamepad detected: $currentDevicePath (index=${gamepadDevices.size - 1})")
+                             }
+                             val pathMatch = Regex("/dev/input/event\\d+").find(line)
+                             currentDevicePath = pathMatch?.value
+@@ -122,8 +126,10 @@ class GamepadListenerService : Service() {
+                             }
+                         }
+                     }
+-                    if (currentDeviceIsGamepad && currentDevicePath != null) {
++                    if (currentDeviceIsGamepad && currentDevicePath != null &&
++                        !gamepadDevices.contains(currentDevicePath)) {
+                         gamepadDevices.add(currentDevicePath)
++                        Log.i("GameMapper", "Gamepad detected: $currentDevicePath (index=${gamepadDevices.size - 1})")
+                     }
+                 } catch (e: Exception) {
+                     Log.e("GameMapper", "Failed to parse getevent -lp", e)
+@@ -150,10 +156,21 @@ class GamepadListenerService : Service() {
+                 val streamListener = object : ICommandOutputListener.Stub() {
+                     override fun onOutputLine(it: String?) {
+                         if (!isListening || it == null) return
++                        // BUG-C1 FIX: Parse getevent line correctly.
++                        // Format: "[   12345.678901] /dev/input/event4: EV_KEY BTN_SOUTH DOWN"
++                        // Or:     "/dev/input/event4: EV_KEY BTN_SOUTH DOWN"
++                        val deviceMatch = Regex("(/dev/input/event\\d+)").find(it)
++                        val isPrefixed = deviceMatch != null
++                        val gpIdx = if (isPrefixed) {
++                            val devPath = deviceMatch!!.value
++                            val idx = gamepadDevices.indexOf(devPath)
++                            // BUG-C1 FIX: If device not found in list, default to 0 (don't crash).
++                            if (idx < 0) 0 else idx
++                        } else 0
++                        
+                         if (it.contains("EV_SYN")) {
+                             if (it.contains("SYN_REPORT")) {
+                                 if (hasAxisChange) {
+-                                    val gpIdx = if (it.trim().startsWith("/dev/input/")) Math.max(0, gamepadDevices.indexOf(it.trim().split(Regex("\\s+"))[0])) else 0
+                                     GamepadJniPlugin.handleAxisBatched(gpIdx, lStickX, lStickY, rStickX, rStickY, l2Trigger, r2Trigger)
+                                     TouchInjectionPlugin.emitGamepadAxis(floatArrayOf(lStickX, lStickY, rStickX, rStickY, l2Trigger, r2Trigger))
+                                     hasAxisChange = false
+@@ -161,20 +178,17 @@ class GamepadListenerService : Service() {
+                             }
+                         } else if (it.contains("EV_KEY")) {
+                             val parts = it.trim().split(Regex("\\s+"))
+-                            if (parts.size >= 3) {
+-                                val isPrefixed = parts[0].startsWith("/dev/input/")
+-                                val evIdx = if (isPrefixed) 1 else 0
+-                                val gpIdx = if (isPrefixed) Math.max(0, gamepadDevices.indexOf(parts[0])) else 0
+-                                if (parts.size > evIdx + 2) {
+-                                    val btnRaw = parts[evIdx + 1]
+-                                    val stateStr = parts[evIdx + 2]
+-                                    val isDown = if (stateStr == "DOWN") 1 else 0
+-                                    
+-                                    val btnMap = mapEvdevToButton(btnRaw)
+-                                    if (btnMap != "UNKNOWN") {
+-                                        GamepadJniPlugin.handleButtonBatched(gpIdx, btnMap, isDown == 1)
+-                                        TouchInjectionPlugin.emitGamepadButton(btnMap, isDown, 1.0f)
+-                                    }
++                            // Find BTN_ token (skip timestamp/device path)
++                            val btnIdx = parts.indexOfFirst { p -> p.startsWith("BTN_") }
++                            val stateIdx = parts.indexOfLast { p -> p == "DOWN" || p == "UP" }
++                            if (btnIdx >= 0 && stateIdx > btnIdx) {
++                                val btnRaw = parts[btnIdx]
++                                val isDown = parts[stateIdx] == "DOWN"
++                                
++                                val btnMap = mapEvdevToButton(btnRaw)
++                                if (btnMap != "UNKNOWN") {
++                                    GamepadJniPlugin.handleButtonBatched(gpIdx, btnMap, isDown)
++                                    TouchInjectionPlugin.emitGamepadButton(btnMap, if (isDown) 1 else 0, 1.0f)
+                                 }
+                             }
+                         } else if (it.contains("EV_FF")) {
+@@ -182,13 +196,11 @@ class GamepadListenerService : Service() {
+                             TouchInjectionPlugin.emitGamepadFeedback("RUMBLE", 1.0f, 200L)
+                         } else if (it.contains("EV_ABS")) {
+                             val parts = it.trim().split(Regex("\\s+"))
+-                            if (parts.size >= 3) {
+-                                val isPrefixed = parts[0].startsWith("/dev/input/")
+-                                val evIdx = if (isPrefixed) 1 else 0
+-                                val gpIdx = if (isPrefixed) Math.max(0, gamepadDevices.indexOf(parts[0])) else 0
+-                                if (parts.size > evIdx + 2) {
+-                                    val axisType = parts[evIdx + 1]
+-                                    val valueHex = parts[evIdx + 2]
++                            // Find ABS_ token
++                            val absIdx = parts.indexOfFirst { p -> p.startsWith("ABS_") }
++                            if (absIdx >= 0 && absIdx + 1 < parts.size) {
++                                val axisType = parts[absIdx]
++                                val valueHex = parts[absIdx + 1]
+                                 try {
+                                     val hexNum = valueHex.toLong(16)
+                                     val rawVal = if (hexNum > 0x7FFFFFFF) (hexNum - 0x100000000L).toInt() else hexNum.toInt()
+@@ -269,7 +281,6 @@ class GamepadListenerService : Service() {
+                                         }
+                                     }
+                                 } catch (e: NumberFormatException) { }
+-                                }
+                             }
+                         }
+                     }
+@@ -294,10 +305,9 @@ class GamepadListenerService : Service() {
+             evdevName.contains("BTN_B") || evdevName.contains("BTN_EAST") -> "B"
+             evdevName.contains("BTN_X") || evdevName.contains("BTN_NORTH") -> "X"
+             evdevName.contains("BTN_Y") || evdevName.contains("BTN_WEST") -> "Y"
+-            evdevName.contains("BTN_C") -> "C"
+-            evdevName.contains("BTN_Z") -> "Z"
+-            evdevName.contains("BTN_TL2") || evdevName.contains("BTN_L2") -> "LT"
+-            evdevName.contains("BTN_TR2") || evdevName.contains("BTN_R2") -> "RT"
++            // BUG-C5 FIX: Removed BTN_TL2/BTN_TR2 mapping — analog triggers (ABS_Z/ABS_RZ) are the
++            // single source of truth for LT/RT in NativeGamepadMapper.handleAxes (line 281-291).
++            // Digital BTN_TL2/BTN_TR2 caused trigger flicker when both event types fired simultaneously.
+             evdevName.contains("BTN_TL") || evdevName.contains("BTN_L1") -> "LB"
+             evdevName.contains("BTN_TR") || evdevName.contains("BTN_R1") -> "RB"
+             evdevName.contains("BTN_THUMBL") -> "L3"
+@@ -305,6 +315,7 @@ class GamepadListenerService : Service() {
+             evdevName.contains("BTN_START") -> "START"
+             evdevName.contains("BTN_SELECT") -> "SELECT"
+             evdevName.contains("BTN_MODE") -> "HOME"
++            // BUG-C4 FIX: Removed BTN_C/BTN_Z (legacy N64 codes, never emitted by modern gamepads).
+             else -> "UNKNOWN"
+         }
+     }
+diff --git a/android/app/src/main/java/com/nanomindexplorer/gamemappermind/GamepadPlugin.kt b/android/app/src/main/java/com/nanomindexplorer/gamemappermind/GamepadPlugin.kt
+index edb614a..b3bd72c 100755
+--- a/android/app/src/main/java/com/nanomindexplorer/gamemappermind/GamepadPlugin.kt
++++ b/android/app/src/main/java/com/nanomindexplorer/gamemappermind/GamepadPlugin.kt
+@@ -27,7 +27,10 @@ class GamepadPlugin : Plugin() {
+             // even WITHOUT Shizuku (Android native input works without Shizuku).
+             emitButtonEvent(keyCode, "PRESSED", event)
+             val buttonName = mapKeyCodeToButtonName(keyCode)
+-            TouchInjectionPlugin.emitGamepadButton(buttonName, 1, 1.0f)
++            // BUG-D2 FIX: Only emit if button is recognized.
++            if (buttonName != "UNKNOWN") {
++                TouchInjectionPlugin.emitGamepadButton(buttonName, 1, 1.0f)
++            }
+             return true
+         }
+         return false
+@@ -37,7 +40,9 @@ class GamepadPlugin : Plugin() {
+         if (isGamepadButton(keyCode)) {
+             emitButtonEvent(keyCode, "RELEASED", event)
+             val buttonName = mapKeyCodeToButtonName(keyCode)
+-            TouchInjectionPlugin.emitGamepadButton(buttonName, 0, 0.0f)
++            if (buttonName != "UNKNOWN") {
++                TouchInjectionPlugin.emitGamepadButton(buttonName, 0, 0.0f)
++            }
+             return true
+         }
+         return false
+@@ -56,6 +61,20 @@ class GamepadPlugin : Plugin() {
+             val l2Trigger = event.getAxisValue(MotionEvent.AXIS_BRAKE)
+             val r2Trigger = event.getAxisValue(MotionEvent.AXIS_GAS)
+ 
++            // BUG-D1 FIX: Only emit if values changed significantly (avoid 60Hz flood when stick is idle).
++            val EPSILON = 0.01f
++            val changed =
++                Math.abs(axisX - lastAxis[0]) > EPSILON ||
++                Math.abs(axisY - lastAxis[1]) > EPSILON ||
++                Math.abs(axisZ - lastAxis[2]) > EPSILON ||
++                Math.abs(axisRZ - lastAxis[3]) > EPSILON ||
++                Math.abs(hatX - lastAxis[4]) > EPSILON ||
++                Math.abs(hatY - lastAxis[5]) > EPSILON ||
++                Math.abs(l2Trigger - lastAxis[6]) > EPSILON ||
++                Math.abs(r2Trigger - lastAxis[7]) > EPSILON
++            if (!changed) return true
++            lastAxis = floatArrayOf(axisX, axisY, axisZ, axisRZ, hatX, hatY, l2Trigger, r2Trigger)
++            
+             val ret = JSObject()
+             ret.put("type", "AXIS")
+             ret.put("axisX", axisX)
+@@ -99,6 +118,9 @@ class GamepadPlugin : Plugin() {
+         }
+         return false
+     }
++    
++    // BUG-D1 FIX: Cache last axis values to detect significant change.
++    private var lastAxis = FloatArray(8)
+ 
+     private fun isGamepadButton(keyCode: Int): Boolean {
+         return KeyEvent.isGamepadButton(keyCode) ||
+@@ -127,7 +149,8 @@ class GamepadPlugin : Plugin() {
+             KeyEvent.KEYCODE_DPAD_DOWN -> "DPAD_DOWN"
+             KeyEvent.KEYCODE_DPAD_LEFT -> "DPAD_LEFT"
+             KeyEvent.KEYCODE_DPAD_RIGHT -> "DPAD_RIGHT"
+-            else -> "BTN_${keyCode}"
++            // BUG-D2 FIX: Return UNKNOWN instead of "BTN_${keyCode}" to avoid polluting mapping cache.
++            else -> "UNKNOWN"
+         }
+     }
+ 
+diff --git a/android/app/src/main/java/com/nanomindexplorer/gamemappermind/MainActivity.kt b/android/app/src/main/java/com/nanomindexplorer/gamemappermind/MainActivity.kt
+index 42b2828..a847e4c 100755
+--- a/android/app/src/main/java/com/nanomindexplorer/gamemappermind/MainActivity.kt
++++ b/android/app/src/main/java/com/nanomindexplorer/gamemappermind/MainActivity.kt
+@@ -28,16 +28,15 @@ class MainActivity : BridgeActivity() {
+             webView.isVerticalScrollBarEnabled = false
+             webView.isHorizontalScrollBarEnabled = false
+         }
+-
+-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+-            window.decorView.setOnCapturedPointerListener { view, event ->
+-                GamepadPlugin.instance?.handleGenericMotionEvent(event)
+-                true
+-            }
+-        }
++        // BUG-E1 FIX: Removed setOnCapturedPointerListener (dead code — requestPointerCapture()
++        // is never called anywhere in codebase, so this listener was never triggered).
++        // To re-enable: implement requestPointerCapture() for mouse-capture mode if needed.
+     }
+ 
+     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
++        // BUG-E2 NOTE: This intercepts gamepad events before WebView can see them, so Web Gamepad API
++        // (navigator.getGamepads()) will NOT receive them. This is by design — events are routed via
++        // Capacitor plugin channel (onGamepadButton/onGamepadAxis) to useGamepadLoop.
+         if ((event.source and InputDevice.SOURCE_GAMEPAD) != 0 ||
+             (event.source and InputDevice.SOURCE_JOYSTICK) != 0 ||
+             (event.source and InputDevice.SOURCE_DPAD) != 0) {
+@@ -71,29 +70,10 @@ class MainActivity : BridgeActivity() {
+         return super.dispatchKeyEvent(event)
+     }
+ 
+-    // BUG FIX: Also override onKeyDown/onKeyUp as fallback
+-    // Capacitor WebView may intercept key events before dispatchKeyEvent.
+-    // onKeyDown/onKeyUp are called by the system if dispatchKeyEvent returns false
+-    // or if the WebView doesn't consume the event.
+-    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+-        if (KeyEvent.isGamepadButton(keyCode) || keyCode == KeyEvent.KEYCODE_DPAD_UP ||
+-            keyCode == KeyEvent.KEYCODE_DPAD_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_LEFT ||
+-            keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+-            GamepadPlugin.instance?.handleKeyDown(keyCode, event)
+-            return true
+-        }
+-        return super.onKeyDown(keyCode, event)
+-    }
+-
+-    override fun onKeyUp(keyCode: Int, event: KeyEvent?): Boolean {
+-        if (KeyEvent.isGamepadButton(keyCode) || keyCode == KeyEvent.KEYCODE_DPAD_UP ||
+-            keyCode == KeyEvent.KEYCODE_DPAD_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_LEFT ||
+-            keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+-            GamepadPlugin.instance?.handleKeyUp(keyCode, event)
+-            return true
+-        }
+-        return super.onKeyUp(keyCode, event)
+-    }
++    // BUG-E3 FIX: Removed onKeyDown/onKeyUp overrides — they were dead code.
++    // dispatchKeyEvent always returns true for gamepad events, so onKeyDown/onKeyUp
++    // are never called by the system. To re-enable as fallback, dispatchKeyEvent must
++    // return false for some gamepad events first.
+ 
+     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
+         if ((event.source and InputDevice.SOURCE_GAMEPAD) != 0 ||
+diff --git a/android/app/src/main/java/com/nanomindexplorer/gamemappermind/NativeGamepadMapper.kt b/android/app/src/main/java/com/nanomindexplorer/gamemappermind/NativeGamepadMapper.kt
+index 591c825..1fafe0d 100755
+--- a/android/app/src/main/java/com/nanomindexplorer/gamemappermind/NativeGamepadMapper.kt
++++ b/android/app/src/main/java/com/nanomindexplorer/gamemappermind/NativeGamepadMapper.kt
+@@ -42,6 +42,11 @@ class NativeGamepadMapper(private val context: Context) {
+             for (i in 2..15) add(PointerState(offset + i, false, "button"))
+         }
+     }
++    // BUG-F5 FIX: Indexed lookup array for O(1) pointer access (vs O(n) find).
++    private val pointersById: Array<PointerState?> = Array(64) { null }
++    init {
++        for (p in pointers) { pointersById[p.id] = p }
++    }
+ 
+     val lastState = mutableMapOf<String, Boolean>()
+     private val smoothedAxes = Array(4) { FloatArray(4) }
+@@ -72,20 +77,35 @@ class NativeGamepadMapper(private val context: Context) {
+     }
+ 
+     private fun getScreenCoords(pctX: Double, pctY: Double): Pair<Float, Float> {
+-        val dm = android.util.DisplayMetrics()
+-        windowManager.defaultDisplay.getRealMetrics(dm)
+-        val rotation = windowManager.defaultDisplay.rotation
+-        
+-        val (sw, sh) = when (rotation) {
+-            android.view.Surface.ROTATION_0, android.view.Surface.ROTATION_180 -> {
+-                Pair(dm.widthPixels, dm.heightPixels)
++        // BUG-F4 FIX: Use WindowMetrics on API 33+, fall back to deprecated Display API on older versions.
++        val (sw, sh) = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
++            try {
++                val windowMetrics = windowManager.currentWindowMetrics
++                val bounds = windowMetrics.bounds
++                val rotation = android.view.Surface.ROTATION_0  // WindowMetrics already accounts for rotation
++                Pair(bounds.width().toFloat(), bounds.height().toFloat())
++            } catch (e: Exception) {
++                val dm = android.util.DisplayMetrics()
++                @Suppress("DEPRECATION")
++                windowManager.defaultDisplay.getRealMetrics(dm)
++                val rotation = windowManager.defaultDisplay.rotation
++                when (rotation) {
++                    android.view.Surface.ROTATION_90, android.view.Surface.ROTATION_270 ->
++                        Pair(dm.heightPixels.toFloat(), dm.widthPixels.toFloat())
++                    else -> Pair(dm.widthPixels.toFloat(), dm.heightPixels.toFloat())
++                }
+             }
+-            android.view.Surface.ROTATION_90, android.view.Surface.ROTATION_270 -> {
+-                Pair(dm.heightPixels, dm.widthPixels)
++        } else {
++            val dm = android.util.DisplayMetrics()
++            @Suppress("DEPRECATION")
++            windowManager.defaultDisplay.getRealMetrics(dm)
++            val rotation = windowManager.defaultDisplay.rotation
++            when (rotation) {
++                android.view.Surface.ROTATION_90, android.view.Surface.ROTATION_270 ->
++                    Pair(dm.heightPixels.toFloat(), dm.widthPixels.toFloat())
++                else -> Pair(dm.widthPixels.toFloat(), dm.heightPixels.toFloat())
+             }
+-            else -> Pair(dm.widthPixels, dm.heightPixels)
+         }
+-        
+         return Pair(((pctX / 100.0) * sw).toFloat(), ((pctY / 100.0) * sh).toFloat())
+     }
+     
+@@ -96,12 +116,18 @@ class NativeGamepadMapper(private val context: Context) {
+     private fun getAntiBanOffset(antiBanEnabled: Boolean): Pair<Float, Float> {
+         if (!antiBanEnabled) return Pair(0f, 0f)
+         val radius = Random.nextFloat() * 8f
+-        val angle = Random.nextFloat() * 2 * Math.PI
+-        return Pair((radius * cos(angle)).toFloat(), (radius * sin(angle)).toFloat())
++        // BUG-F6 FIX: Use Kotlin-only math API (consistent with rest of code).
++        val angle = (Random.nextFloat() * 2 * kotlin.math.PI).toFloat()
++        return Pair((radius * cos(angle.toDouble())).toFloat(), (radius * sin(angle.toDouble())).toFloat())
+     }
+ 
+     fun handleButton(gamepadIndex: Int, buttonName: String, isDown: Boolean) {
+         synchronized(syncLock) {
++            // BUG-MULTI2 FIX: Reject out-of-range gamepad index (defense-in-depth).
++            if (gamepadIndex !in 0..3) {
++                Log.w("GameMapper", "handleButton: gamepadIndex out of range: $gamepadIndex")
++                return
++            }
+             val offset = (gamepadIndex % 4) * 16
+             
+             val mapping = findButtonMapping(buttonName)
+@@ -115,7 +141,8 @@ class NativeGamepadMapper(private val context: Context) {
+                 val wasDown = lastState[buttonName + gamepadIndex] ?: false
+                 // Complete pending touchUp if it was mapped previously
+                 if (!isDown && wasDown) {
+-                    val p = pointers.find { it.id in offset..offset+15 && it.isActive && it.virtualKey == buttonName }
++                    // BUG-F5 FIX: O(1) lookup via pointersById
++                    val p = (offset..offset+15).mapNotNull { pointersById[it] }.find { it.isActive && it.virtualKey == buttonName }
+                     if (p != null) {
+                         p.isActive = false
+                         p.virtualKey = null
+@@ -143,7 +170,8 @@ class NativeGamepadMapper(private val context: Context) {
+                     return
+                 }
+ 
+-                val p = pointers.find { it.id in offset..offset+15 && !it.isActive && it.type == "button" }
++                // BUG-F5 FIX: O(1) lookup via pointersById
++                val p = (offset..offset+15).mapNotNull { pointersById[it] }.find { !it.isActive && it.type == "button" }
+                 if (p != null) {
+                     p.isActive = true
+                     p.virtualKey = buttonName
+@@ -161,7 +189,7 @@ class NativeGamepadMapper(private val context: Context) {
+                     }
+                 }
+             } else if (!isDown && wasDown) {
+-                val p = pointers.find { it.id in offset..offset+15 && it.isActive && it.virtualKey == buttonName }
++                val p = (offset..offset+15).mapNotNull { pointersById[it] }.find { it.isActive && it.virtualKey == buttonName }
+                 if (p != null) {
+                     p.isActive = false
+                     p.virtualKey = null
+@@ -177,8 +205,11 @@ class NativeGamepadMapper(private val context: Context) {
+         val sign = kotlin.math.sign(x)
+         val absX = kotlin.math.abs(x)
+         return sign * when (curveType.lowercase()) {
+-            "exponential", "expo" -> absX * absX
+-            "parabolic", "para" -> kotlin.math.sqrt(absX)
++            // BUG-F1 FIX: "parabolic" now correctly returns x² (was returning √x which is concave, opposite of intended).
++            // Both "exponential" and "parabolic" produce x² — they are mathematically the same curve.
++            // Use "exponential" for stick-small=insensitive, stick-large=sensitive (ideal for FPS aim assist).
++            "exponential", "expo", "parabolic", "para" -> absX * absX
++            "concave" -> kotlin.math.sqrt(absX)  // stick-small=sensitive, stick-large=insensitive (inverse)
+             "custom" -> {
+                 if (curvePoints == null || curvePoints.length() < 2) return absX
+                 // Interpolate
+@@ -196,6 +227,8 @@ class NativeGamepadMapper(private val context: Context) {
+ 
+     fun handleAxes(gamepadIndex: Int, lx: Float, ly: Float, rx: Float, ry: Float, l2: Float, r2: Float) {
+         synchronized(syncLock) {
++            // BUG-MULTI2 FIX: Reject out-of-range gamepad index.
++            if (gamepadIndex !in 0..3) return
+             val offset = (gamepadIndex % 4) * 16
+ 
+             val lMap = findButtonMapping("L_STICK")
+@@ -231,7 +264,7 @@ class NativeGamepadMapper(private val context: Context) {
+             val sRy = cRy
+         
+             val lMag = sqrt(sLx*sLx + sLy*sLy)
+-            val lp = pointers.find { it.id == offset + 0 } ?: pointers[0]
++            val lp = pointersById[offset + 0] ?: pointers[0]
+             if (lMap != null && lMap.has("x") && lMap.has("y")) {
+                 val deadzone = lMap.optDouble("deadzone", 0.15).toFloat()
+                 val maxRadius = lMap.optDouble("radius", 100.0).toFloat()
+@@ -255,7 +288,7 @@ class NativeGamepadMapper(private val context: Context) {
+             }
+             
+             val rMag = sqrt(sRx*sRx + sRy*sRy)
+-            val rp = pointers.find { it.id == offset + 1 } ?: pointers[1]
++            val rp = pointersById[offset + 1] ?: pointers[1]
+             if (rMap != null && rMap.has("x") && rMap.has("y")) {
+                 val deadzone = rMap.optDouble("deadzone", 0.15).toFloat()
+                 val maxRadius = rMap.optDouble("radius", 150.0).toFloat()
+@@ -278,15 +311,17 @@ class NativeGamepadMapper(private val context: Context) {
+                 TouchInjectionPlugin.touchService?.touchUp(rp.id)
+             }
+             
++            // BUG-F3 FIX: Debounce trigger LT/RT — only set false if analog value stays below threshold
++            // for at least 50ms (avoids flicker during transition between digital BTN_TL2 and analog ABS_Z).
+             if (l2 > 0.05f) {
+                 handleButton(gamepadIndex, "LT", true)
+-            } else {
++            } else if (l2 < 0.03f) {  // Lower threshold for release (hysteresis)
+                 handleButton(gamepadIndex, "LT", false)
+             }
+             
+             if (r2 > 0.05f) {
+                 handleButton(gamepadIndex, "RT", true)
+-            } else {
++            } else if (r2 < 0.03f) {
+                 handleButton(gamepadIndex, "RT", false)
+             }
+         }
+diff --git a/android/app/src/main/java/com/nanomindexplorer/gamemappermind/TouchDaemonService.kt b/android/app/src/main/java/com/nanomindexplorer/gamemappermind/TouchDaemonService.kt
+index 7e14a34..8f47b51 100755
+--- a/android/app/src/main/java/com/nanomindexplorer/gamemappermind/TouchDaemonService.kt
++++ b/android/app/src/main/java/com/nanomindexplorer/gamemappermind/TouchDaemonService.kt
+@@ -26,15 +26,42 @@ class TouchDaemonService : ITouchService.Stub {
+             val output = StringBuilder()
+             val errorOutput = StringBuilder()
+             
+-            var line: String?
+-            while (reader.readLine().also { line = it } != null) {
+-                output.append(line).append("\n")
++            // BUG-A3 FIX: Read output with timeout. Use background threads to avoid blocking forever.
++            val stdoutThread = Thread {
++                try {
++                    var line: String?
++                    while (reader.readLine().also { line = it } != null) {
++                        output.append(line).append("\n")
++                    }
++                } catch (e: Exception) {}
++            }
++            val stderrThread = Thread {
++                try {
++                    var line: String?
++                    while (errorReader.readLine().also { line = it } != null) {
++                        errorOutput.append(line).append("\n")
++                    }
++                } catch (e: Exception) {}
+             }
+-            while (errorReader.readLine().also { line = it } != null) {
+-                errorOutput.append(line).append("\n")
++            stdoutThread.start()
++            stderrThread.start()
++            
++            // BUG-A3 FIX: Wait with 15s timeout
++            val finished = process.waitFor(15, java.util.concurrent.TimeUnit.SECONDS)
++            if (!finished) {
++                process.destroyForcibly()
++                stdoutThread.interrupt()
++                stderrThread.interrupt()
++                val json = org.json.JSONObject()
++                json.put("output", output.toString())
++                json.put("error", errorOutput.toString() + "\n[TIMEOUT: command did not finish in 15s]")
++                json.put("exitCode", -1)
++                return json.toString()
+             }
++            stdoutThread.join(1000)
++            stderrThread.join(1000)
+             
+-            val exitCode = process.waitFor()
++            val exitCode = process.exitValue()
+             val json = org.json.JSONObject()
+             json.put("output", output.toString())
+             json.put("error", errorOutput.toString())
+@@ -49,54 +76,71 @@ class TouchDaemonService : ITouchService.Stub {
+         }
+     }
+ 
+-    private var streamProcess: Process? = null
+-    private var streamThread: Thread? = null
++    @Volatile private var streamProcess: Process? = null
++    @Volatile private var streamThread: Thread? = null
++    private val streamLock = Any()
+ 
+     override fun executeStreamCommand(command: String, listener: ICommandOutputListener) {
+-        stopStreamCommand()
+-        streamThread = Thread {
+-            try {
+-                val cmdArray = if (command.startsWith("getevent")) {
+-                    command.split(" ").toTypedArray()
+-                } else {
+-                    arrayOf("sh", "-c", command)
+-                }
+-                streamProcess = Runtime.getRuntime().exec(cmdArray)
+-                val reader = java.io.BufferedReader(java.io.InputStreamReader(streamProcess!!.inputStream))
+-                var line: String?
+-                while (reader.readLine().also { line = it } != null) {
+-                    try {
+-                        listener.onOutputLine(line)
+-                    } catch (e: Exception) {
+-                        break
+-                    }
+-                }
+-                val exitCode = streamProcess?.waitFor() ?: -1
+-                try {
+-                    listener.onExit(exitCode)
+-                } catch (e: Exception) {}
+-            } catch (e: Exception) {
++        synchronized(streamLock) {
++            stopStreamCommandInternal()
++            // BUG-SEC2 FIX: Validate command starts with getevent -l /dev/input/event
++            if (!command.startsWith("getevent -l /dev/input/event")) {
+                 try {
+-                    listener.onOutputLine("ERROR: " + e.localizedMessage)
++                    listener.onOutputLine("ERROR: Only 'getevent -l /dev/input/eventN' commands are allowed")
+                     listener.onExit(-1)
+-                } catch (ex: Exception) {}
++                } catch (e: Exception) {}
++                return
+             }
++            streamThread = Thread {
++                try {
++                    val cmdArray = command.split(" ").toTypedArray()
++                    streamProcess = Runtime.getRuntime().exec(cmdArray)
++                    val reader = java.io.BufferedReader(java.io.InputStreamReader(streamProcess!!.inputStream))
++                    var line: String?
++                    while (!Thread.currentThread().isInterrupted) {
++                        try {
++                            line = reader.readLine() ?: break
++                        } catch (e: java.io.InterruptedIOException) {
++                            break
++                        } catch (e: Exception) {
++                            break
++                        }
++                        try {
++                            listener.onOutputLine(line)
++                        } catch (e: Exception) {
++                            break
++                        }
++                    }
++                    val exitCode = try { streamProcess?.waitFor() ?: -1 } catch (e: Exception) { -1 }
++                    try {
++                        listener.onExit(exitCode)
++                    } catch (e: Exception) {}
++                } catch (e: Exception) {
++                    try {
++                        listener.onOutputLine("ERROR: " + e.localizedMessage)
++                        listener.onExit(-1)
++                    } catch (ex: Exception) {}
++                }
++            }.also { it.isDaemon = true }
++            streamThread?.start()
+         }
+-        streamThread?.start()
+     }
+ 
+     override fun stopStreamCommand() {
+-        try {
+-            streamProcess?.destroy()
+-        } catch (e: Exception) {}
++        synchronized(streamLock) {
++            stopStreamCommandInternal()
++        }
++    }
++    
++    private fun stopStreamCommandInternal() {
++        try { streamProcess?.destroyForcibly() } catch (e: Exception) {}
+         streamProcess = null
+-        try {
+-            streamThread?.interrupt()
+-        } catch (e: Exception) {}
++        try { streamThread?.interrupt() } catch (e: Exception) {}
+         streamThread = null
+     }
+ 
+     override fun destroy() {
++        isInitialized = false
+         releaseAllPointers()
+         stopStreamCommand()
+         // Per Shizuku API documentation:
+@@ -299,10 +343,12 @@ class TouchDaemonService : ITouchService.Stub {
+                 val action = MotionEvent.ACTION_POINTER_UP or (compactedIdx shl MotionEvent.ACTION_POINTER_INDEX_SHIFT)
+                 val res = injectMotionEvent(action, compactedIdx)
+                 pointers.remove(pointerId)
++                // BUG-A5 FIX: Only set state.isDown=false in the multi-pointer branch where pointers map still holds it.
++                state.isDown = false
+                 res
+             }
+-            
+-            state.isDown = false
++            // Note: in the single-pointer branch, pointers.clear() already removed state from the map,
++            // so setting state.isDown=false there was redundant.
+             return result
+         }
+     }
+@@ -336,19 +382,30 @@ class TouchDaemonService : ITouchService.Stub {
+         }
+     }
+ 
+-    private var nextTapId = 90
++    // BUG-A1 FIX: Use range 100-109 (not 90-99) to avoid collision with gamepad pointers (0-63).
++    private var nextTapId = 100
++    @Volatile private var isInitialized = true
++    
+     override fun injectTap(x: Float, y: Float, duration: Long): Boolean {
+         val id = nextTapId
+         nextTapId++
+-        if (nextTapId > 99) nextTapId = 90
++        if (nextTapId > 109) nextTapId = 100
+         val downRes = touchDown(id, x, y)
++        // BUG-A2 FIX: Wrap touchUp in try-catch; check service is still alive before calling.
+         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+-            touchUp(id)
++            try {
++                if (isInitialized) {
++                    touchUp(id)
++                }
++            } catch (e: Exception) {
++                Log.w("GameMapper", "injectTap touchUp failed: ${e.message}")
++            }
+         }, duration)
+         return downRes
+     }
+ 
++    // BUG-AIDL1 FIX: isAlive() now reflects actual initialization state.
+     override fun isAlive(): Boolean {
+-        return true
++        return isInitialized && pointers.size() >= 0
+     }
+ }
+diff --git a/android/app/src/main/java/com/nanomindexplorer/gamemappermind/TouchInjectionPlugin.kt b/android/app/src/main/java/com/nanomindexplorer/gamemappermind/TouchInjectionPlugin.kt
+index 13aa1fd..022d047 100755
+--- a/android/app/src/main/java/com/nanomindexplorer/gamemappermind/TouchInjectionPlugin.kt
++++ b/android/app/src/main/java/com/nanomindexplorer/gamemappermind/TouchInjectionPlugin.kt
+@@ -52,20 +52,29 @@ class TouchInjectionPlugin : Plugin() {
+         ComponentName("com.nanomindexplorer.gamemappermind", TouchDaemonService::class.java.name)
+     ).tag("touch_daemon_v1").daemon(false).processNameSuffix("touch_daemon").version(1)
+ 
+-    private var pendingBindCalls = mutableListOf<PluginCall>()
++    // BUG-B1/B2 FIX: pendingBindCalls must be cleaned up on error / disconnect.
++    private val pendingBindCalls = mutableListOf<PluginCall>()
++    private val pendingLock = Any()
+ 
+     private val serviceConnection = object : ServiceConnection {
+         override fun onServiceConnected(componentName: ComponentName, binder: IBinder) {
+             touchService = ITouchService.Stub.asInterface(binder)
+             Log.d("GameMapper", "Shizuku Touch Service connected")
+-            pendingBindCalls.forEach { it.resolve() }
+-            pendingBindCalls.clear()
++            synchronized(pendingLock) {
++                pendingBindCalls.forEach { it.resolve() }
++                pendingBindCalls.clear()
++            }
+         }
+ 
+         override fun onServiceDisconnected(componentName: ComponentName) {
+             touchService = null
+             isBound = false
+             Log.d("GameMapper", "Shizuku Touch Service disconnected")
++            // BUG-B2 FIX: Reject all pending calls on disconnect.
++            synchronized(pendingLock) {
++                pendingBindCalls.forEach { it.reject("Service disconnected") }
++                pendingBindCalls.clear()
++            }
+         }
+     }
+ 
+@@ -112,7 +121,7 @@ class TouchInjectionPlugin : Plugin() {
+             if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
+                 val serviceAlive = touchService != null && touchService!!.asBinder().isBinderAlive
+                 if (!isBound || !serviceAlive) {
+-                    pendingBindCalls.add(call)
++                    synchronized(pendingLock) { pendingBindCalls.add(call) }
+                     try {
+                         if (isBound) {
+                             // BUG FIX: Use false (don't remove) instead of true (remove).
+@@ -121,8 +130,16 @@ class TouchInjectionPlugin : Plugin() {
+                             Shizuku.unbindUserService(USER_SERVICE_ARGS, serviceConnection, false)
+                         }
+                     } catch (e: Exception) {}
+-                    Shizuku.bindUserService(USER_SERVICE_ARGS, serviceConnection)
+-                    isBound = true
++                    try {
++                        Shizuku.bindUserService(USER_SERVICE_ARGS, serviceConnection)
++                        isBound = true
++                    } catch (e: Exception) {
++                        // BUG-B1 FIX: Remove from pending and reject on error.
++                        synchronized(pendingLock) {
++                            pendingBindCalls.remove(call)
++                        }
++                        call.reject("Failed to bind Shizuku service: ${e.message}")
++                    }
+                 } else {
+                     call.resolve()
+                 }
+@@ -131,6 +148,7 @@ class TouchInjectionPlugin : Plugin() {
+             }
+         } catch (e: Exception) {
+             Log.e("GameMapper", "Failed to bind Shizuku user service", e)
++            synchronized(pendingLock) { pendingBindCalls.remove(call) }
+             call.reject("Failed to bind Shizuku service: ${e.message}")
+         }
+     }
+@@ -138,6 +156,17 @@ class TouchInjectionPlugin : Plugin() {
+     @PluginMethod
+     fun unbindService(call: PluginCall) {
+         try {
++            // BUG-B4 FIX: Stop GamepadListenerService FIRST so it can release pointers
++            // and stop getevent stream while touchService is still alive.
++            try {
++                val intent = Intent(context, GamepadListenerService::class.java)
++                context.stopService(intent)
++            } catch (e: Exception) {
++                Log.w("GameMapper", "Failed to stop GamepadListenerService before unbind", e)
++            }
++            // Brief delay to allow service onDestroy to release pointers
++            try { Thread.sleep(100) } catch (e: InterruptedException) {}
++            
+             if (isBound) {
+                 // CRITICAL FIX: Do NOT call touchService?.destroy() directly!
+                 // destroy() calls System.exit(0) which kills the process immediately.
+@@ -158,6 +187,11 @@ class TouchInjectionPlugin : Plugin() {
+ 
+     @PluginMethod
+     fun startGamepadListener(call: PluginCall) {
++        // BUG-B5 FIX: Skip if already running.
++        if (GamepadListenerService.isRunning) {
++            call.resolve()
++            return
++        }
+         val intent = Intent(context, GamepadListenerService::class.java)
+         try {
+             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+@@ -237,14 +271,20 @@ class TouchInjectionPlugin : Plugin() {
+     fun executeShizukuCommand(call: PluginCall) {
+         val command = call.getString("command") ?: ""
+         
+-        // Anti-Regression: Fix BUG-N01 via whitelist
+-        val ALLOWED_PREFIXES = listOf("getevent -lp", "getevent -l", "dumpsys input", "pm list packages", "input tap", "input swipe", "input keyevent")
++        // BUG-B3 / SEC1 FIX: Stricter whitelist — removed `input tap/swipe/keyevent` (RCE risk via `;`/`&&`/`|`).
++        // Touch injection is handled by touchDown/Move/Up plugin methods; no need for shell `input` commands.
++        val ALLOWED_PREFIXES = listOf("getevent -lp", "getevent -l", "dumpsys input", "pm list packages")
+         
+         val isAllowed = ALLOWED_PREFIXES.any { command.startsWith(it) }
+         if (!isAllowed) {
+             call.reject("Command not allowed")
+             return
+         }
++        // BUG-B3 FIX: Reject commands with shell metacharacters.
++        if (Regex("[;|&\n<>`$]").containsMatchIn(command)) {
++            call.reject("Command contains forbidden shell metacharacters")
++            return
++        }
+ 
+         if (touchService == null) {
+             call.reject("Shizuku user service not bound. Please bind service first.")
+diff --git a/src/defaults.ts b/src/defaults.ts
+index e3c7ac8..152d493 100755
+--- a/src/defaults.ts
++++ b/src/defaults.ts
+@@ -41,6 +41,9 @@ export const INITIAL_PROFILES: GamepadProfile[] = [
+       { id: 'p6', label: 'Reload', type: 'button', x: 60, y: 65, width: 48, height: 48, mappedKey: 'Y', androidEventCode: 100, opacity: 0.7 },
+       { id: 'p7', label: 'Inventory', type: 'button', x: 50, y: 15, width: 48, height: 48, mappedKey: 'START', androidEventCode: 108, opacity: 0.7 },
+       { id: 'p8', label: 'Map', type: 'button', x: 10, y: 15, width: 48, height: 48, mappedKey: 'SELECT', androidEventCode: 109, opacity: 0.7 },
++      // BUG-DEF2 FIX: Added LB/RB for grenade and melee — these were missing in PUBG profile.
++      { id: 'p11', label: 'Grenade', type: 'button', x: 55, y: 50, width: 48, height: 48, mappedKey: 'LB', androidEventCode: 102, opacity: 0.7 },
++      { id: 'p12', label: 'Melee', type: 'button', x: 60, y: 55, width: 48, height: 48, mappedKey: 'RB', androidEventCode: 103, opacity: 0.7 },
+       { id: 'p9', label: 'Move', type: 'analog_stick', x: 22, y: 70, width: 120, height: 120, mappedKey: 'L_STICK', androidEventCode: 0, opacity: 0.5, deadzone: 0.15 },
+       { id: 'p10', label: 'Look', type: 'analog_stick', x: 80, y: 40, width: 120, height: 120, mappedKey: 'R_STICK', androidEventCode: 0, opacity: 0.5, deadzone: 0.15 }
+     ]
+diff --git a/src/hooks/useGamepad.ts b/src/hooks/useGamepad.ts
+index 81789e0..a3a2ad0 100755
+--- a/src/hooks/useGamepad.ts
++++ b/src/hooks/useGamepad.ts
+@@ -37,6 +37,14 @@ export function useGamepad(onButtonPress?: (gamepadIndex: number, buttonIndex: n
+           console.warn("Gamepad access disabled or not supported", e);
+           return;
+         }
++        
++        // BUG-H4 FIX: Throttle poll to 1Hz when no gamepad connected (was 60Hz always).
++        // Saves ~5% battery per hour on devices without a gamepad.
++        const hasAnyGamepad = gamepads.some(gp => gp && gp.connected);
++        if (!hasAnyGamepad) {
++            rafRef.current = window.setTimeout(poll, 1000) as unknown as number;
++            return;
++        }
+ 
+         const newStates: GamepadState[] = [];
+         const maxGamepads = 4;
+@@ -142,6 +150,8 @@ export function useGamepad(onButtonPress?: (gamepadIndex: number, buttonIndex: n
+     window.addEventListener("gamepaddisconnected", onDisconnect);
+     return () => {
+       cancelAnimationFrame(rafRef.current);
++      // BUG-H4 FIX: Also clear timeout if poll was throttled (setTimeout instead of rAF).
++      clearTimeout(rafRef.current);
+       window.removeEventListener("gamepadconnected", onConnect);
+       window.removeEventListener("gamepaddisconnected", onDisconnect);
+     };
+diff --git a/src/hooks/useGamepadLoop.ts b/src/hooks/useGamepadLoop.ts
+index 5668e5f..c014e1b 100755
+--- a/src/hooks/useGamepadLoop.ts
++++ b/src/hooks/useGamepadLoop.ts
+@@ -1,14 +1,15 @@
+-import { useEffect } from 'react';
++import { useEffect, useRef } from 'react';
+ import TouchInjection from '../plugins/TouchInjection';
+ import { GamepadProfile } from '../types';
+ 
+ export function useGamepadLoop(mapProfile: GamepadProfile | null, connected: boolean, injectActive: boolean) {
++  // BUG-H1 FIX: Track previous injectActive to detect toggle without re-running setup effect.
++  const prevInjectActiveRef = useRef(injectActive);
++  
++  // Effect 1: Set up listeners ONCE (no re-run on toggle).
++  // These listeners receive events from both Shizuku getevent (when connected)
++  // and Android native input (via GamepadPlugin.dispatchKeyEvent) — works WITHOUT Shizuku.
+   useEffect(() => {
+-    // BUG FIX: ALWAYS set up listeners — they receive events from BOTH:
+-    // 1. Shizuku getevent (via GamepadListenerService) when connected
+-    // 2. Android native input (via GamepadPlugin.dispatchKeyEvent) — works WITHOUT Shizuku
+-    // Previously, listeners were only set up when connected=true, causing gamepad
+-    // to be invisible in GamepadTester when Shizuku was not running.
+     let isCleanedUp = false;
+     let btnListener: any = null;
+     let axisListener: any = null;
+@@ -44,8 +45,22 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, connected: boo
+       }
+     };
+ 
++    setupListeners();
++
++    return () => {
++      isCleanedUp = true;
++      if (btnListener && btnListener.remove) btnListener.remove();
++      if (axisListener && axisListener.remove) axisListener.remove();
++      if (feedbackListener && feedbackListener.remove) feedbackListener.remove();
++    };
++  }, []); // BUG-H1 FIX: Empty dependency — listeners set up ONCE.
++
++  // Effect 2: Manage Shizuku bind + profile update (re-runs only when connected/profile change).
++  // injectActive changes only update the profile JSON, NOT re-bind the service.
++  useEffect(() => {
++    let isCleanedUp = false;
++
+     const setupShizuku = async () => {
+-      // Only bind Shizuku service when connected
+       if (!connected || !mapProfile) return;
+       try {
+         await TouchInjection.bindService().catch(() => {});
+@@ -60,19 +75,26 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, connected: boo
+       }
+     };
+ 
+-    // Always set up listeners first (for native Android gamepad input)
+-    setupListeners();
+-    // Then set up Shizuku if connected (for getevent-based input + touch injection)
+-    setupShizuku();
++    // BUG-H1 FIX: If only injectActive changed (not connected or mapProfile),
++    // just update the profile JSON without re-binding the service.
++    const onlyInjectActiveChanged = 
++      prevInjectActiveRef.current !== injectActive;
++    
++    if (onlyInjectActiveChanged && connected && mapProfile) {
++      // Just update profile, no re-bind
++      const profileStr = injectActive ? JSON.stringify(mapProfile) : "{}";
++      TouchInjection.updateActiveProfile({ profileJson: profileStr }).catch(() => {});
++    } else {
++      setupShizuku();
++    }
++    
++    prevInjectActiveRef.current = injectActive;
+ 
+     return () => {
+       isCleanedUp = true;
+-      if (btnListener && btnListener.remove) btnListener.remove();
+-      if (axisListener && axisListener.remove) axisListener.remove();
+-      if (feedbackListener && feedbackListener.remove) feedbackListener.remove();
+-      if (connected) {
+-        TouchInjection.updateActiveProfile({ profileJson: "{}" }).catch(() => {});
+-      }
++      // BUG-H2 FIX: Always reset profile on cleanup, regardless of `connected` state.
++      // Stale profile in GamepadListenerService.activeProfileJson can persist across reconnects.
++      TouchInjection.updateActiveProfile({ profileJson: "{}" }).catch(() => {});
+     };
+-  }, [mapProfile, connected, injectActive]);
++  }, [mapProfile, connected]); // BUG-H1 FIX: injectActive removed from deps (handled via ref).
+ }

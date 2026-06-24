@@ -22,12 +22,17 @@ object GamepadJniPlugin {
     }
 
     fun queueEvent(eventAction: () -> Unit) {
+        var needsPost = false
         synchronized(batchedEvents) {
             batchedEvents.add(eventAction)
             if (!isFramePending) {
                 isFramePending = true
-                Choreographer.getInstance().postFrameCallback(frameCallback)
+                needsPost = true
             }
+        }
+        // BUG-G1 FIX: Call Choreographer.postFrameCallback OUTSIDE synchronized block to avoid potential deadlock.
+        if (needsPost) {
+            Choreographer.getInstance().postFrameCallback(frameCallback)
         }
     }
 

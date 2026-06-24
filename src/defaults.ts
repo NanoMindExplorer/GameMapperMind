@@ -41,6 +41,9 @@ export const INITIAL_PROFILES: GamepadProfile[] = [
       { id: 'p6', label: 'Reload', type: 'button', x: 60, y: 65, width: 48, height: 48, mappedKey: 'Y', androidEventCode: 100, opacity: 0.7 },
       { id: 'p7', label: 'Inventory', type: 'button', x: 50, y: 15, width: 48, height: 48, mappedKey: 'START', androidEventCode: 108, opacity: 0.7 },
       { id: 'p8', label: 'Map', type: 'button', x: 10, y: 15, width: 48, height: 48, mappedKey: 'SELECT', androidEventCode: 109, opacity: 0.7 },
+      // BUG-DEF2 FIX: Added LB/RB for grenade and melee — these were missing in PUBG profile.
+      { id: 'p11', label: 'Grenade', type: 'button', x: 55, y: 50, width: 48, height: 48, mappedKey: 'LB', androidEventCode: 102, opacity: 0.7 },
+      { id: 'p12', label: 'Melee', type: 'button', x: 60, y: 55, width: 48, height: 48, mappedKey: 'RB', androidEventCode: 103, opacity: 0.7 },
       { id: 'p9', label: 'Move', type: 'analog_stick', x: 22, y: 70, width: 120, height: 120, mappedKey: 'L_STICK', androidEventCode: 0, opacity: 0.5, deadzone: 0.15 },
       { id: 'p10', label: 'Look', type: 'analog_stick', x: 80, y: 40, width: 120, height: 120, mappedKey: 'R_STICK', androidEventCode: 0, opacity: 0.5, deadzone: 0.15 }
     ]

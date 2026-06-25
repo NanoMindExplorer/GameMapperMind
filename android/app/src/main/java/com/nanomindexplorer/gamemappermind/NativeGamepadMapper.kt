@@ -147,15 +147,23 @@ class NativeGamepadMapper(private val context: Context) {
             }
             val offset = (gamepadIndex % 4) * 16
             
+            // BUG-FIX: Check touchService FIRST. If null, no injection is possible.
+            // Log clearly so user knows daemon must be started.
+            val ts = TouchInjectionPlugin.touchService
+            if (ts == null) {
+                Log.e("GameMapper", "handleButton: touchService is NULL — daemon not started! " +
+                    "Tap 'BOOT DAEMON' in Shizuku tab first. Button '$buttonName' isDown=$isDown IGNORED.")
+                return
+            }
+            
             val mapping = findButtonMapping(buttonName)
             
-            // BUG-FIX #3: Add logging to trace injection chain.
             if (mapping == null) {
                 Log.w("GameMapper", "handleButton: NO MAPPING for '$buttonName' (cache size=${buttonMapCache.size})")
             } else if (!mapping.has("x") || !mapping.has("y")) {
                 Log.w("GameMapper", "handleButton: mapping for '$buttonName' has no x/y coordinates")
             } else {
-                Log.d("GameMapper", "handleButton: '$buttonName' isDown=$isDown → mapping found at (${mapping.getDouble("x")}%, ${mapping.getDouble("y")}%)")
+                Log.d("GameMapper", "handleButton: '$buttonName' isDown=$isDown → mapping at (${mapping.getDouble("x")}%, ${mapping.getDouble("y")}%)")
             }
             
             // check player filter
@@ -287,9 +295,15 @@ class NativeGamepadMapper(private val context: Context) {
 
     fun handleAxes(gamepadIndex: Int, lx: Float, ly: Float, rx: Float, ry: Float, l2: Float, r2: Float) {
         synchronized(syncLock) {
-            // BUG-MULTI2 FIX: Reject out-of-range gamepad index.
             if (gamepadIndex !in 0..3) return
             val offset = (gamepadIndex % 4) * 16
+
+            // BUG-FIX: Check touchService FIRST. If null, no injection possible.
+            val ts = TouchInjectionPlugin.touchService
+            if (ts == null) {
+                Log.e("GameMapper", "handleAxes: touchService is NULL — daemon not started!")
+                return
+            }
 
             val lMap = findButtonMapping("L_STICK")
             val rMap = findButtonMapping("R_STICK")

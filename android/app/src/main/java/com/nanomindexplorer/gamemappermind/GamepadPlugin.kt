@@ -22,14 +22,17 @@ class GamepadPlugin : Plugin() {
 
     fun handleKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         if (isGamepadButton(keyCode)) {
-            // BUG FIX: Emit on BOTH "gamepadEvent" (legacy) AND "onGamepadButton" (standard)
-            // so that useGamepadLoop and GamepadTester receive native Android gamepad events
-            // even WITHOUT Shizuku (Android native input works without Shizuku).
             emitButtonEvent(keyCode, "PRESSED", event)
             val buttonName = mapKeyCodeToButtonName(keyCode)
-            // BUG-D2 FIX: Only emit if button is recognized.
             if (buttonName != "UNKNOWN") {
                 TouchInjectionPlugin.emitGamepadButton(buttonName, 1, 1.0f)
+                // BUG-FIX: Also call NativeGamepadMapper for injection (not just JS event).
+                // Previously, GamepadPlugin ONLY emitted JS events (UI feedback) but did NOT
+                // trigger touch injection. Injection only happened via Shizuku getevent path.
+                // If Shizuku getevent stream is not running (no gamepad detected, or stream
+                // broken), pressing gamepad buttons does NOTHING in the game.
+                // Now: Call handleButtonBatched directly for immediate injection via native path.
+                GamepadJniPlugin.handleButtonBatched(0, buttonName, true)
             }
             return true
         }
@@ -42,6 +45,8 @@ class GamepadPlugin : Plugin() {
             val buttonName = mapKeyCodeToButtonName(keyCode)
             if (buttonName != "UNKNOWN") {
                 TouchInjectionPlugin.emitGamepadButton(buttonName, 0, 0.0f)
+                // BUG-FIX: Also call NativeGamepadMapper for injection (release).
+                GamepadJniPlugin.handleButtonBatched(0, buttonName, false)
             }
             return true
         }
@@ -97,6 +102,12 @@ class GamepadPlugin : Plugin() {
             // BUG-SYNC3 FIX: Emit [LX, LY, RX, RY, L2, R2] — consistent with Shizuku path.
             val axes = floatArrayOf(axisX, axisY, axisRX, axisRY, l2Trigger, r2Trigger)
             TouchInjectionPlugin.emitGamepadAxis(axes)
+            
+            // BUG-FIX: Also call NativeGamepadMapper for analog stick injection.
+            // Previously, GamepadPlugin ONLY emitted JS events but did NOT trigger
+            // touch injection for analog sticks. Injection only happened via Shizuku.
+            // Now: Call handleAxisBatched directly for immediate injection via native path.
+            GamepadJniPlugin.handleAxisBatched(0, axisX, axisY, axisRX, axisRY, l2Trigger, r2Trigger)
             
             // D-pad: emit press AND release
             // HAT axis: -1.0 = up/left, 0 = centered, 1.0 = down/right

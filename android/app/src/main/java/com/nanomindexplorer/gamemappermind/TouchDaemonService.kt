@@ -294,6 +294,7 @@ class TouchDaemonService : ITouchService.Stub {
 
     override fun touchDown(pointerId: Int, x: Float, y: Float): Boolean {
         synchronized(pointers) {
+            Log.d("GameMapper", "touchDown: id=$pointerId x=$x y=$y")
             var state = pointers.get(pointerId)
             if (state == null) {
                 state = PointerState()

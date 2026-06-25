@@ -90,6 +90,21 @@ class TouchInjectionPlugin : Plugin() {
         super.load()
         instance = java.lang.ref.WeakReference(this)
         Shizuku.addRequestPermissionResultListener(permissionListener)
+        
+        // BUG-FIX #2: Create NativeGamepadMapper IMMEDIATELY in plugin load.
+        // Previously, NativeGamepadMapper was only created in GamepadListenerService
+        // background thread. If service hasn't started yet, or thread hasn't executed,
+        // instance is null → all handleButton/handleAxes calls are silent no-ops.
+        // Now: Create in plugin load (runs on main thread during Activity onCreate).
+        // Context is available via bridge.activity or context property.
+        try {
+            if (NativeGamepadMapper.instance == null) {
+                NativeGamepadMapper(context)
+                Log.i("GameMapper", "NativeGamepadMapper created in TouchInjectionPlugin.load()")
+            }
+        } catch (e: Exception) {
+            Log.e("GameMapper", "Failed to create NativeGamepadMapper in load()", e)
+        }
     }
 
     override fun handleOnDestroy() {

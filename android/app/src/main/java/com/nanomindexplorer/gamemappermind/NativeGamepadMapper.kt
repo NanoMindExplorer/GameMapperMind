@@ -141,7 +141,6 @@ class NativeGamepadMapper(private val context: Context) {
 
     fun handleButton(gamepadIndex: Int, buttonName: String, isDown: Boolean) {
         synchronized(syncLock) {
-            // BUG-MULTI2 FIX: Reject out-of-range gamepad index (defense-in-depth).
             if (gamepadIndex !in 0..3) {
                 Log.w("GameMapper", "handleButton: gamepadIndex out of range: $gamepadIndex")
                 return
@@ -149,6 +148,16 @@ class NativeGamepadMapper(private val context: Context) {
             val offset = (gamepadIndex % 4) * 16
             
             val mapping = findButtonMapping(buttonName)
+            
+            // BUG-FIX #3: Add logging to trace injection chain.
+            if (mapping == null) {
+                Log.w("GameMapper", "handleButton: NO MAPPING for '$buttonName' (cache size=${buttonMapCache.size})")
+            } else if (!mapping.has("x") || !mapping.has("y")) {
+                Log.w("GameMapper", "handleButton: mapping for '$buttonName' has no x/y coordinates")
+            } else {
+                Log.d("GameMapper", "handleButton: '$buttonName' isDown=$isDown → mapping found at (${mapping.getDouble("x")}%, ${mapping.getDouble("y")}%)")
+            }
+            
             // check player filter
             if (mapping != null && mapping.has("player")) {
                  val player = mapping.optInt("player", 1)

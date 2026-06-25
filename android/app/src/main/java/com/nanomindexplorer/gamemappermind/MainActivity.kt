@@ -27,6 +27,21 @@ class MainActivity : BridgeActivity() {
             webView.overScrollMode = View.OVER_SCROLL_NEVER
             webView.isVerticalScrollBarEnabled = false
             webView.isHorizontalScrollBarEnabled = false
+            
+            // BUG-FIX: Block WebView from receiving joystick/gamepad motion events.
+            // Without this, analog stick movement causes WebView to scroll.
+            // dispatchGenericMotionEvent returns true, but Capacitor WebView may
+            // still receive events via internal OnGenericMotionListener.
+            webView.setOnGenericMotionListener { v, event ->
+                if ((event.source and InputDevice.SOURCE_GAMEPAD) != 0 ||
+                    (event.source and InputDevice.SOURCE_JOYSTICK) != 0 ||
+                    (event.source and InputDevice.SOURCE_CLASS_JOYSTICK) != 0 ||
+                    (event.source and InputDevice.SOURCE_DPAD) != 0) {
+                    true  // Consume — prevent WebView from scrolling
+                } else {
+                    false
+                }
+            }
         }
         // BUG-E1 FIX: Removed setOnCapturedPointerListener (dead code — requestPointerCapture()
         // is never called anywhere in codebase, so this listener was never triggered).

@@ -141,9 +141,9 @@ export const INITIAL_PROFILES: GamepadProfile[] = [
       // Menu buttons
       { id: 'e9', label: 'Pause', type: 'button', x: 50, y: 5, width: 44, height: 44, mappedKey: 'START', androidEventCode: 108, opacity: 0.6 },
       // Movement stick (left side)
-      { id: 'e10', label: 'Move', type: 'analog_stick', x: 22, y: 70, width: 120, height: 120, mappedKey: 'L_STICK', androidEventCode: 0, opacity: 0.5, deadzone: 0.15 },
+      { id: 'e10', label: 'Move', type: 'analog_stick', x: 22, y: 70, width: 120, height: 120, mappedKey: 'L_STICK', androidEventCode: 0, opacity: 0.5, deadzone: 0.15, radius: 100 },
       // Camera/view stick (right side, upper) — for replays/camera angle
-      { id: 'e11', label: 'Camera', type: 'analog_stick', x: 80, y: 35, width: 100, height: 100, mappedKey: 'R_STICK', androidEventCode: 0, opacity: 0.4, deadzone: 0.15 }
+      { id: 'e11', label: 'Camera', type: 'analog_stick', x: 80, y: 35, width: 100, height: 100, mappedKey: 'R_STICK', androidEventCode: 0, opacity: 0.4, deadzone: 0.15, radius: 150 }
     ]
   }
 ];

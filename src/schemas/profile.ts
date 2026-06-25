@@ -14,6 +14,7 @@ export const VirtualButtonSchema = z.object({
   macroId: z.string().optional(),
   deadzone: z.number().optional(),
   sensitivity: z.number().optional(),
+  radius: z.number().optional(),
   swipeDirection: z.enum(['UP', 'DOWN', 'LEFT', 'RIGHT']).optional(),
   swipeDuration: z.number().optional(),
   inputSource: z.enum(['TOUCHSCREEN', 'MOUSE', 'STYLUS', 'GAMEPAD']).optional(),

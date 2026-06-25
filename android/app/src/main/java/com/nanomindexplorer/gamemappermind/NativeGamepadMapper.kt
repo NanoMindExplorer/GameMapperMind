@@ -315,16 +315,18 @@ class NativeGamepadMapper(private val context: Context) {
                     val tY = cY + (sLy * maxRadius)
                     if (!lp.isActive) {
                         lp.isActive = true
-                        TouchInjectionPlugin.touchService?.touchDown(lp.id, cX, cY)
+                        try { TouchInjectionPlugin.touchService?.touchDown(lp.id, cX, cY) } catch(e: Exception) { lp.isActive = false }
                     }
-                    TouchInjectionPlugin.touchService?.touchMove(lp.id, tX, tY)
+                    if (lp.isActive) {
+                        try { TouchInjectionPlugin.touchService?.touchMove(lp.id, tX, tY) } catch(e: Exception) { lp.isActive = false; try { TouchInjectionPlugin.touchService?.touchUp(lp.id) } catch(_: Exception) {} }
+                    }
                 } else if (lp.isActive) {
                     lp.isActive = false
-                    TouchInjectionPlugin.touchService?.touchUp(lp.id)
+                    try { TouchInjectionPlugin.touchService?.touchUp(lp.id) } catch(e: Exception) {}
                 }
             } else if (lp.isActive) {
                 lp.isActive = false
-                TouchInjectionPlugin.touchService?.touchUp(lp.id)
+                try { TouchInjectionPlugin.touchService?.touchUp(lp.id) } catch(e: Exception) {}
             }
             
             val rMag = sqrt(sRx*sRx + sRy*sRy)
@@ -339,16 +341,18 @@ class NativeGamepadMapper(private val context: Context) {
                     val tY = cY + (sRy * maxRadius)
                     if (!rp.isActive) {
                         rp.isActive = true
-                        TouchInjectionPlugin.touchService?.touchDown(rp.id, cX, cY)
+                        try { TouchInjectionPlugin.touchService?.touchDown(rp.id, cX, cY) } catch(e: Exception) { rp.isActive = false }
                     }
-                    TouchInjectionPlugin.touchService?.touchMove(rp.id, tX, tY)
+                    if (rp.isActive) {
+                        try { TouchInjectionPlugin.touchService?.touchMove(rp.id, tX, tY) } catch(e: Exception) { rp.isActive = false; try { TouchInjectionPlugin.touchService?.touchUp(rp.id) } catch(_: Exception) {} }
+                    }
                 } else if (rp.isActive) {
                     rp.isActive = false
-                    TouchInjectionPlugin.touchService?.touchUp(rp.id)
+                    try { TouchInjectionPlugin.touchService?.touchUp(rp.id) } catch(e: Exception) {}
                 }
             } else if (rp.isActive) {
                 rp.isActive = false
-                TouchInjectionPlugin.touchService?.touchUp(rp.id)
+                try { TouchInjectionPlugin.touchService?.touchUp(rp.id) } catch(e: Exception) {}
             }
             
             // BUG-F3 FIX: Debounce trigger LT/RT — only set false if analog value stays below threshold

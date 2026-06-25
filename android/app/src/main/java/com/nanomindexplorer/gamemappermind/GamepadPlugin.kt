@@ -53,12 +53,16 @@ class GamepadPlugin : Plugin() {
         if ((event.source and android.view.InputDevice.SOURCE_JOYSTICK) == android.view.InputDevice.SOURCE_JOYSTICK) {
             val axisX = event.getAxisValue(MotionEvent.AXIS_X)   // Left stick X
             val axisY = event.getAxisValue(MotionEvent.AXIS_Y)   // Left stick Y
-            // BUG-SYNC3 FIX: Use AXIS_RX/AXIS_RY for right stick (not AXIS_Z/AXIS_RZ).
-            // AXIS_Z = L2 trigger on PS controllers, right stick X on Xbox only.
-            // AXIS_RZ = R2 trigger on PS controllers, right stick Y on Xbox only.
-            // AXIS_RX/AXIS_RY = right stick on ALL standard controllers (W3C mapping).
-            val axisRX = event.getAxisValue(MotionEvent.AXIS_RX)  // Right stick X
-            val axisRY = event.getAxisValue(MotionEvent.AXIS_RY)  // Right stick Y
+            // BUG-FIX: Right stick — try AXIS_RX/AXIS_RY first, fallback to AXIS_Z/AXIS_RZ.
+            // Beberapa gamepad (terutama Xbox via Bluetooth) hanya emit AXIS_Z/AXIS_RZ untuk right stick.
+            // Gamepad standar PS4/PS5 pakai AXIS_RX/AXIS_RY. Cek mana yang ada.
+            var axisRX = event.getAxisValue(MotionEvent.AXIS_RX)
+            var axisRY = event.getAxisValue(MotionEvent.AXIS_RY)
+            // Jika AXIS_RX/AXIS_RY bernilai 0, coba AXIS_Z/AXIS_RZ (Xbox fallback)
+            if (Math.abs(axisRX) < 0.01f && Math.abs(axisRY) < 0.01f) {
+                axisRX = event.getAxisValue(MotionEvent.AXIS_Z)
+                axisRY = event.getAxisValue(MotionEvent.AXIS_RZ)
+            }
             val hatX = event.getAxisValue(MotionEvent.AXIS_HAT_X)
             val hatY = event.getAxisValue(MotionEvent.AXIS_HAT_Y)
             

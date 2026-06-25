@@ -18,6 +18,7 @@ export interface VirtualButton {
   macroId?: string;
   deadzone?: number;
   sensitivity?: number;
+  radius?: number; // analog stick movement radius in pixels (default: 100 for L, 150 for R)
   swipeDirection?: 'UP' | 'DOWN' | 'LEFT' | 'RIGHT';
   swipeDuration?: number;
   inputSource?: 'TOUCHSCREEN' | 'MOUSE' | 'STYLUS' | 'GAMEPAD';

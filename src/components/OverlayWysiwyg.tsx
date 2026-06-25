@@ -30,7 +30,7 @@ export default function OverlayWysiwyg(props: OverlayWysiwygProps) {
   const selectedBtn = h.activeProfile?.buttons?.find((b: any) => b.id === h.selectedButtonId);
 
   return (
-    <div className="flex flex-col h-full bg-slate-950 font-sans text-slate-200 overflow-hidden">
+    <div className="flex flex-col flex-1 min-h-0 bg-slate-950 font-sans text-slate-200 overflow-hidden">
 
       {/* ====== TOP BAR (compact, fixed height) ====== */}
       {!h.isNativeOverlay && (

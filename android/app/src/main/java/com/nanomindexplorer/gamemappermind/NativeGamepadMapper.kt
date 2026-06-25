@@ -55,10 +55,22 @@ class NativeGamepadMapper(private val context: Context) {
     
     fun buildMapCache() {
         buttonMapCache.clear()
-        val jsonStr = GamepadListenerService.activeProfileJson ?: return
+        val jsonStr = GamepadListenerService.activeProfileJson
+        if (jsonStr == null) {
+            Log.w("GameMapper", "buildMapCache: activeProfileJson is NULL — no profile delivered yet")
+            return
+        }
+        if (jsonStr == "{}" || jsonStr.isEmpty()) {
+            Log.w("GameMapper", "buildMapCache: activeProfileJson is EMPTY — profile was cleared")
+            return
+        }
         try {
             val root = JSONObject(jsonStr)
-            val buttons = root.optJSONArray("buttons") ?: return
+            val buttons = root.optJSONArray("buttons")
+            if (buttons == null) {
+                Log.w("GameMapper", "buildMapCache: no buttons array in profile JSON")
+                return
+            }
             for (i in 0 until buttons.length()) {
                 val b = buttons.optJSONObject(i)
                 val key = b?.optString("mappedKey")
@@ -66,7 +78,10 @@ class NativeGamepadMapper(private val context: Context) {
                     buttonMapCache[key] = b
                 }
             }
-        } catch (e: Exception) {}
+            Log.i("GameMapper", "buildMapCache: loaded ${buttonMapCache.size} button mappings from profile")
+        } catch (e: Exception) {
+            Log.e("GameMapper", "buildMapCache: failed to parse profile JSON", e)
+        }
     }
     
     private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager

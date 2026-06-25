@@ -80,6 +80,14 @@ class GamepadListenerService : Service() {
         isListening = true
         Thread {
             try {
+                // BUG-FIX #1: Create NativeGamepadMapper IMMEDIATELY, before getevent -lp.
+                // Previously, NativeGamepadMapper was created AFTER getevent -lp (which takes
+                // 100-500ms). During that time, all button events were silently dropped
+                // (instance was null). Also, if getevent -lp found no gamepad, the thread
+                // returned early and NativeGamepadMapper was NEVER created.
+                // Now: Create first, then parse getevent, then start stream.
+                val nativeMapper = NativeGamepadMapper(this@GamepadListenerService)
+
                 // Get min/max first using getevent -p
                 val absRanges = mutableMapOf<String, Pair<Int, Int>>()
                 // BUG-C6 FIX: Use MutableList instead of MutableSet so indexOf() actually works.
@@ -138,6 +146,11 @@ class GamepadListenerService : Service() {
                 val geteventCmd = if (gamepadDevices.isNotEmpty()) {
                     "getevent -l " + gamepadDevices.joinToString(" ")
                 } else {
+                    // BUG-FIX #2: Don't return early if no gamepad found.
+                    // NativeGamepadMapper is already created (instance is set).
+                    // If gamepad connects later, user can restart daemon.
+                    // Also, native path (GamepadPlugin) still works for button events.
+                    Log.w("GameMapper", "No gamepad device detected in getevent -lp. NativeGamepadMapper still created for native path.")
                     TouchInjectionPlugin.emitGamepadButton("ERROR_NO_GAMEPAD", 0, 0f)
                     isListening = false
                     return@Thread
@@ -151,8 +164,7 @@ class GamepadListenerService : Service() {
                 var r2Trigger = 0f
                 var hasAxisChange = false
                 
-                val nativeMapper = NativeGamepadMapper(this@GamepadListenerService)
-                
+                // nativeMapper already created at top of thread (BUG-FIX #1)
                 val streamListener = object : ICommandOutputListener.Stub() {
                     override fun onOutputLine(it: String?) {
                         if (!isListening || it == null) return

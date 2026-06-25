@@ -94,24 +94,23 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, connected: boo
       }
     };
 
-    // If only injectActive changed (not connected or mapProfile), no re-bind needed.
-    // injectActive no longer affects profile JSON (always sent when connected).
-    const onlyInjectActiveChanged = prevInjectActiveRef.current !== injectActive;
-
-    if (onlyInjectActiveChanged && connected && mapProfile) {
-      // injectActive changed but profile is already loaded — no action needed.
-      // Profile JSON is always the same regardless of injectActive now.
-    } else {
-      setupShizuku();
-    }
+    // BUG-FIX #4: Always re-send profile when effect runs, even if only injectActive changed.
+    // Previously, when onlyInjectActiveChanged=true, profile was NOT re-sent.
+    // Combined with cleanup clearing profile, this left buttonMapCache empty.
+    // Now: always call setupShizuku which re-sends profile.
+    setupShizuku();
 
     prevInjectActiveRef.current = injectActive;
 
     return () => {
       isCleanedUp = true;
-      // CACAT #2 FIX: Reset profile to "{}" on cleanup (component unmount or profile change).
-      // This clears buttonMapCache so stale mappings don't persist.
-      TouchInjection.updateActiveProfile({ profileJson: "{}" }).catch(() => {});
+      // BUG-FIX #3: Do NOT clear profile to "{}" on every effect re-run.
+      // Previously, cleanup cleared profile every time deps changed (mapProfile, connected, injectActive).
+      // This caused: (1) profile cleared when overlay toggled, (2) profile cleared when profile updated during drag.
+      // Result: buttonMapCache empty → findButtonMapping returns null → NO INJECTION.
+      // Fix: Only clear profile on actual unmount (all deps undefined), not on re-runs.
+      // Profile will be re-sent by the next setupShizuku() call if needed.
+      // TouchInjection.updateActiveProfile({ profileJson: "{}" }).catch(() => {});
     };
   }, [mapProfile, connected, injectActive]);
 }

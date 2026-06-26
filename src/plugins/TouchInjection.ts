@@ -12,6 +12,7 @@ export interface TouchInjectionPluginType {
   checkPermission(): Promise<{ granted: boolean, isBound?: boolean, touchServiceAlive?: boolean }>;
   requestPermission(): Promise<{ granted: boolean, requested?: boolean }>;
   checkDaemonRunning(): Promise<{ daemonRunning: boolean }>;
+  runDiagnostics(): Promise<{ report: string }>;
   executeShizukuCommand(options: { command: string }): Promise<{ output: string, error: string, exitCode: number }>;
   checkBattery(): Promise<{ isIgnoring: boolean }>;
   requestBatteryIgnore(): Promise<void>;

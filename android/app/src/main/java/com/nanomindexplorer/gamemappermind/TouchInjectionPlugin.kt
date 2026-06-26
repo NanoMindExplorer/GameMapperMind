@@ -320,13 +320,81 @@ class TouchInjectionPlugin : Plugin() {
     @PluginMethod
     fun updateActiveProfile(call: PluginCall) {
         val configJson = call.getString("profileJson")
+        Log.i("GameMapper", "updateActiveProfile: json length=${configJson?.length ?: 0}")
         GamepadListenerService.activeProfileJson = configJson
         touchService?.releaseAllPointers()
         if (configJson != null) {
             try { touchService?.updateConfig(configJson) } catch (e: Exception) {}
         }
         NativeGamepadMapper.resetAll()
+        // BUG-FIX: Log cache size after rebuild so user can verify profile loaded.
+        Log.i("GameMapper", "updateActiveProfile: buttonMapCache size=${NativeGamepadMapper.instance?.buttonMapCache?.size ?: -1}")
         call.resolve()
+    }
+
+    @PluginMethod
+    fun runDiagnostics(call: PluginCall) {
+        val data = JSObject()
+        val sb = StringBuilder()
+
+        // Step 1: Shizuku status
+        sb.append("=== DIAGNOSTICS ===\n")
+        try {
+            sb.append("1. Shizuku isPreV11: ${Shizuku.isPreV11()}\n")
+            sb.append("2. Shizuku pingBinder: ${Shizuku.pingBinder()}\n")
+            val granted = Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+            sb.append("3. Shizuku permission granted: $granted\n")
+        } catch (e: Exception) {
+            sb.append("1-3. ERROR: ${e.message}\n")
+        }
+
+        // Step 2: Touch service
+        val ts = touchService
+        sb.append("4. touchService: ${if (ts != null) "ALIVE" else "NULL"}\n")
+        if (ts != null) {
+            try {
+                sb.append("5. touchService.isAlive: ${ts.isAlive()}\n")
+                sb.append("6. touchService.binderAlive: ${ts.asBinder().isBinderAlive}\n")
+            } catch (e: Exception) {
+                sb.append("5-6. ERROR: ${e.message}\n")
+            }
+        }
+
+        // Step 3: GamepadListenerService
+        sb.append("7. GamepadListenerService.isRunning: ${GamepadListenerService.isRunning}\n")
+
+        // Step 4: NativeGamepadMapper
+        val mapper = NativeGamepadMapper.instance
+        sb.append("8. NativeGamepadMapper.instance: ${if (mapper != null) "EXISTS" else "NULL"}\n")
+        if (mapper != null) {
+            sb.append("9. buttonMapCache size: ${mapper.buttonMapCache.size}\n")
+            sb.append("10. buttonMapCache keys: ${mapper.buttonMapCache.keys}\n")
+            sb.append("11. activeProfileJson length: ${GamepadListenerService.activeProfileJson?.length ?: -1}\n")
+        }
+
+        // Step 5: isBound
+        sb.append("12. isBound: $isBound\n")
+
+        // Step 6: Try getevent -lp to see if gamepad is detected
+        if (ts != null) {
+            try {
+                val result = ts.executeShellCommand("getevent -lp")
+                val obj = org.json.JSONObject(result)
+                val output = obj.optString("output", "")
+                val hasGamepad = output.contains("BTN_A") || output.contains("BTN_GAMEPAD") || output.contains("BTN_SOUTH")
+                sb.append("13. getevent -lp has gamepad: $hasGamepad\n")
+                // Extract device paths
+                val devicePaths = Regex("/dev/input/event\\d+").findAll(output).map { it.value }.toSet()
+                sb.append("14. Input devices: $devicePaths\n")
+            } catch (e: Exception) {
+                sb.append("13-14. getevent ERROR: ${e.message}\n")
+            }
+        }
+
+        val report = sb.toString()
+        Log.i("GameMapper", report)
+        data.put("report", report)
+        call.resolve(data)
     }
 
     @PluginMethod

@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { ShizukuState } from '../types';
 import { useShizuku } from '../hooks/useShizuku';
+import TouchInjection from '../plugins/TouchInjection';
 
 interface ShizukuPanelProps {
   shizukuState: ShizukuState;
@@ -90,6 +91,22 @@ export default function ShizukuPanel({ shizukuState, setShizukuState, onLogMessa
   const sendCustomCommand = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!customLog.trim()) return;
+    
+    // BUG-FIX: Diagnostics command — run full injection chain check
+    if (customLog.trim() === 'diag' || customLog.trim() === 'diagnostics') {
+      onLogMessage('[DIAG] Running full diagnostics...');
+      try {
+        const { report } = await TouchInjection.runDiagnostics();
+        report.split('\n').forEach((line: string) => {
+          if (line.trim()) onLogMessage(`[DIAG] ${line}`);
+        });
+      } catch (err: any) {
+        onLogMessage(`[DIAG ERROR] ${err.message || err}`);
+      }
+      setCustomLog('');
+      return;
+    }
+    
     onLogMessage(`[sh] $ ${customLog}`);
     
     // Execute real command if native

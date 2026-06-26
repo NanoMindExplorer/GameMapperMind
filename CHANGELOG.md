@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-06-27
+### Added
+- **Flexible trigger system** — "Learn Trigger" mode captures any physical gamepad button (including non-standard via raw evdev) and assigns it as trigger
+- **Chord Learn Mode** — capture multiple buttons sequentially (e.g., LB+RB = special action). All must be pressed simultaneously to fire.
+- **6 interaction types** beyond default hold:
+  - Turbo (auto-repeat tap every N ms while held)
+  - Toggle (press once = touch stays, press again = release)
+  - Charge (hold for threshold ms, release to trigger)
+  - Gesture (multi-point touch path with delays)
+  - Tap (single quick touch)
+  - Macro (trigger recorded macro sequence)
+- **Stick-as-drag mode** — analog stick moves touch point absolutely across screen (mortar/sniper aim) vs default joystick mode (relative to center)
+- **Gesture Point Editor** — UI for adding/editing/removing gesture path points (X%, Y%, delayMs)
+- **Visual interaction indicators** — badge icons on canvas nodes: ⚡ turbo, ⊕ toggle, ⏱ charge, ~ gesture, ▸ tap, M macro, DRAG stick
+- **Gesture path visualization** — dashed cyan lines connecting gesture points in canvas editor
+- **Macro selector** — dropdown to choose which recorded macro to trigger
+- **Sensitivity curve selector** — dropdown for linear/exponential/parabolic/concave
+
+### Fixed
+- Duplicate `val wasDown` declaration in NativeGamepadMapper causing Kotlin compile failure
+- Sensitivity slider now connected to injection pipeline (was writing field but never reading it)
+- `exponential` curve now true exponential `(e^(kx)-1)/(e^k-1)` instead of identical to parabolic (x²)
+- `types.ts` sensitivityCurve enum missing 'concave' (type mismatch with schema)
+- `isAlive()` always returning true (SparseArray.size() >= 0 is always true)
+- `pathFailCount` race condition (changed to AtomicInteger)
+- RCE in executeShellCommand (whitelist moved into service layer)
+- ADMIN_TOKEN logged to stdout
+- /api/log auth mismatch (frontend calls without Authorization header)
+- Dual-path gamepad double-injection (isRunning guard now protects injection calls too)
+- Shizuku persistence: reduced polling 5s→20s, auto battery ignore, one-shot rebind on resume
+
+### Changed
+- `NativeGamepadMapper.buildMapCache` now indexes by both mappedKey (legacy) and trigger.inputs[] (new)
+- `NativeGamepadMapper.handleButton` evaluates trigger-based mappings first, falls back to legacy path
+- `NativeGamepadMapper.processStick` supports stickMode='drag' for absolute screen movement
+- `ButtonPropertyPanel` redesigned with Learn Trigger, interaction type selector, dynamic params
+- `OverlayWysiwyg` canvas shows interaction type badges + gesture path visualization
+- `package-lock.json` regenerated to remove 12 deleted dependencies
+
 ## [2.0.0] - 2026-06-27
 ### Breaking
 - Minimum Android version raised to **Android 12 (API 31)**. Older versions no longer supported.

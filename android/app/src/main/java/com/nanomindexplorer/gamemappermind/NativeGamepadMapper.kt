@@ -52,9 +52,20 @@ class NativeGamepadMapper(private val context: Context) {
     val lastState = mutableMapOf<String, Boolean>()
     private val smoothedAxes = Array(4) { FloatArray(4) }
     var buttonMapCache = mutableMapOf<String, JSONObject>()
-    
+
+    // INTERACTION-EXPANSION: Trigger cache maps each physical input → list of mappings
+    // that use that input as a trigger. A single input can be in multiple mappings
+    // (e.g., "A" could be in both a tap mapping and a chord mapping with "B").
+    private var triggerMapCache = mutableMapOf<String, MutableList<JSONObject>>()
+
+    // INTERACTION-EXPANSION: State tracking for turbo/toggle/charge per node ID.
+    private val turboRunnables = mutableMapOf<String, Runnable>()   // nodeId → active turbo loop
+    private val toggleState = mutableMapOf<String, Boolean>()       // nodeId → isToggledOn
+    private val chargeTimestamps = mutableMapOf<String, Long>()     // nodeId → press time ms
+
     fun buildMapCache() {
         buttonMapCache.clear()
+        triggerMapCache.clear()
         val jsonStr = GamepadListenerService.activeProfileJson
         if (jsonStr == null) {
             Log.w("GameMapper", "buildMapCache: activeProfileJson is NULL — no profile delivered yet")
@@ -74,11 +85,24 @@ class NativeGamepadMapper(private val context: Context) {
             for (i in 0 until buttons.length()) {
                 val b = buttons.optJSONObject(i)
                 val key = b?.optString("mappedKey")
-                if (key != null) {
+                if (key != null && key != "null") {
                     buttonMapCache[key] = b
                 }
+                // INTERACTION-EXPANSION: Also index by trigger inputs if trigger field exists.
+                val trigger = b?.optJSONObject("trigger")
+                if (trigger != null) {
+                    val inputs = trigger.optJSONArray("inputs")
+                    if (inputs != null) {
+                        for (j in 0 until inputs.length()) {
+                            val input = inputs.optString(j)
+                            if (input.isNotEmpty()) {
+                                triggerMapCache.getOrPut(input) { mutableListOf() }.add(b)
+                            }
+                        }
+                    }
+                }
             }
-            Log.i("GameMapper", "buildMapCache: loaded ${buttonMapCache.size} button mappings from profile")
+            Log.i("GameMapper", "buildMapCache: loaded ${buttonMapCache.size} mappedKey + ${triggerMapCache.size} trigger inputs from profile")
         } catch (e: Exception) {
             Log.e("GameMapper", "buildMapCache: failed to parse profile JSON", e)
         }
@@ -121,9 +145,248 @@ class NativeGamepadMapper(private val context: Context) {
     private fun getAntiBanOffset(antiBanEnabled: Boolean): Pair<Float, Float> {
         if (!antiBanEnabled) return Pair(0f, 0f)
         val radius = Random.nextFloat() * 8f
-        // BUG-F6 FIX: Use Kotlin-only math API (consistent with rest of code).
         val angle = (Random.nextFloat() * 2 * kotlin.math.PI).toFloat()
         return Pair((radius * cos(angle.toDouble())).toFloat(), (radius * sin(angle.toDouble())).toFloat())
+    }
+
+    // ========================================================================
+    // INTERACTION-EXPANSION: Flexible trigger evaluation + interaction handlers
+    // ========================================================================
+
+    /**
+     * Check if ALL inputs in a chord trigger are currently active.
+     * For single-button trigger, always returns true (the one button IS the trigger).
+     */
+    private fun isChordActive(mapping: JSONObject, gamepadIndex: Int): Boolean {
+        val trigger = mapping.optJSONObject("trigger") ?: return true
+        val inputs = trigger.optJSONArray("inputs") ?: return true
+        for (i in 0 until inputs.length()) {
+            val input = inputs.optString(i)
+            val isActive = lastState[input + gamepadIndex] ?: false
+            if (!isActive) return false
+        }
+        return true
+    }
+
+    /**
+     * Evaluate a trigger-based mapping and dispatch to the appropriate interaction handler.
+     * Called from handleButton when triggerMapCache has entries for the button.
+     */
+    private fun evaluateTriggerMappings(buttonName: String, gamepadIndex: Int, isDown: Boolean, offset: Int) {
+        val mappings = triggerMapCache[buttonName] ?: return
+        for (mapping in mappings) {
+            val nodeId = mapping.optString("id", "")
+            if (nodeId.isEmpty()) continue
+
+            // For chord: only trigger when ALL inputs are active (on press) or ANY released (on release)
+            val trigger = mapping.optJSONObject("trigger")
+            val isChord = trigger != null && trigger.optString("type") == "chord"
+
+            if (isDown) {
+                if (isChord && !isChordActive(mapping, gamepadIndex)) {
+                    continue // Not all chord inputs pressed yet — wait
+                }
+                dispatchInteraction(mapping, gamepadIndex, true, offset)
+            } else {
+                // On release: always dispatch (end the interaction)
+                dispatchInteraction(mapping, gamepadIndex, false, offset)
+            }
+        }
+    }
+
+    /**
+     * Dispatch to interaction handler based on interactionType.
+     */
+    private fun dispatchInteraction(mapping: JSONObject, gamepadIndex: Int, isDown: Boolean, offset: Int) {
+        val interactionType = mapping.optString("interactionType", "hold")
+        val nodeId = mapping.optString("id", "")
+
+        when (interactionType) {
+            "tap" -> {
+                // Tap: single injectTap on press, nothing on release
+                if (isDown) {
+                    val tapDuration = mapping.optLong("tapDuration", 60L)
+                    var (x, y) = getScreenCoords(mapping.getDouble("x"), mapping.getDouble("y"))
+                    val (ox, oy) = getAntiBanOffset(mapping.optBoolean("antiBanEnabled", false))
+                    try {
+                        TouchInjectionPlugin.touchService?.injectTap(x + ox, y + oy, tapDuration)
+                    } catch (e: Exception) {
+                        Log.w("GameMapper", "tap interaction failed: ${e.message}")
+                    }
+                }
+            }
+            "turbo" -> {
+                // Turbo: auto-repeat injectTap every repeatIntervalMs while held
+                handleTurbo(mapping, nodeId, isDown, gamepadIndex)
+            }
+            "toggle" -> {
+                // Toggle: first press = touchDown (stays), second press = touchUp
+                handleToggle(mapping, nodeId, isDown, offset)
+            }
+            "charge" -> {
+                // Charge: hold for chargeThresholdMs, then release to trigger
+                handleCharge(mapping, nodeId, isDown, offset)
+            }
+            "gesture" -> {
+                // Gesture: sequence of touchMove points
+                if (isDown) handleGesture(mapping, offset)
+            }
+            else -> {
+                // "hold" (default) — same as existing button behavior: touchDown on press, touchUp on release
+                handleHoldInteraction(mapping, isDown, offset)
+            }
+        }
+    }
+
+    private fun handleTurbo(mapping: JSONObject, nodeId: String, isDown: Boolean, gamepadIndex: Int) {
+        if (isDown) {
+            // Cancel any existing turbo for this node
+            turboRunnables[nodeId]?.let { mainHandler.removeCallbacks(it) }
+
+            val intervalMs = mapping.optLong("repeatIntervalMs", 50L)
+            var (x, y) = getScreenCoords(mapping.getDouble("x"), mapping.getDouble("y"))
+            val (ox, oy) = getAntiBanOffset(mapping.optBoolean("antiBanEnabled", false))
+            x += ox; y += oy
+            val tapDuration = mapping.optLong("tapDuration", 30L)
+
+            val runnable = object : Runnable {
+                override fun run() {
+                    try {
+                        TouchInjectionPlugin.touchService?.injectTap(x, y, tapDuration)
+                    } catch (e: Exception) {
+                        Log.w("GameMapper", "turbo tap failed: ${e.message}")
+                    }
+                    mainHandler.postDelayed(this, intervalMs)
+                }
+            }
+            turboRunnables[nodeId] = runnable
+            // First tap immediately, then repeat
+            runnable.run()
+        } else {
+            // Cancel turbo loop
+            turboRunnables[nodeId]?.let { mainHandler.removeCallbacks(it) }
+            turboRunnables.remove(nodeId)
+        }
+    }
+
+    private fun handleToggle(mapping: JSONObject, nodeId: String, isDown: Boolean, offset: Int) {
+        if (!isDown) return // Toggle only acts on press
+        val isToggled = toggleState[nodeId] ?: false
+        var (x, y) = getScreenCoords(mapping.getDouble("x"), mapping.getDouble("y"))
+        val (ox, oy) = getAntiBanOffset(mapping.optBoolean("antiBanEnabled", false))
+        x += ox; y += oy
+
+        if (!isToggled) {
+            // Turn ON: touchDown (stays pressed)
+            val p = (offset..offset+15).mapNotNull { pointersById[it] }.find { !it.isActive && it.type == "button" }
+            if (p != null) {
+                p.isActive = true
+                p.virtualKey = "toggle_$nodeId"
+                try { TouchInjectionPlugin.touchService?.touchDown(p.id, x, y) } catch(e: Exception) {}
+            }
+            toggleState[nodeId] = true
+        } else {
+            // Turn OFF: touchUp
+            val p = (offset..offset+15).mapNotNull { pointersById[it] }.find { it.isActive && it.virtualKey == "toggle_$nodeId" }
+            if (p != null) {
+                p.isActive = false
+                p.virtualKey = null
+                try { TouchInjectionPlugin.touchService?.touchUp(p.id) } catch(e: Exception) {}
+            }
+            toggleState[nodeId] = false
+        }
+    }
+
+    private fun handleCharge(mapping: JSONObject, nodeId: String, isDown: Boolean, offset: Int) {
+        if (isDown) {
+            // Record press time
+            chargeTimestamps[nodeId] = System.currentTimeMillis()
+        } else {
+            // On release: check if held long enough
+            val pressTime = chargeTimestamps[nodeId] ?: return
+            val heldMs = System.currentTimeMillis() - pressTime
+            val threshold = mapping.optLong("chargeThresholdMs", 500L)
+            chargeTimestamps.remove(nodeId)
+
+            if (heldMs >= threshold) {
+                // Charge complete — fire the action (tap)
+                var (x, y) = getScreenCoords(mapping.getDouble("x"), mapping.getDouble("y"))
+                val (ox, oy) = getAntiBanOffset(mapping.optBoolean("antiBanEnabled", false))
+                val tapDuration = mapping.optLong("tapDuration", 60L)
+                try {
+                    TouchInjectionPlugin.touchService?.injectTap(x + ox, y + oy, tapDuration)
+                } catch (e: Exception) {
+                    Log.w("GameMapper", "charge tap failed: ${e.message}")
+                }
+            }
+        }
+    }
+
+    private fun handleGesture(mapping: JSONObject, offset: Int) {
+        val points = mapping.optJSONArray("gesturePoints") ?: return
+        if (points.length() == 0) return
+
+        val p = (offset..offset+15).mapNotNull { pointersById[it] }.find { !it.isActive && it.type == "button" } ?: return
+        p.isActive = true
+        p.virtualKey = "gesture_${mapping.optString("id", "")}"
+
+        var (startX, startY) = getScreenCoords(mapping.getDouble("x"), mapping.getDouble("y"))
+        val (ox, oy) = getAntiBanOffset(mapping.optBoolean("antiBanEnabled", false))
+        startX += ox; startY += oy
+
+        try { TouchInjectionPlugin.touchService?.touchDown(p.id, startX, startY) } catch(e: Exception) { p.isActive = false; return }
+
+        // Schedule gesture points sequentially
+        var cumulativeDelay = 0L
+        for (i in 0 until points.length()) {
+            val pt = points.optJSONObject(i) ?: continue
+            val (px, py) = getScreenCoords(pt.getDouble("x"), pt.getDouble("y"))
+            val delayMs = pt.optLong("delayMs", 50L)
+            cumulativeDelay += delayMs
+
+            mainHandler.postDelayed({
+                synchronized(syncLock) {
+                    if (p.isActive) {
+                        try { TouchInjectionPlugin.touchService?.touchMove(p.id, px + ox, py + oy) } catch(e: Exception) {}
+                    }
+                }
+            }, cumulativeDelay)
+        }
+
+        // Schedule touchUp after all gesture points
+        mainHandler.postDelayed({
+            synchronized(syncLock) {
+                if (p.isActive) {
+                    p.isActive = false
+                    p.virtualKey = null
+                    try { TouchInjectionPlugin.touchService?.touchUp(p.id) } catch(e: Exception) {}
+                }
+            }
+        }, cumulativeDelay + 50L)
+    }
+
+    private fun handleHoldInteraction(mapping: JSONObject, isDown: Boolean, offset: Int) {
+        // Same as existing button press/release logic, but for trigger-based mappings
+        var (x, y) = getScreenCoords(mapping.getDouble("x"), mapping.getDouble("y"))
+        val (ox, oy) = getAntiBanOffset(mapping.optBoolean("antiBanEnabled", false))
+        x += ox; y += oy
+        val nodeId = "hold_${mapping.optString("id", "")}"
+
+        if (isDown) {
+            val p = (offset..offset+15).mapNotNull { pointersById[it] }.find { !it.isActive && it.type == "button" }
+            if (p != null) {
+                p.isActive = true
+                p.virtualKey = nodeId
+                try { TouchInjectionPlugin.touchService?.touchDown(p.id, x, y) } catch(e: Exception) { p.isActive = false }
+            }
+        } else {
+            val p = (offset..offset+15).mapNotNull { pointersById[it] }.find { it.isActive && it.virtualKey == nodeId }
+            if (p != null) {
+                p.isActive = false
+                p.virtualKey = null
+                try { TouchInjectionPlugin.touchService?.touchUp(p.id) } catch(e: Exception) {}
+            }
+        }
     }
 
     fun handleButton(gamepadIndex: Int, buttonName: String, isDown: Boolean) {
@@ -135,14 +398,35 @@ class NativeGamepadMapper(private val context: Context) {
             val offset = (gamepadIndex % 4) * 16
             
             // BUG-FIX: Check touchService FIRST. If null, no injection is possible.
-            // Log clearly so user knows daemon must be started.
             val ts = TouchInjectionPlugin.touchService
             if (ts == null) {
                 Log.e("GameMapper", "handleButton: touchService is NULL — daemon not started! " +
-                    "Tap 'BOOT DAEMON' in Shizuku tab first. Button '$buttonName' isDown=$isDown IGNORED.")
+                    "Button '$buttonName' isDown=$isDown IGNORED.")
                 return
             }
-            
+
+            // INTERACTION-EXPANSION: Update lastState EARLY so chord evaluation can check it.
+            val wasDown = lastState[buttonName + gamepadIndex] ?: false
+            lastState[buttonName + gamepadIndex] = isDown
+
+            // INTERACTION-EXPANSION: Evaluate trigger-based mappings first.
+            // If triggerMapCache has entries for this button, dispatch to interaction handlers.
+            // This takes precedence over the legacy mappedKey path.
+            if (triggerMapCache.containsKey(buttonName)) {
+                evaluateTriggerMappings(buttonName, gamepadIndex, isDown, offset)
+                // Also run legacy path if the same button has a mappedKey entry (backward compat).
+                // But only for non-trigger mappings (avoid double injection).
+                val legacyMapping = findButtonMapping(buttonName)
+                if (legacyMapping != null && legacyMapping.optJSONObject("trigger") == null) {
+                    // This mapping uses mappedKey only (no trigger field) — run legacy path.
+                    // Need to restore wasDown since we already updated lastState.
+                    // The legacy path below reads wasDown from lastState, so we temporarily set it back.
+                    lastState[buttonName + gamepadIndex] = wasDown // restore for legacy path
+                } else {
+                    return // Trigger-based mapping handled everything — skip legacy path.
+                }
+            }
+
             val mapping = findButtonMapping(buttonName)
             
             if (mapping == null) {

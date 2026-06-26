@@ -1,5 +1,18 @@
 import { z } from 'zod';
 
+// INTERACTION-EXPANSION: Zod schemas for flexible trigger + interaction types
+export const TriggerSchema = z.object({
+  type: z.enum(['button', 'chord', 'axis']),
+  inputs: z.array(z.string()),
+  axisThreshold: z.number().min(0).max(1).optional(),
+});
+
+export const GesturePointSchema = z.object({
+  x: z.number(),
+  y: z.number(),
+  delayMs: z.number(),
+});
+
 export const VirtualButtonSchema = z.object({
   id: z.string(),
   label: z.string(),
@@ -21,11 +34,19 @@ export const VirtualButtonSchema = z.object({
   toolType: z.enum(['FINGER', 'STYLUS']).optional(),
   tapDuration: z.number().optional(),
   player: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).optional(),
-  // BUG-P1 FIX: Add 'concave' to enum (added in math audit v1 BUG-F1 fix).
-  // NativeGamepadMapper.applyCurve supports: linear, exponential, parabolic, concave, custom.
-  // Without 'concave' in schema, OverlayApp rejects profiles that use this curve type.
   sensitivityCurve: z.enum(['linear', 'exponential', 'parabolic', 'concave', 'custom']).optional(),
   curvePoints: z.array(z.array(z.number())).optional(),
+
+  // INTERACTION-EXPANSION fields
+  trigger: TriggerSchema.optional(),
+  interactionType: z.enum(['tap', 'hold', 'swipe', 'turbo', 'toggle', 'charge', 'gesture', 'macro']).optional(),
+  repeatIntervalMs: z.number().min(10).max(1000).optional(),
+  chargeThresholdMs: z.number().min(50).max(5000).optional(),
+  gesturePoints: z.array(GesturePointSchema).optional(),
+  stickMode: z.enum(['joystick', 'drag']).optional(),
+  swipeEndX: z.number().optional(),
+  swipeEndY: z.number().optional(),
+  swipeReturn: z.boolean().optional(),
 });
 
 export const GamepadProfileSchema = z.object({

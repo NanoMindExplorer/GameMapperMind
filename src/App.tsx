@@ -128,7 +128,25 @@ export default function App() {
     };
     const handleAxis = (e: Event) => {
       const data = (e as CustomEvent).detail;
-      setActiveAxes({ lx: data.axes[0], ly: data.axes[1], rx: data.axes[2], ry: data.axes[3] });
+      // DRIFT-FIX: Apply radial deadzone to display axes so the canvas cap
+      // doesn't drift when stick is at rest. Auto-center calibration in
+      // GamepadListenerService should fix the root cause, but this is a
+      // safety net for small residual drift.
+      const DEADZONE = 0.08;
+      const lx = data.axes[0] || 0;
+      const ly = data.axes[1] || 0;
+      const rx = data.axes[2] || 0;
+      const ry = data.axes[3] || 0;
+      const lMag = Math.sqrt(lx * lx + ly * ly);
+      const rMag = Math.sqrt(rx * rx + ry * ry);
+      const applyDz = (x: number, y: number, mag: number) => {
+        if (mag <= DEADZONE) return { x: 0, y: 0 };
+        const scale = Math.min(1, (mag - DEADZONE) / (1 - DEADZONE));
+        return { x: (x / mag) * scale, y: (y / mag) * scale };
+      };
+      const l = applyDz(lx, ly, lMag);
+      const r = applyDz(rx, ry, rMag);
+      setActiveAxes({ lx: l.x, ly: l.y, rx: r.x, ry: r.y });
     };
     window.addEventListener('native-gamepad-button', handleBtn);
     window.addEventListener('native-gamepad-axis', handleAxis);

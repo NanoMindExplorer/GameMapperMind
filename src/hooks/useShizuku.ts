@@ -94,11 +94,23 @@ export const useShizuku = () => {
     if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
         try {
           await TouchInjection.bindService();
-          // BUG-FIX: Reduced delay from 500ms to 200ms. 500ms was too long,
-          // causing slow re-bind when app resumes from background.
-          // 200ms is enough for service to initialize after onServiceConnected.
           await new Promise(r => setTimeout(r, 200));
+          // PERSIST-FIX: Start GamepadListenerService IMMEDIATELY after bind.
+          // This foreground service keeps the app process alive when user
+          // switches to eFootball or other games. Without it, OS kills the
+          // process → touchService becomes null → zero injection.
           await TouchInjection.startGamepadListener();
+          // PERSIST-FIX: Auto-request battery optimization exemption.
+          // Without this, Android aggressively kills background processes
+          // when a heavy game (eFootball) is in foreground.
+          try {
+            const { isIgnoring } = await TouchInjection.checkBattery();
+            if (!isIgnoring) {
+              await TouchInjection.requestBatteryIgnore();
+            }
+          } catch (e) {
+            // Non-fatal — user can manually exempt later
+          }
           return true;
         } catch(e) {
           console.error("Bind failed", e);

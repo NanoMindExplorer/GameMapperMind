@@ -41,10 +41,16 @@ class GamepadListenerService : Service() {
     }
 
     private fun startForegroundService() {
+        // PERSIST-FIX: Higher priority notification to prevent OS from killing process
+        // when heavy game (eFootball) is in foreground. IMPORTANCE_HIGH + ongoing flag
+        // makes Android treat this process as critical foreground.
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Gamepad Listener Active")
-            .setContentText("Listening for raw evdev inputs (No-Focus-Steal)")
+            .setContentTitle("GameMapperMind Active")
+            .setContentText("Gamepad mapping service running — touch injection active")
             .setSmallIcon(android.R.drawable.ic_menu_compass)
+            .setOngoing(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .build()
         if (Build.VERSION.SDK_INT >= 34) {
             startForeground(2, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
@@ -55,7 +61,10 @@ class GamepadListenerService : Service() {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(CHANNEL_ID, "Gamepad Listener", NotificationManager.IMPORTANCE_LOW)
+            // PERSIST-FIX: Use IMPORTANCE_HIGH to keep process alive during gameplay
+            val channel = NotificationChannel(CHANNEL_ID, "Gamepad Listener", NotificationManager.IMPORTANCE_HIGH)
+            channel.description = "Keeps GameMapperMind alive during gameplay for touch injection"
+            channel.setShowBadge(false)
             val manager = getSystemService(NotificationManager::class.java)
             manager?.createNotificationChannel(channel)
         }
@@ -163,6 +172,17 @@ class GamepadListenerService : Service() {
                 var l2Trigger = 0f
                 var r2Trigger = 0f
                 var hasAxisChange = false
+
+                // AUTO-CENTER CALIBRATION: Record neutral axis values from getevent
+                // during the first ~500ms of streaming. Many gamepads have neutral
+                // positions that are NOT at (min+max)/2 — e.g., a stick with range
+                // [0, 255] might have neutral at 132 instead of 127. Without
+                // calibration, the stick appears "stuck" in one direction.
+                // We capture the first EV_ABS value for each axis as the neutral,
+                // then subtract it during normalization.
+                val axisNeutral = mutableMapOf<String, Int>()
+                var calibrationComplete = false
+                var calibrationStartTime = System.currentTimeMillis()
                 
                 // nativeMapper already created at top of thread (BUG-FIX #1)
                 val streamListener = object : ICommandOutputListener.Stub() {
@@ -265,42 +285,39 @@ class GamepadListenerService : Service() {
                                             val range = absRanges[axisType]
                                             val min = range?.first ?: -32768
                                             val max = range?.second ?: 32767
-                                            // BUG-MATH FIX: Use Float division throughout for precision.
-                                            // Previous code used Int division (max - min) / 2f which is OK,
-                                            // but mid computation min + (max-min)/2f can lose precision
-                                            // when min is large negative and max is large positive.
-                                            // Use Float arithmetic explicitly.
                                             val span = (max - min).toFloat()
-                                            val mid = min + span / 2f
-                                            val half = span / 2f
+
+                                            // AUTO-CENTER CALIBRATION: During first 500ms, capture neutral value
+                                            // for each axis. This fixes "analog stuck downward" on gamepads where
+                                            // neutral position is not at (min+max)/2.
+                                            if (!calibrationComplete) {
+                                                if (System.currentTimeMillis() - calibrationStartTime < 500) {
+                                                    // Still in calibration window — record first value seen for each axis
+                                                    if (!axisNeutral.containsKey(axisType)) {
+                                                        axisNeutral[axisType] = rawVal
+                                                        Log.d("GameMapper", "AUTO-CENTER: $axisType neutral=$rawVal (range=$min..$max)")
+                                                    }
+                                                } else {
+                                                    calibrationComplete = true
+                                                    Log.i("GameMapper", "AUTO-CENTER calibration complete: ${axisNeutral.size} axes calibrated")
+                                                }
+                                            }
 
                                             var finalVal = 0f
-                                            // CACAT #4 FIX: ABS_GAS/ABS_BRAKE (dan ABS_THROTTLE/ABS_RUDDER) adalah
-                                            // trigger analog yang range-nya [0, max], bukan [-max, max].
-                                            // Sebelumnya hanya ABS_Z/ABS_RZ yang masuk cabang trigger [0,1];
-                                            // ABS_GAS/ABS_BRAKE jatuh ke cabang analog stick [-1,1] lalu disimpan
-                                            // ke l2Trigger/r2Trigger — akibatnya trigger pada controller yang pakai
-                                            // GAS/BRAKE (banyak Xbox via Bluetooth) tidak responsif di setengah tekan.
-                                            //
-                                            // Trigger axis list (semua di-map ke [0, 1]):
-                                            //   ABS_Z, ABS_RZ       — Xbox/standar modern
-                                            //   ABS_GAS, ABS_BRAKE  — Xbox via Bluetooth, beberapa generic
-                                            //   ABS_THROTTLE, ABS_RUDDER — joystick/HOTAS (defensive)
                                             val isTriggerAxis = axisType == "ABS_Z" || axisType == "ABS_RZ" ||
                                                                 axisType == "ABS_GAS" || axisType == "ABS_BRAKE" ||
                                                                 axisType == "ABS_THROTTLE" || axisType == "ABS_RUDDER"
                                             if (isTriggerAxis) {
                                                 // Triggers: map [min, max] → [0, 1]
-                                                finalVal = if (half > 0f) ((rawVal - min).toFloat() / span).coerceIn(0f, 1f) else 0f
+                                                finalVal = if (span > 0f) ((rawVal - min).toFloat() / span).coerceIn(0f, 1f) else 0f
                                             } else {
                                                 // Analog sticks: map [min, max] → [-1, 1]
-                                                // BUG-EVDEV-DZ FIX: Do NOT apply per-axis deadzone here.
-                                                // Per-axis deadzone creates a cross-shaped dead zone, which
-                                                // distorts diagonal direction (e.g. (0.1, 0.17) becomes (0, 0.17)).
-                                                // Radial deadzone is applied correctly in NativeGamepadMapper.processStick
-                                                // using sqrt(lx² + ly²), which forms a circular dead zone and preserves
-                                                // direction. Also, hardcoding 0.15 here ignored the user's profile deadzone.
-                                                finalVal = if (half > 0f) ((rawVal - mid) / half).coerceIn(-1f, 1f) else 0f
+                                                // AUTO-CENTER: Use calibrated neutral instead of mathematical midpoint.
+                                                // If we have a calibrated neutral, use it as the center.
+                                                // Otherwise fall back to mathematical midpoint.
+                                                val neutral = axisNeutral[axisType]?.toFloat() ?: (min + span / 2f)
+                                                val half = span / 2f
+                                                finalVal = if (half > 0f) ((rawVal - neutral) / half).coerceIn(-1f, 1f) else 0f
                                             }
 
                                             when (axisType) {

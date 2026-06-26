@@ -25,7 +25,7 @@ export interface VirtualButton {
   toolType?: 'FINGER' | 'STYLUS';
   tapDuration?: number;
   player?: 1 | 2 | 3 | 4;
-  sensitivityCurve?: 'linear' | 'exponential' | 'parabolic' | 'custom';
+  sensitivityCurve?: 'linear' | 'exponential' | 'parabolic' | 'concave' | 'custom';
   curvePoints?: number[][];
 }
 

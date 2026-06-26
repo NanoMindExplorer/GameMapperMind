@@ -51,6 +51,29 @@ class TouchDaemonService : ITouchService.Stub {
     // ========================================================================
 
     override fun executeShellCommand(command: String): String {
+        // SECURITY FIX: Whitelist + metacharacter filter moved INTO the service itself.
+        // Previously, whitelist only existed in TouchInjectionPlugin.executeShizukuCommand.
+        // Since ITouchService is a binder running as shell uid (2000), any process that
+        // can bind to it could execute arbitrary shell commands as shell user (RCE).
+        // Now: the service itself enforces the whitelist, regardless of caller.
+        val ALLOWED_PREFIXES = listOf("getevent -lp", "getevent -l", "dumpsys input", "pm list packages")
+        val isAllowed = ALLOWED_PREFIXES.any { command.startsWith(it) }
+        if (!isAllowed) {
+            val json = org.json.JSONObject()
+            json.put("output", "")
+            json.put("error", "Command not allowed by service whitelist: $command")
+            json.put("exitCode", -1)
+            return json.toString()
+        }
+        // Reject commands with shell metacharacters (command injection prevention)
+        if (Regex("[;|&\n<>`$]").containsMatchIn(command)) {
+            val json = org.json.JSONObject()
+            json.put("output", "")
+            json.put("error", "Command contains forbidden shell metacharacters")
+            json.put("exitCode", -1)
+            return json.toString()
+        }
+
         return try {
             val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", command))
             val reader = java.io.BufferedReader(java.io.InputStreamReader(process.inputStream))
@@ -337,7 +360,10 @@ class TouchDaemonService : ITouchService.Stub {
 
     // Active injection path: "A", "B", "C", or null (not determined yet)
     @Volatile private var activePath: String? = null
-    @Volatile private var pathFailCount = 0
+    // FIX: Use AtomicInteger instead of @Volatile Int — pathFailCount++ is read-modify-write
+    // and can race when called from binder thread (touchDown) + main thread (injectTap's
+    // scheduled touchUp). AtomicInteger.incrementAndGet is atomic.
+    private val pathFailCount = java.util.concurrent.atomic.AtomicInteger(0)
     private val MAX_FAIL_BEFORE_SWITCH = 3
     @Volatile private var isInitialized = true
 
@@ -374,12 +400,12 @@ class TouchDaemonService : ITouchService.Stub {
                     else -> false
                 }
                 if (result) {
-                    pathFailCount = 0
+                    pathFailCount.set(0)
                     return true
                 }
-                pathFailCount++
-                if (pathFailCount >= MAX_FAIL_BEFORE_SWITCH) {
-                    Log.w("GameMapper", "Path $currentPath failed $pathFailCount times — switching")
+                val fails = pathFailCount.incrementAndGet()
+                if (fails >= MAX_FAIL_BEFORE_SWITCH) {
+                    Log.w("GameMapper", "Path $currentPath failed $fails times — switching")
                     switchToNextPath(currentPath)
                 }
                 return false
@@ -389,13 +415,13 @@ class TouchDaemonService : ITouchService.Stub {
             if (tryPathA(event)) {
                 activePath = "A"
                 Log.i("GameMapper", "Active injection path set to A (IInputManager AIDL)")
-                pathFailCount = 0
+                pathFailCount.set(0)
                 return true
             }
             if (tryPathB(event)) {
                 activePath = "B"
                 Log.i("GameMapper", "Active injection path set to B (InputManager class)")
-                pathFailCount = 0
+                pathFailCount.set(0)
                 return true
             }
             // Both failed — switch to shell fallback permanently
@@ -434,7 +460,7 @@ class TouchDaemonService : ITouchService.Stub {
     }
 
     private fun switchToNextPath(currentPath: String) {
-        pathFailCount = 0
+        pathFailCount.set(0)
         activePath = when (currentPath) {
             "A" -> {
                 Log.i("GameMapper", "Switching from Path A → Path B")
@@ -708,7 +734,9 @@ class TouchDaemonService : ITouchService.Stub {
     }
 
     override fun isAlive(): Boolean {
-        return isInitialized && pointers.size() >= 0
+        // FIX: Removed `pointers.size() >= 0` — SparseArray.size() is always >= 0,
+        // so the check was meaningless (always true). Now returns actual init state.
+        return isInitialized
     }
 
     // ========================================================================
@@ -720,7 +748,7 @@ class TouchDaemonService : ITouchService.Stub {
         try {
             report.put("coords", "[${x.toInt()}, ${y.toInt()}]")
             report.put("activePath", activePath ?: "undetermined")
-            report.put("pathFailCount", pathFailCount)
+            report.put("pathFailCount", pathFailCount.get())
 
             // Path A status
             val proxy = iInputManagerProxy

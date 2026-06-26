@@ -124,15 +124,24 @@ export const useShizuku = () => {
     try {
         const { granted, requested } = await TouchInjection.requestPermission();
         if (granted) {
-          // BUG-FIX: Auto-start daemon immediately after permission granted.
-          // Without GamepadListenerService (foreground service) running, app process
-          // can be killed by OS when backgrounded → binder connection dies →
-          // app disappears from Shizuku management.
-          // With foreground service running, app process stays alive → binder persists.
+          // Auto-start daemon immediately after permission granted.
           try {
             await bindAndStart();
           } catch (e) {
             console.warn("Auto-start daemon after permission grant failed:", e);
+          }
+          // SHIZUKU-PERSIST FIX: Auto-request battery optimization exemption.
+          // Without this, Android may kill the app process when backgrounded →
+          // binder connection dies → app disappears from Shizuku management.
+          // This is non-blocking — if user denies, app still works but may
+          // lose binding when backgrounded.
+          try {
+            const { isIgnoring } = await TouchInjection.checkBattery();
+            if (!isIgnoring) {
+              await TouchInjection.requestBatteryIgnore();
+            }
+          } catch (e) {
+            console.warn("Auto battery ignore request failed:", e);
           }
           return { success: true };
         }

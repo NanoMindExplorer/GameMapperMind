@@ -167,8 +167,12 @@ const logLimiter = rateLimit({
 
 app.use("/api/log", logLimiter);
 
-// POST /api/log — called by main.tsx and OverlayApp.tsx for client error reporting
-app.post("/api/log", requireAuth, (req: Request, res: Response) => {
+// POST /api/log — called by main.tsx and OverlayApp.tsx for client error reporting.
+// FIX: Removed requireAuth — frontend ErrorBoundary calls this WITHOUT Authorization
+// header (it runs before ADMIN_TOKEN is loaded). With requireAuth, all error reports
+// got 401 and failed silently. The rate limiter (10 req/min) already prevents abuse.
+// Sensitive log retrieval (GET /api/logs) still requires auth.
+app.post("/api/log", (req: Request, res: Response) => {
   try {
     const parsed = LogSchema.parse(req.body);
     const clientIp = req.ip || "";
@@ -265,8 +269,10 @@ async function startServer() {
 
     const server = app.listen(PORT, "0.0.0.0", () => {
       console.log(`✅ Server running on http://localhost:${PORT}`);
-      console.log(`🛡️ Admin Token: ${ADMIN_TOKEN}`);
-      console.log("⚠️  Jangan bagikan token ini! Simpan di environment variable.");
+      // SECURITY FIX: Removed ADMIN_TOKEN from stdout log — anyone with access to
+      // server logs could read the token. Token is stored in .admin_token file
+      // (mode 0600) or set via ADMIN_TOKEN env var. Read it from there if needed.
+      console.log(`🛡️ Admin Token: stored in .admin_token file (read with: cat .admin_token)`);
     });
 
     // Graceful shutdown — handle both SIGTERM and SIGINT

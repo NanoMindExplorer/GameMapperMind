@@ -258,15 +258,17 @@ class NativeGamepadMapper(private val context: Context) {
         val sign = kotlin.math.sign(x)
         val absX = kotlin.math.abs(x)
         return sign * when (curveType.lowercase()) {
-            // BUG-F1 FIX: "parabolic" now correctly returns x² (was returning √x which is concave, opposite of intended).
-            // Both "exponential" and "parabolic" produce x² — they are mathematically the same curve.
-            // Use "exponential" for stick-small=insensitive, stick-large=sensitive (ideal for FPS aim assist).
-            "exponential", "expo", "parabolic", "para" -> absX * absX
+            // FIX: "exponential" is now a TRUE exponential curve (e^(kx)-1)/(e^k-1) with k=3.
+            // This gives a smoother "small=insensitive, large=sensitive" feel than x².
+            // "parabolic" remains x² (simpler, more aggressive near 0).
+            "exponential", "expo" -> {
+                val k = 3.0
+                ((Math.exp(k * absX.toDouble()) - 1) / (Math.exp(k) - 1)).toFloat()
+            }
+            "parabolic", "para" -> absX * absX
             "concave" -> kotlin.math.sqrt(absX)  // stick-small=sensitive, stick-large=insensitive (inverse)
             "custom" -> {
                 if (curvePoints == null || curvePoints.length() < 2) return absX
-                // BUG-M7 FIX: Clamp absX to [0, 1] before interpolation to avoid idx out of range.
-                // Also coerce idx to [0, n-2] and recompute t from clamped values.
                 val clampedX = absX.coerceIn(0f, 1f)
                 val n = curvePoints.length()
                 val step = 1.0f / (n - 1)
@@ -349,10 +351,17 @@ class NativeGamepadMapper(private val context: Context) {
         val curvePoints = mapping.optJSONArray("curvePoints")
         val curvedMag = applyCurve(rescaledMag, curve, curvePoints)
 
-        // 5. Reconstruct output vector: unit_vector(rawX, rawY) * curvedMag * maxRadius
+        // FIX: Apply sensitivity multiplier from ButtonPropertyPanel slider.
+        // Previously, the "sensitivity" field was written by the UI slider but NEVER read
+        // by the injection pipeline — the slider had no effect. Now: multiply curvedMag
+        // by sensitivity (default 1.0 = no change, 2.0 = double distance, 0.5 = half).
+        val sensitivity = mapping.optDouble("sensitivity", 1.0).toFloat().coerceIn(0.1f, 5.0f)
+        val finalMag = (curvedMag * sensitivity).coerceIn(0f, 1f)
+
+        // 5. Reconstruct output vector: unit_vector(rawX, rawY) * finalMag * maxRadius
         val invMag = if (rawMag > 1e-6f) 1f / rawMag else 0f
-        val outX = (sx * invMag) * curvedMag * maxRadius
-        val outY = (sy * invMag) * curvedMag * maxRadius
+        val outX = (sx * invMag) * finalMag * maxRadius
+        val outY = (sy * invMag) * finalMag * maxRadius
         val tX = cX + outX
         val tY = cY + outY
 

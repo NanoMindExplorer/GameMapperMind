@@ -25,24 +25,17 @@ class GamepadPlugin : Plugin() {
             emitButtonEvent(keyCode, "PRESSED", event)
             val buttonName = mapKeyCodeToButtonName(keyCode)
             if (buttonName != "UNKNOWN") {
-                // BUG-DUAL-JS FIX: When Shizuku getevent path is active, it ALSO emits JS events
-                // for the same button (it sees raw kernel events). Without this guard, the UI
-                // receives two emitGamepadButton events per press → indicator flickers twice,
-                // input log grows 2x. Injection itself is NOT doubled (NativeGamepadMapper.lastState
-                // dedupes), but JS event spam is real.
-                // Strategy: if Shizuku getevent service is running, let it be the JS source;
-                // we still call handleButtonBatched as a SAFETY NET (in case getevent stream is
-                // broken but Shizuku binder is up — lastState dedup prevents double injection).
+                // DUAL-PATH FIX: When Shizuku getevent path is active, it is the SINGLE source
+                // of truth for both JS events AND injection. This prevents:
+                //   1. Double JS emit (UI flicker)
+                //   2. Double injection call with conflicting gamepadIndex (Android path uses
+                //      index=0 hardcoded, Shizuku path uses indexOf(devPath) — for multi-gamepad
+                //      these don't match, causing lastState dedup to fail → double injection)
+                // When Shizuku is NOT running, this Android path is the fallback for injection.
                 if (!GamepadListenerService.isRunning) {
                     TouchInjectionPlugin.emitGamepadButton(buttonName, 1, 1.0f)
+                    GamepadJniPlugin.handleButtonBatched(0, buttonName, true)
                 }
-                // BUG-FIX: Also call NativeGamepadMapper for injection (not just JS event).
-                // Previously, GamepadPlugin ONLY emitted JS events (UI feedback) but did NOT
-                // trigger touch injection. Injection only happened via Shizuku getevent path.
-                // If Shizuku getevent stream is not running (no gamepad detected, or stream
-                // broken), pressing gamepad buttons does NOTHING in the game.
-                // Now: Call handleButtonBatched directly for immediate injection via native path.
-                GamepadJniPlugin.handleButtonBatched(0, buttonName, true)
             }
             return true
         }
@@ -54,12 +47,12 @@ class GamepadPlugin : Plugin() {
             emitButtonEvent(keyCode, "RELEASED", event)
             val buttonName = mapKeyCodeToButtonName(keyCode)
             if (buttonName != "UNKNOWN") {
-                // BUG-DUAL-JS FIX: see handleKeyDown — skip JS emit when Shizuku path is live.
+                // DUAL-PATH FIX: see handleKeyDown — skip both JS emit AND injection when
+                // Shizuku path is live.
                 if (!GamepadListenerService.isRunning) {
                     TouchInjectionPlugin.emitGamepadButton(buttonName, 0, 0.0f)
+                    GamepadJniPlugin.handleButtonBatched(0, buttonName, false)
                 }
-                // BUG-FIX: Also call NativeGamepadMapper for injection (release).
-                GamepadJniPlugin.handleButtonBatched(0, buttonName, false)
             }
             return true
         }
@@ -133,20 +126,15 @@ class GamepadPlugin : Plugin() {
             notifyListeners("gamepadEvent", ret)
 
             // BUG-SYNC3 FIX: Emit [LX, LY, RX, RY, L2, R2] — consistent with Shizuku path.
-            // BUG-DUAL-JS FIX: When Shizuku getevent path is active, it ALSO emits axis events.
-            // Skip our JS emit to avoid UI spam (axis indicator flickering, log doubling).
-            // NativeGamepadMapper.handleAxes is idempotent via pointer state tracking, so
-            // calling handleAxisBatched as a safety net is safe (no double injection).
+            // DUAL-PATH FIX: When Shizuku getevent path is active, it is the single source
+            // for both JS events AND injection. Skip both to prevent:
+            //   1. Double JS emit (axis indicator flicker)
+            //   2. Double injection with conflicting gamepadIndex (Android=0, Shizuku=indexOf)
             val axes = floatArrayOf(axisX, axisY, axisRX, axisRY, l2Trigger, r2Trigger)
             if (!GamepadListenerService.isRunning) {
                 TouchInjectionPlugin.emitGamepadAxis(axes)
+                GamepadJniPlugin.handleAxisBatched(0, axisX, axisY, axisRX, axisRY, l2Trigger, r2Trigger)
             }
-
-            // BUG-FIX: Also call NativeGamepadMapper for analog stick injection.
-            // Previously, GamepadPlugin ONLY emitted JS events but did NOT trigger
-            // touch injection for analog sticks. Injection only happened via Shizuku.
-            // Now: Call handleAxisBatched directly for immediate injection via native path.
-            GamepadJniPlugin.handleAxisBatched(0, axisX, axisY, axisRX, axisRY, l2Trigger, r2Trigger)
             
             // D-pad: emit press AND release
             // HAT axis: -1.0 = up/left, 0 = centered, 1.0 = down/right

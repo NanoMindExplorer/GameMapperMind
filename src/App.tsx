@@ -25,9 +25,10 @@ import { ScreenOrientation } from '@capacitor/screen-orientation';
 import { useShizuku } from './hooks/useShizuku';
 import { useGamepadLoop } from './hooks/useGamepadLoop';
 import { useInputInjector } from './hooks/useInputInjector';
+import TouchInjection from './plugins/TouchInjection';
 
 export default function App() {
-  const { checkShizukuStatus, executeShizukuCommand, injectInput, stopDaemon } = useShizuku();
+  const { checkShizukuStatus, executeShizukuCommand, injectInput, stopDaemon, startDaemon } = useShizuku();
   const { startOverlay, stopOverlay } = useInputInjector();
   const [shizukuState, setShizukuState] = React.useState<ShizukuState>({
     status: 'DISCONNECTED',
@@ -310,16 +311,37 @@ export default function App() {
 
   React.useEffect(() => {
     fetchStatus();
-    // Native background checker
-    const interval = setInterval(fetchStatus, 5000);
+    // SHIZUKU-PERSIST FIX: Reduced polling from 5s to 20s.
+    // 5s polling was too aggressive — every poll calls Shizuku.pingBinder() +
+    // checkSelfPermission() which can trigger binder re-evaluation and put
+    // pressure on the Shizuku process. 20s is enough for UI status updates
+    // without causing binder stress.
+    const interval = setInterval(fetchStatus, 20000);
     
     let appListener: any;
     import('@capacitor/app').then(({ App: CapacitorApp }) => {
       appListener = CapacitorApp.addListener('appStateChange', async (state) => {
         if (state.isActive) {
-           // BUG FIX: Only fetch status, do NOT blindly rebind on every resume
-           // bindService is already called by useShizuku.checkShizukuStatus if needed
+           // SHIZUKU-PERSIST FIX: On app resume, fetch status AND do a one-shot rebind
+           // if permission is granted but touchService is dead. This is NOT churn —
+           // it only fires once per resume (guarded by isBindingRef in useShizuku).
+           // Previously, polling was read-only which meant if binding died while
+           // backgrounded, user had to manually tap "Start Daemon" again.
            await fetchStatus();
+           // After fetchStatus updates state, check if we need to rebind.
+           // The rebind logic is in useShizuku.checkShizukuStatus — but that's
+           // read-only now. So we call bindAndStart directly if service is dead.
+           // This is safe because isBindingRef prevents concurrent binds.
+           try {
+             const { granted, touchServiceAlive } = await TouchInjection.checkPermission();
+             if (granted && !touchServiceAlive) {
+               // One-shot rebind on resume — prevents "app disappeared from Shizuku"
+               // after backgrounding. The isBindingRef guard in useShizuku prevents churn.
+               await startDaemon();
+             }
+           } catch (e) {
+             console.warn("Resume rebind check failed:", e);
+           }
         }
       });
     }).catch(console.warn);

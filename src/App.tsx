@@ -25,8 +25,6 @@ import { ScreenOrientation } from '@capacitor/screen-orientation';
 import { useShizuku } from './hooks/useShizuku';
 import { useGamepadLoop } from './hooks/useGamepadLoop';
 import { useInputInjector } from './hooks/useInputInjector';
-import { useGamepad } from './hooks/useGamepad';
-import { GamepadStatusBadge } from './components/GamepadStatusBadge';
 
 export default function App() {
   const { checkShizukuStatus, executeShizukuCommand, injectInput, stopDaemon } = useShizuku();
@@ -377,9 +375,6 @@ export default function App() {
   // Do NOT duplicate overlay rendering in App.tsx — causes conflict.
   // main.tsx checks window.location.search for 'overlay=true' and renders OverlayApp directly.
 
-  // BUG-R1 FIX: Call useGamepad for web-based gamepad detection fallback
-  const gamepadStates = useGamepad();
-
   return (
     <div className="min-h-screen bg-[#060608] text-slate-100 flex flex-col font-sans selection:bg-indigo-500 selection:text-white">
       {/* Visual background atmospheric elements */}
@@ -427,12 +422,17 @@ export default function App() {
 
           {/* Quick HUD State indications & Emergency Kill Switch */}
           <div className="flex items-center gap-4">
-            <GamepadStatusBadge />
+            {/* BUG-FIX: Removed GamepadStatusBadge (Web Gamepad API doesn't work in native
+                Android WebView — events are intercepted by MainActivity.dispatchKeyEvent).
+                Also removed the confusing "GP: CONNECTED/DISCONNECTED" text which used
+                Shizuku status but was labeled as "GP" (gamepad), misleading users into
+                thinking their physical gamepad was/wasn't connected.
+                Now: single Shizuku daemon status indicator (green dot = daemon alive). */}
             <div className="hidden md:flex items-center gap-6 text-[10px] text-slate-400 font-mono pr-2 border-r border-slate-800">
-              <div className="flex items-center gap-2" title={shizukuState.status === 'CONNECTED_SHIZUKU' || shizukuState.status === 'CONNECTED_ADB' ? `Shizuku Service Running` : 'No gamepad connected'}>
-                <span className={`w-1.5 h-1.5 rounded-full ${shizukuState.status === 'CONNECTED_SHIZUKU' || shizukuState.status === 'CONNECTED_ADB' ? 'bg-green-500 animate-pulse' : 'bg-slate-600'}`}></span>
-                <span className={shizukuState.status === 'CONNECTED_SHIZUKU' || shizukuState.status === 'CONNECTED_ADB' ? 'text-green-400' : 'text-slate-500'}>
-                  GP: {shizukuState.status === 'CONNECTED_SHIZUKU' || shizukuState.status === 'CONNECTED_ADB' ? 'CONNECTED' : 'DISCONNECTED'}
+              <div className="flex items-center gap-2" title={shizukuState.recoveryState === 'DAEMON_ALIVE' ? 'Shizuku daemon running and touch service bound' : 'Shizuku daemon not running — tap Start Daemon in Orchestration Control'}>
+                <span className={`w-1.5 h-1.5 rounded-full ${shizukuState.recoveryState === 'DAEMON_ALIVE' ? 'bg-green-500 animate-pulse' : 'bg-slate-600'}`}></span>
+                <span className={shizukuState.recoveryState === 'DAEMON_ALIVE' ? 'text-green-400' : 'text-slate-500'}>
+                  Daemon: {shizukuState.recoveryState === 'DAEMON_ALIVE' ? 'ALIVE' : shizukuState.recoveryState || 'OFFLINE'}
                 </span>
               </div>
             </div>

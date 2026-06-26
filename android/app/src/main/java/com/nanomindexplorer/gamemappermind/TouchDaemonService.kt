@@ -297,6 +297,78 @@ class TouchDaemonService : ITouchService.Stub {
         return (z0 * stdDev + mean).toFloat()
     }
 
+    // BUG-INJECT-FALLBACK FIX: Track consecutive injectInputEvent failures.
+    // After 3 consecutive failures, switch to `input tap` shell command fallback
+    // which is slower (~100ms per tap) but works on ALL Android versions and OEMs
+    // including HarmonyOS 4.2 where InputManager.injectInputEvent reflection may be blocked.
+    @Volatile private var injectFailCount = 0
+    @Volatile private var useShellFallback = false
+    private val MAX_INJECT_FAILURES = 3
+
+    /**
+     * Fallback: use `input tap X Y` shell command to inject a tap.
+     * This is the SAME mechanism Android's `input` binary uses internally — it goes
+     * through IInputManager.injectInputEvent via AIDL. Works on all devices where
+     * Shizuku runs as shell uid (which has INJECT_EVENTS permission).
+     *
+     * Limitations:
+     *   - Only works for single taps (no multi-touch)
+     *   - ~100ms latency per tap (process spawn overhead)
+     *   - Cannot do touchMove (analog stick won't work with this fallback)
+     *
+     * But it GUARANTEES that button presses reach the game, which is the #1 user complaint.
+     */
+    private fun shellInputTap(x: Float, y: Float): Boolean {
+        return try {
+            val xi = x.toInt()
+            val yi = y.toInt()
+            val process = Runtime.getRuntime().exec(arrayOf("input", "tap", xi.toString(), yi.toString()))
+            val finished = process.waitFor(500, java.util.concurrent.TimeUnit.MILLISECONDS)
+            if (!finished) {
+                process.destroyForcibly()
+                Log.w("GameMapper", "shellInputTap: TIMEOUT at ($xi, $yi)")
+                return false
+            }
+            val exitCode = process.exitValue()
+            if (exitCode == 0) {
+                Log.d("GameMapper", "shellInputTap: OK at ($xi, $yi)")
+                true
+            } else {
+                Log.w("GameMapper", "shellInputTap: exit=$exitCode at ($xi, $yi)")
+                false
+            }
+        } catch (e: Exception) {
+            Log.e("GameMapper", "shellInputTap failed: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * Fallback: use `input swipe` for touchDown→Move→Up sequence.
+     * Used for analog stick movement when InputManager.injectInputEvent is blocked.
+     * Duration is in milliseconds.
+     */
+    private fun shellInputSwipe(x1: Float, y1: Float, x2: Float, y2: Float, durationMs: Long): Boolean {
+        return try {
+            val process = Runtime.getRuntime().exec(arrayOf(
+                "input", "swipe",
+                x1.toInt().toString(), y1.toInt().toString(),
+                x2.toInt().toString(), y2.toInt().toString(),
+                durationMs.toString()
+            ))
+            val finished = process.waitFor(durationMs + 1000, java.util.concurrent.TimeUnit.MILLISECONDS)
+            if (!finished) {
+                process.destroyForcibly()
+                false
+            } else {
+                process.exitValue() == 0
+            }
+        } catch (e: Exception) {
+            Log.e("GameMapper", "shellInputSwipe failed: ${e.message}")
+            false
+        }
+    }
+
     private fun injectMotionEvent(action: Int, actionIndex: Int): Boolean {
         val downTime = baseDownTime
         val eventTime = SystemClock.uptimeMillis()
@@ -349,31 +421,76 @@ class TouchDaemonService : ITouchService.Stub {
         )
 
         return try {
+            // BUG-INJECT-FALLBACK FIX: If we've already detected that InputManager.injectInputEvent
+            // is broken on this device (3+ consecutive failures), skip straight to shell fallback
+            // for ACTION_DOWN/ACTION_UP (button taps). Analog stick (ACTION_MOVE) cannot use shell
+            // fallback — it will silently fail, but at least button presses will work.
+            if (useShellFallback && (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_UP || action == (MotionEvent.ACTION_POINTER_DOWN or (actionIndex shl MotionEvent.ACTION_POINTER_INDEX_SHIFT)))) {
+                val x = pointerCoords[0].x
+                val y = pointerCoords[0].y
+                if (action == MotionEvent.ACTION_DOWN || action == (MotionEvent.ACTION_POINTER_DOWN or (actionIndex shl MotionEvent.ACTION_POINTER_INDEX_SHIFT))) {
+                    // For DOWN, we can't do a standalone tap yet (need UP to complete).
+                    // Store the coords and return true — the UP will trigger shellInputTap.
+                    // Actually, simpler: just do the tap immediately for DOWN, ignore UP.
+                    // This means each button press = 1 tap, which is what we want.
+                    val tapResult = shellInputTap(x, y)
+                    event.recycle()
+                    return tapResult
+                } else {
+                    // ACTION_UP — already tapped on DOWN, just return true
+                    event.recycle()
+                    return true
+                }
+            }
+
             // BUG-INJECT-REFLECT FIX: Handle multiple injectInputEvent signatures.
-            // The method may take (InputEvent, int) or (InputEvent, int, int) or (InputEvent, Integer).
-            // We discovered the signature in the lazy init — now invoke based on parameter count.
             val method = injectInputEventMethod
             val im = inputManager
             if (method == null || im == null) {
                 Log.e("GameMapper", "injectMotionEvent: method=$method inputManager=$im — cannot inject")
+                if (!useShellFallback) {
+                    injectFailCount++
+                    if (injectFailCount >= MAX_INJECT_FAILURES) {
+                        useShellFallback = true
+                        Log.e("GameMapper", "SWITCHING TO SHELL FALLBACK — InputManager.injectInputEvent is broken on this device. " +
+                            "Button taps will use `input tap` (slower but reliable). Analog stick movement will NOT work.")
+                    }
+                }
                 return false
             }
             val result: Boolean = when (method.parameterCount) {
                 2 -> method.invoke(im, event, 0) as? Boolean ?: false
-                3 -> method.invoke(im, event, 0, 0) as? Boolean ?: false  // (event, mode, flags)
-                else -> {
-                    // Fallback: assume 2-arg signature
-                    method.invoke(im, event, 0) as? Boolean ?: false
-                }
+                3 -> method.invoke(im, event, 0, 0) as? Boolean ?: false
+                else -> method.invoke(im, event, 0) as? Boolean ?: false
             }
-            if (!result) {
-                Log.w("GameMapper", "injectInputEvent returned false — event may have been filtered " +
-                    "(source=${currentInputSource}, action=0x${action.toString(16)}, pointerCount=$pointerCount, " +
-                    "coords=(${pointerCoords[0].x},${pointerCoords[0].y}))")
+            if (result) {
+                // Reset failure counter on success
+                if (injectFailCount > 0) {
+                    injectFailCount = 0
+                    if (useShellFallback) {
+                        useShellFallback = false
+                        Log.i("GameMapper", "InputManager.injectInputEvent recovered — switching back from shell fallback")
+                    }
+                }
+            } else {
+                injectFailCount++
+                Log.w("GameMapper", "injectInputEvent returned false (fail #$injectFailCount) — " +
+                    "source=${currentInputSource}, action=0x${action.toString(16)}, " +
+                    "coords=(${pointerCoords[0].x},${pointerCoords[0].y})")
+                if (injectFailCount >= MAX_INJECT_FAILURES && !useShellFallback) {
+                    useShellFallback = true
+                    Log.e("GameMapper", "SWITCHING TO SHELL FALLBACK after $injectFailCount consecutive failures. " +
+                        "Button taps will now use `input tap` shell command.")
+                }
             }
             result
         } catch (e: Exception) {
             Log.e("GameMapper", "Injection failed: ${e.javaClass.simpleName}: ${e.message}", e)
+            injectFailCount++
+            if (injectFailCount >= MAX_INJECT_FAILURES && !useShellFallback) {
+                useShellFallback = true
+                Log.e("GameMapper", "SWITCHING TO SHELL FALLBACK after exception: ${e.javaClass.simpleName}")
+            }
             false
         } finally {
             event.recycle()
@@ -542,5 +659,82 @@ class TouchDaemonService : ITouchService.Stub {
     // BUG-AIDL1 FIX: isAlive() now reflects actual initialization state.
     override fun isAlive(): Boolean {
         return isInitialized && pointers.size() >= 0
+    }
+
+    /**
+     * Diagnostic: test injection at (x, y) and return a JSON report with:
+     *   - inputManager obtained? (which path)
+     *   - injectInputEventMethod found? (which signature)
+     *   - injectInputEvent return value
+     *   - shell fallback active?
+     *   - `input tap` test result
+     *
+     * This lets the user verify injection works WITHOUT needing the gamepad.
+     * They tap "Test Injection" in the app, and a touch appears at (x, y) on screen
+     * if everything is working. The JSON report tells them exactly what's broken.
+     */
+    override fun testInjection(x: Float, y: Float): String {
+        val report = org.json.JSONObject()
+        try {
+            report.put("coords", "[${x.toInt()}, ${y.toInt()}]")
+
+            // Step 1: InputManager
+            val im = inputManager
+            report.put("inputManager_null", im == null)
+            if (im != null) {
+                report.put("inputManager_class", im.javaClass.name)
+            }
+
+            // Step 2: injectInputEvent method
+            val method = injectInputEventMethod
+            report.put("injectMethod_null", method == null)
+            if (method != null) {
+                report.put("injectMethod_signature", "parameterCount=${method.parameterCount}")
+            }
+
+            // Step 3: Try injectInputEvent directly
+            report.put("useShellFallback", useShellFallback)
+            report.put("injectFailCount", injectFailCount)
+
+            // Step 4: Try a real touchDown + touchUp
+            val testPointerId = 200  // use tap range to avoid gamepad pointer collision
+            var downResult = false
+            var upResult = false
+            try {
+                downResult = touchDown(testPointerId, x, y)
+                Thread.sleep(50)
+                upResult = touchUp(testPointerId)
+            } catch (e: Exception) {
+                report.put("touchException", e.message)
+            }
+            report.put("touchDown_result", downResult)
+            report.put("touchUp_result", upResult)
+
+            // Step 5: Test shell fallback
+            var shellResult = false
+            try {
+                shellResult = shellInputTap(x, y)
+            } catch (e: Exception) {
+                report.put("shellException", e.message)
+            }
+            report.put("shellInputTap_result", shellResult)
+
+            // Step 6: Recommendation
+            val recommendation = when {
+                im == null && shellResult -> "InputManager reflection blocked on this device. Shell fallback (input tap) WORKS. Button presses will work; analog stick movement will NOT."
+                im == null && !shellResult -> "CRITICAL: Both InputManager and shell fallback failed. Shizuku may not be running as shell uid, or device is heavily restricted."
+                method == null && shellResult -> "injectInputEvent method not found via reflection. Shell fallback works. Buttons OK, analog stick NO."
+                method != null && downResult && shellResult -> "ALL PATHS WORK. Injection should function normally."
+                method != null && !downResult && shellResult -> "InputManager.injectInputEvent returns false (likely filtered by OEM). Shell fallback works — will auto-switch after 3 failures."
+                method != null && downResult && !shellResult -> "InputManager works, shell fallback failed (unusual). Will use InputManager path."
+                else -> "Injection status unclear. Check logcat for details."
+            }
+            report.put("recommendation", recommendation)
+
+            Log.i("GameMapper", "testInjection report: $report")
+        } catch (e: Exception) {
+            report.put("fatalError", e.message)
+        }
+        return report.toString()
     }
 }

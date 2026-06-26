@@ -548,4 +548,25 @@ class TouchInjectionPlugin : Plugin() {
             call.reject("Injection failed: ${e.message}")
         }
     }
+
+    @PluginMethod
+    fun testInjection(call: PluginCall) {
+        val x = call.getFloat("x") ?: 500f
+        val y = call.getFloat("y") ?: 500f
+        try {
+            if (touchService == null) {
+                call.reject("Shizuku user service not bound. Please start daemon first.")
+                return
+            }
+            val jsonResult = touchService?.testInjection(x, y) ?: "{}"
+            val obj = org.json.JSONObject(jsonResult)
+            val data = JSObject()
+            for (key in obj.keys()) {
+                data.put(key, obj.get(key))
+            }
+            call.resolve(data)
+        } catch (e: Exception) {
+            call.reject("testInjection failed: ${e.message}")
+        }
+    }
 }

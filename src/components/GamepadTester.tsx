@@ -13,223 +13,99 @@ interface GamepadTesterProps {
 }
 
 export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterProps) {
-  // Pressed-buttons state (driven by physical gamepad OR on-screen simulator clicks)
+  // Pressed-buttons state (driven by native Android gamepad events via Capacitor plugin)
   const [pressedButtons, setPressedButtons] = React.useState<Record<string, boolean>>({});
   const [stickLeft, setStickLeft] = React.useState({ x: 0, y: 0 });
   const [stickRight, setStickRight] = React.useState({ x: 0, y: 0 });
   const [triggers, setTriggers] = React.useState({ lt: 0, rt: 0 });
 
-  // Physical Gamepad connected state
-  const [connectedGamepad, setConnectedGamepad] = React.useState<Gamepad | null>(null);
+  // Native gamepad connected state — set true only when a REAL button/axis event arrives.
+  // BUG-FAKE-GAMEPAD FIX: Previously, handleNativeBtn set connectedGamepad to a fake
+  // "Shizuku Emulated Native Gamepad" object whenever ANY native-gamepad-button event
+  // fired — including ERROR_NO_GAMEPAD, ERROR_SHIZUKU_NOT_RUNNING, etc. This made the
+  // UI say "Gamepad Connected" even when no gamepad was turned on. Now: only set
+  // connected=true when a real button name (A/B/X/Y/LB/RB/etc.) arrives.
+  const [nativeGamepadActive, setNativeGamepadActive] = React.useState(false);
+  const lastBtnLogRef = React.useRef(0);
 
-  // Track the previous state to avoid redundant renders on loop polling
-  const lastStateRef = React.useRef({
-    connectedId: null as string | null,
-    buttonsStr: '',
-    rawBtnStr: '',
-    triggersStr: '',
-    lx: 0,
-    ly: 0,
-    rx: 0,
-    ry: 0
-  });
-
-  // Poll for physical gamepads and map inputs (real Web Gamepad API)
   React.useEffect(() => {
-    let animationFrameId: number;
-
-    const pollGamepads = () => {
-      let gamepads: (Gamepad | null)[] = [];
-      try {
-        gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
-      } catch (e) {
-        // Do nothing if getGamepads throws SecurityError
-      }
-      let activeGP: Gamepad | null = null;
-
-      for (let i = 0; i < gamepads.length; i++) {
-        if (gamepads[i] && gamepads[i]!.mapping !== '') {
-          activeGP = gamepads[i];
-          break;
-        }
-      }
-      if (!activeGP) {
-        for (let i = 0; i < gamepads.length; i++) {
-          if (gamepads[i]) {
-            activeGP = gamepads[i];
-            break;
-          }
-        }
-      }
-
-      // Read all raw buttons so the user can see if M1/M2 are detected at non-standard indices
-      const rawButtonsPressed: string[] = [];
-      if (activeGP) {
-        activeGP.buttons.forEach((btn, idx) => {
-          if (btn.pressed) rawButtonsPressed.push(`B${idx}`);
-        });
-      }
-
-      const activeId = activeGP ? activeGP.id : null;
-      const rawStr = rawButtonsPressed.join(',');
-
-      if (activeId !== lastStateRef.current.connectedId || rawStr !== lastStateRef.current.rawBtnStr) {
-        setConnectedGamepad(activeGP);
-        lastStateRef.current.connectedId = activeId;
-        lastStateRef.current.rawBtnStr = rawStr;
-
-        if (activeGP && rawStr) {
-            onLogMessage(`[HARDWARE] Menekan tombol raw: ${rawStr}`);
-        }
-      }
-
-      if (activeGP) {
-        // Map physical buttons to UI state
-        const buttons = activeGP.buttons;
-        const buttonMap: Record<string, boolean> = {};
-
-        // Standard mapping indices:
-        // 0: A/Cross, 1: B/Circle, 2: X/Square, 3: Y/Triangle
-        if (buttons[0]?.pressed) buttonMap['a'] = true;
-        if (buttons[1]?.pressed) buttonMap['b'] = true;
-        if (buttons[2]?.pressed) buttonMap['x'] = true;
-        if (buttons[3]?.pressed) buttonMap['y'] = true;
-
-        // D-Pad buttons: 12: Up, 13: Down, 14: Left, 15: Right
-        if (buttons[12]?.pressed) buttonMap['d_up'] = true;
-        if (buttons[13]?.pressed) buttonMap['d_down'] = true;
-        if (buttons[14]?.pressed) buttonMap['d_left'] = true;
-        if (buttons[15]?.pressed) buttonMap['d_right'] = true;
-
-        if (buttons[4]?.pressed) buttonMap['l_shoulder'] = true;
-        if (buttons[5]?.pressed) buttonMap['r_shoulder'] = true;
-
-        if (buttons[8]?.pressed) buttonMap['select'] = true;
-        if (buttons[9]?.pressed) buttonMap['start'] = true;
-        if (buttons[10]?.pressed) buttonMap['l3'] = true;
-        if (buttons[11]?.pressed) buttonMap['r3'] = true;
-
-        const buttonsStr = JSON.stringify(buttonMap);
-        if (buttonsStr !== lastStateRef.current.buttonsStr) {
-          setPressedButtons(buttonMap);
-          lastStateRef.current.buttonsStr = buttonsStr;
-        }
-
-        // Triggers: LT (6), RT (7) - float values 0 to 1
-        const ltVal = buttons[6] ? buttons[6].value : 0;
-        const rtVal = buttons[7] ? buttons[7].value : 0;
-        const triggersStr = `${ltVal.toFixed(2)}_${rtVal.toFixed(2)}`;
-        if (triggersStr !== lastStateRef.current.triggersStr) {
-          setTriggers({ lt: ltVal, rt: rtVal });
-          lastStateRef.current.triggersStr = triggersStr;
-        }
-
-        // Joysticks: Left X (0), Left Y (1), Right X (2), Right Y (3)
-        const axes = activeGP.axes;
-        const lx = axes[0] !== undefined ? axes[0] : 0;
-        const ly = axes[1] !== undefined ? axes[1] : 0;
-        const rx = axes[2] !== undefined ? axes[2] : 0;
-        const ry = axes[3] !== undefined ? axes[3] : 0;
-
-        // BUG-P13 FIX: Use radial deadzone (magnitude-based) instead of per-axis threshold.
-        // Per-axis deadzone causes "diagonal drift" — when stick is at 45°, both X and Y
-        // are ~0.07 (below 0.08 threshold), so output is (0, 0). But the stick IS moved.
-        // Radial deadzone: if magnitude > deadzone, scale = (mag - dz) / (1 - dz), apply to both.
-        const deadzone = 0.08;
-        const lMag = Math.sqrt(lx * lx + ly * ly);
-        const rMag = Math.sqrt(rx * rx + ry * ry);
-        let filterLX = 0, filterLY = 0, filterRX = 0, filterRY = 0;
-        if (lMag > deadzone) {
-          const scale = Math.min(1, (lMag - deadzone) / (1 - deadzone));
-          filterLX = (lx / lMag) * scale;
-          filterLY = (ly / lMag) * scale;
-        }
-        if (rMag > deadzone) {
-          const scale = Math.min(1, (rMag - deadzone) / (1 - deadzone));
-          filterRX = (rx / rMag) * scale;
-          filterRY = (ry / rMag) * scale;
-        }
-
-        if (
-          Math.abs(filterLX - lastStateRef.current.lx) > 0.01 ||
-          Math.abs(filterLY - lastStateRef.current.ly) > 0.01
-        ) {
-          setStickLeft({ x: filterLX, y: filterLY });
-          lastStateRef.current.lx = filterLX;
-          lastStateRef.current.ly = filterLY;
-        }
-
-        if (
-          Math.abs(filterRX - lastStateRef.current.rx) > 0.01 ||
-          Math.abs(filterRY - lastStateRef.current.ry) > 0.01
-        ) {
-          setStickRight({ x: filterRX, y: filterRY });
-          lastStateRef.current.rx = filterRX;
-          lastStateRef.current.ry = filterRY;
-        }
-      }
-
-      animationFrameId = requestAnimationFrame(pollGamepads);
-    };
-
-    const handleConnect = (e: GamepadEvent) => {
-      onLogMessage(`[HARDWARE] Physical gamepad connected: ${e.gamepad.id} (index: ${e.gamepad.index})`);
-    };
-
-    const handleDisconnect = (e: GamepadEvent) => {
-      onLogMessage(`[HARDWARE] Physical gamepad disconnected: ${e.gamepad.id}`);
-    };
+    // Real button names emitted by GamepadPlugin (Android API path) and
+    // GamepadListenerService (Shizuku getevent path). ERROR_* events are NOT
+    // real button presses and must NOT trigger the "connected" state.
+    const REAL_BUTTON_NAMES = new Set([
+      'A', 'B', 'X', 'Y',
+      'LB', 'RB', 'LT', 'RT',
+      'L3', 'R3',
+      'START', 'SELECT', 'HOME',
+      'DPAD_UP', 'DPAD_DOWN', 'DPAD_LEFT', 'DPAD_RIGHT'
+    ]);
 
     const handleNativeBtn = (e: Event) => {
       const data = (e as CustomEvent).detail;
+      const btnName: string = data.buttonName || '';
+
+      // Ignore ERROR_* events — they are status notifications, not button presses.
+      if (btnName.startsWith('ERROR_')) {
+        onLogMessage(`[SHIZUKU] ${btnName}`);
+        return;
+      }
+
+      // Only process real button names.
+      if (!REAL_BUTTON_NAMES.has(btnName)) return;
+
+      // Mark native gamepad as active — a real button event arrived.
+      if (!nativeGamepadActive) {
+        setNativeGamepadActive(true);
+      }
+
       setPressedButtons(prev => {
-         const next = { ...prev };
-         // BUG FIX: Map ALL button names that GamepadPlugin emits
-         // GamepadPlugin emits: A, B, X, Y, LB, RB, LT, RT, L3, R3, START, SELECT, HOME, DPAD_*
-         const kMap: Record<string, string> = {
-            'A': 'a', 'B': 'b', 'X': 'x', 'Y': 'y',
-            'LB': 'l_shoulder', 'RB': 'r_shoulder',
-            'LT': 'lt_trigger', 'RT': 'rt_trigger',
-            'L3': 'l3', 'R3': 'r3',
-            'START': 'start', 'SELECT': 'select', 'HOME': 'home',
-            'DPAD_UP': 'd_up', 'DPAD_DOWN': 'd_down',
-            'DPAD_LEFT': 'd_left', 'DPAD_RIGHT': 'd_right'
-         };
-         const mapped = kMap[data.buttonName];
-         if (mapped) {
-            if (data.value === 1) next[mapped] = true;
-            else delete next[mapped];
-         }
-         return next;
+        const next = { ...prev };
+        const kMap: Record<string, string> = {
+           'A': 'a', 'B': 'b', 'X': 'x', 'Y': 'y',
+           'LB': 'l_shoulder', 'RB': 'r_shoulder',
+           'LT': 'lt_trigger', 'RT': 'rt_trigger',
+           'L3': 'l3', 'R3': 'r3',
+           'START': 'start', 'SELECT': 'select', 'HOME': 'home',
+           'DPAD_UP': 'd_up', 'DPAD_DOWN': 'd_down',
+           'DPAD_LEFT': 'd_left', 'DPAD_RIGHT': 'd_right'
+        };
+        const mapped = kMap[btnName];
+        if (mapped) {
+           if (data.value === 1) next[mapped] = true;
+           else delete next[mapped];
+        }
+        return next;
       });
-      // Fallback connected status purely visual
-      if (!connectedGamepad) {
-        setConnectedGamepad({ id: 'Shizuku Emulated Native Gamepad', buttons: [], axes: [], mapping: 'standard' } as any);
+
+      // Throttle button logs to 1 per 200ms (avoid flooding when holding button)
+      const now = Date.now();
+      if (now - lastBtnLogRef.current > 200) {
+        lastBtnLogRef.current = now;
+        onLogMessage(`[GAMEPAD] ${btnName} ${data.value === 1 ? '▼ DOWN' : '▲ UP'}`);
       }
     };
 
     const handleNativeAxis = (e: Event) => {
         const data = (e as CustomEvent).detail;
+        if (!data.axes || data.axes.length < 4) return;
+        if (!nativeGamepadActive) {
+          setNativeGamepadActive(true);
+        }
         setStickLeft({ x: data.axes[0], y: data.axes[1] });
         setStickRight({ x: data.axes[2], y: data.axes[3] });
-        setTriggers({ lt: data.axes[4], rt: data.axes[5] });
+        if (data.axes.length >= 6) {
+          setTriggers({ lt: data.axes[4], rt: data.axes[5] });
+        }
     };
 
-    window.addEventListener("gamepadconnected", handleConnect);
-    window.addEventListener("gamepaddisconnected", handleDisconnect);
     window.addEventListener('native-gamepad-button', handleNativeBtn);
     window.addEventListener('native-gamepad-axis', handleNativeAxis);
 
-    animationFrameId = requestAnimationFrame(pollGamepads);
-
     return () => {
-      cancelAnimationFrame(animationFrameId);
-      window.removeEventListener("gamepadconnected", handleConnect);
-      window.removeEventListener("gamepaddisconnected", handleDisconnect);
       window.removeEventListener('native-gamepad-button', handleNativeBtn);
       window.removeEventListener('native-gamepad-axis', handleNativeAxis);
     };
-  }, [onLogMessage, connectedGamepad]);
+  }, [onLogMessage, nativeGamepadActive]);
 
   // On-screen simulator handlers (for users without physical gamepad to test UI)
   const setSimButtonState = (key: string, state: boolean) => {
@@ -264,28 +140,28 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
             </div>
           </div>
 
-          {/* Physical Gamepad Detection Status Banner */}
+          {/* Native Gamepad Event Status Banner */}
           <div className={`p-3 rounded-lg border transition-all duration-300 ${
-            connectedGamepad
+            nativeGamepadActive
               ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-300 shadow-md shadow-emerald-500/5'
               : 'bg-slate-950/80 border-slate-850 text-slate-400'
           }`}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="relative flex h-2 w-2">
-                  <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${connectedGamepad ? 'bg-emerald-400' : 'bg-slate-650'}`}></span>
-                  <span className={`relative inline-flex rounded-full h-2 w-2 ${connectedGamepad ? 'bg-emerald-500' : 'bg-slate-500'}`}></span>
+                  <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${nativeGamepadActive ? 'bg-emerald-400' : 'bg-slate-650'}`}></span>
+                  <span className={`relative inline-flex rounded-full h-2 w-2 ${nativeGamepadActive ? 'bg-emerald-500' : 'bg-slate-500'}`}></span>
                 </span>
                 <span className="text-[11px] font-medium font-sans">
-                  {connectedGamepad
-                    ? `Gamepad Terdeteksi: ${connectedGamepad.id}`
-                    : 'Tidak ada Gamepad Fisik terdeteksi (Gunakan tombol simulator di bawah atau pasang gamepad Bluetooth/OTG)'
+                  {nativeGamepadActive
+                    ? 'Gamepad aktif — event diterima dari native path'
+                    : 'Menunggu event gamepad... (nyalakan gamepad Bluetooth/OTG dan tekan tombol)'
                   }
                 </span>
               </div>
-              {connectedGamepad && (
+              {nativeGamepadActive && (
                 <span className="text-[9px] font-mono bg-emerald-900/30 px-2 py-0.5 rounded border border-emerald-800 text-emerald-450 animate-pulse">
-                  KONEKSI AKTIF (Index: {connectedGamepad.index})
+                  EVENT ACTIVE
                 </span>
               )}
             </div>
@@ -505,9 +381,9 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
             </div>
 
             {/* Fallback Simulator Guide */}
-            {!connectedGamepad && (
+            {!nativeGamepadActive && (
               <div className="mt-4 text-[9px] text-center text-slate-500 uppercase tracking-widest font-mono">
-                 <span className="border border-slate-800 bg-slate-900 rounded px-2 py-1">Mode Visualisasi Terpasang. Hubungkan Gamepad USB/Bluetooth untuk sinkronisasi gerakan.</span>
+                 <span className="border border-slate-800 bg-slate-900 rounded px-2 py-1">Mode Simulasi. Hubungkan Gamepad USB/Bluetooth untuk input nyata.</span>
               </div>
             )}
           </div>

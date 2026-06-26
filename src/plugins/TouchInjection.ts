@@ -21,6 +21,7 @@ export interface TouchInjectionPluginType {
   touchMove(options: { pointerId: number; x: number; y: number }): Promise<void>;
   touchUp(options: { pointerId: number }): Promise<void>;
   injectTap(options: { x: number; y: number; duration?: number }): Promise<void>;
+  testInjection(options: { x?: number; y?: number }): Promise<Record<string, any>>;
 
   addListener(
     eventName: 'onGamepadButton', 

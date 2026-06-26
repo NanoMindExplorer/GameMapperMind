@@ -91,7 +91,7 @@ export default function ShizukuPanel({ shizukuState, setShizukuState, onLogMessa
   const sendCustomCommand = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!customLog.trim()) return;
-    
+
     // BUG-FIX: Diagnostics command — run full injection chain check
     if (customLog.trim() === 'diag' || customLog.trim() === 'diagnostics') {
       onLogMessage('[DIAG] Running full diagnostics...');
@@ -106,9 +106,27 @@ export default function ShizukuPanel({ shizukuState, setShizukuState, onLogMessa
       setCustomLog('');
       return;
     }
-    
+
+    // BUG-FIX: testinjection command — test injection at (500, 500) and report
+    if (customLog.trim() === 'testinjection' || customLog.trim() === 'testinject') {
+      onLogMessage('[TEST] Running injection test at (500, 500)...');
+      try {
+        const result = await TouchInjection.testInjection({ x: 500, y: 500 });
+        onLogMessage(`[TEST] InputManager null: ${result.inputManager_null}`);
+        onLogMessage(`[TEST] injectMethod null: ${result.injectMethod_null}`);
+        onLogMessage(`[TEST] touchDown result: ${result.touchDown_result}`);
+        onLogMessage(`[TEST] shellInputTap result: ${result.shellInputTap_result}`);
+        onLogMessage(`[TEST] useShellFallback: ${result.useShellFallback}`);
+        onLogMessage(`[TEST] Recommendation: ${result.recommendation || 'none'}`);
+      } catch (err: any) {
+        onLogMessage(`[TEST ERROR] ${err.message || err}`);
+      }
+      setCustomLog('');
+      return;
+    }
+
     onLogMessage(`[sh] $ ${customLog}`);
-    
+
     // Execute real command if native
     const res = await executeShizukuCommand(customLog);
     if (res) {
@@ -131,6 +149,31 @@ export default function ShizukuPanel({ shizukuState, setShizukuState, onLogMessa
     }
 
     setCustomLog('');
+  };
+
+  // BUG-INJECT-FALLBACK: Test injection button — user taps this to verify
+  // touch injection works WITHOUT needing the gamepad. Sends a tap to (500, 500)
+  // and reports whether InputManager.injectInputEvent or shell fallback succeeded.
+  const [testInjectionLoading, setTestInjectionLoading] = React.useState(false);
+  const handleTestInjection = async () => {
+    setTestInjectionLoading(true);
+    onLogMessage('[TEST] Testing injection at screen center (500, 500)...');
+    onLogMessage('[TEST] Watch your screen — a touch should appear at center.');
+    try {
+      const result = await TouchInjection.testInjection({ x: 500, y: 500 });
+      onLogMessage(`[TEST] InputManager: ${result.inputManager_null ? 'NULL (blocked)' : 'OK'}`);
+      onLogMessage(`[TEST] injectMethod: ${result.injectMethod_null ? 'NULL (not found)' : 'OK'}`);
+      onLogMessage(`[TEST] touchDown: ${result.touchDown_result ? 'SUCCESS' : 'FAILED'}`);
+      onLogMessage(`[TEST] shellInputTap: ${result.shellInputTap_result ? 'SUCCESS' : 'FAILED'}`);
+      if (result.recommendation) {
+        onLogMessage(`[TEST] → ${result.recommendation}`);
+      }
+    } catch (err: any) {
+      onLogMessage(`[TEST ERROR] ${err.message || err}`);
+      onLogMessage('[TEST] Make sure daemon is started first (tap "Start Daemon" above).');
+    } finally {
+      setTestInjectionLoading(false);
+    }
   };
 
   return (
@@ -337,6 +380,39 @@ export default function ShizukuPanel({ shizukuState, setShizukuState, onLogMessa
               </div>
             </div>
           )}
+
+          {/* BUG-INJECT-FALLBACK: Test Injection button */}
+          <div className="p-4 bg-indigo-950/30 border border-indigo-800/50 rounded-lg space-y-3">
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-indigo-400" />
+              <h4 className="text-xs font-bold text-indigo-300">Injection Verification</h4>
+            </div>
+            <p className="text-[11px] text-slate-300 leading-relaxed">
+              Tap button below to test touch injection at screen center (500, 500) WITHOUT needing gamepad.
+              A touch should appear on your screen. The log shows whether InputManager or shell fallback
+              was used, and gives a recommendation if something is broken.
+            </p>
+            <button
+              onClick={handleTestInjection}
+              disabled={testInjectionLoading || shizukuState.status !== 'CONNECTED_SHIZUKU'}
+              className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-500 text-white text-xs font-bold rounded flex items-center justify-center gap-2 transition-colors"
+            >
+              {testInjectionLoading ? (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  Testing...
+                </>
+              ) : (
+                <>
+                  <Zap className="w-3.5 h-3.5" />
+                  Test Injection (tap center of screen)
+                </>
+              )}
+            </button>
+            {shizukuState.status !== 'CONNECTED_SHIZUKU' && (
+              <p className="text-[10px] text-amber-400">Start daemon first to enable test.</p>
+            )}
+          </div>
 
           {/* Quick Troubleshooting Guide */}
           <div className="p-4 bg-amber-950/20 border border-amber-900/40 rounded-lg flex gap-3">

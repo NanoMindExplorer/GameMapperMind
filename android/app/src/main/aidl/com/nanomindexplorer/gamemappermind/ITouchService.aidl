@@ -13,5 +13,6 @@ interface ITouchService {
     void executeStreamCommand(String command, ICommandOutputListener listener) = 8;
     void stopStreamCommand() = 9;
     void updateConfig(String json) = 10;
+    String testInjection(float x, float y) = 11;
     void destroy() = 16777114;
 }

@@ -534,7 +534,6 @@ class NativeGamepadMapper(private val context: Context) {
             }
 
             if (mapping == null || !mapping.has("x") || !mapping.has("y")) {
-                val wasDown = lastState[buttonName + gamepadIndex] ?: false
                 // Complete pending touchUp if it was mapped previously
                 if (!isDown && wasDown) {
                     // BUG-F5 FIX: O(1) lookup via pointersById
@@ -548,11 +547,10 @@ class NativeGamepadMapper(private val context: Context) {
                 lastState[buttonName + gamepadIndex] = isDown
                 return
             }
-            
+
             val antiBanEnabled = mapping.optBoolean("antiBanEnabled", false)
             val type = mapping.optString("type", "button")
-            
-            val wasDown = lastState[buttonName + gamepadIndex] ?: false
+
             if (isDown && !wasDown) {
                 val tapDuration = mapping.optLong("tapDuration", 0L)
                 var (x, y) = getScreenCoords(mapping.getDouble("x"), mapping.getDouble("y"))

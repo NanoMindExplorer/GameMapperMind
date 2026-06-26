@@ -294,12 +294,13 @@ class GamepadListenerService : Service() {
                                                 finalVal = if (half > 0f) ((rawVal - min).toFloat() / span).coerceIn(0f, 1f) else 0f
                                             } else {
                                                 // Analog sticks: map [min, max] → [-1, 1]
-                                                var normalizedVal = if (half > 0f) ((rawVal - mid) / half) else 0f
-                                                // Apply deadzone (radial-style for single axis).
-                                                if (Math.abs(normalizedVal) < 0.15f) {
-                                                    normalizedVal = 0f
-                                                }
-                                                finalVal = normalizedVal.coerceIn(-1f, 1f)
+                                                // BUG-EVDEV-DZ FIX: Do NOT apply per-axis deadzone here.
+                                                // Per-axis deadzone creates a cross-shaped dead zone, which
+                                                // distorts diagonal direction (e.g. (0.1, 0.17) becomes (0, 0.17)).
+                                                // Radial deadzone is applied correctly in NativeGamepadMapper.processStick
+                                                // using sqrt(lx² + ly²), which forms a circular dead zone and preserves
+                                                // direction. Also, hardcoding 0.15 here ignored the user's profile deadzone.
+                                                finalVal = if (half > 0f) ((rawVal - mid) / half).coerceIn(-1f, 1f) else 0f
                                             }
 
                                             when (axisType) {

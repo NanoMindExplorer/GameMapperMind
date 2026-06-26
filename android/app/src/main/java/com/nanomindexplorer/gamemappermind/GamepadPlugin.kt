@@ -25,7 +25,17 @@ class GamepadPlugin : Plugin() {
             emitButtonEvent(keyCode, "PRESSED", event)
             val buttonName = mapKeyCodeToButtonName(keyCode)
             if (buttonName != "UNKNOWN") {
-                TouchInjectionPlugin.emitGamepadButton(buttonName, 1, 1.0f)
+                // BUG-DUAL-JS FIX: When Shizuku getevent path is active, it ALSO emits JS events
+                // for the same button (it sees raw kernel events). Without this guard, the UI
+                // receives two emitGamepadButton events per press → indicator flickers twice,
+                // input log grows 2x. Injection itself is NOT doubled (NativeGamepadMapper.lastState
+                // dedupes), but JS event spam is real.
+                // Strategy: if Shizuku getevent service is running, let it be the JS source;
+                // we still call handleButtonBatched as a SAFETY NET (in case getevent stream is
+                // broken but Shizuku binder is up — lastState dedup prevents double injection).
+                if (!GamepadListenerService.isRunning) {
+                    TouchInjectionPlugin.emitGamepadButton(buttonName, 1, 1.0f)
+                }
                 // BUG-FIX: Also call NativeGamepadMapper for injection (not just JS event).
                 // Previously, GamepadPlugin ONLY emitted JS events (UI feedback) but did NOT
                 // trigger touch injection. Injection only happened via Shizuku getevent path.
@@ -44,7 +54,10 @@ class GamepadPlugin : Plugin() {
             emitButtonEvent(keyCode, "RELEASED", event)
             val buttonName = mapKeyCodeToButtonName(keyCode)
             if (buttonName != "UNKNOWN") {
-                TouchInjectionPlugin.emitGamepadButton(buttonName, 0, 0.0f)
+                // BUG-DUAL-JS FIX: see handleKeyDown — skip JS emit when Shizuku path is live.
+                if (!GamepadListenerService.isRunning) {
+                    TouchInjectionPlugin.emitGamepadButton(buttonName, 0, 0.0f)
+                }
                 // BUG-FIX: Also call NativeGamepadMapper for injection (release).
                 GamepadJniPlugin.handleButtonBatched(0, buttonName, false)
             }
@@ -63,16 +76,36 @@ class GamepadPlugin : Plugin() {
             // Gamepad standar PS4/PS5 pakai AXIS_RX/AXIS_RY. Cek mana yang ada.
             var axisRX = event.getAxisValue(MotionEvent.AXIS_RX)
             var axisRY = event.getAxisValue(MotionEvent.AXIS_RY)
-            // Jika AXIS_RX/AXIS_RY bernilai 0, coba AXIS_Z/AXIS_RZ (Xbox fallback)
-            if (Math.abs(axisRX) < 0.01f && Math.abs(axisRY) < 0.01f) {
-                axisRX = event.getAxisValue(MotionEvent.AXIS_Z)
-                axisRY = event.getAxisValue(MotionEvent.AXIS_RZ)
+            // BUG-RIGHTAXIS FIX: Only fall back to AXIS_Z/AXIS_RZ if this device has EVER reported
+            // a non-zero value on AXIS_RX/AXIS_RY. Previously, falling back when stick was momentarily
+            // at (0, 0) caused flicker on right-stick release. Now: latch `hasReportedRXRY` per
+            // device id — once we've seen RX/RY signal, we trust RX/RY as the right-stick source.
+            val deviceId = event.deviceId
+            if (!hasReportedRXRY.contains(deviceId)) {
+                if (Math.abs(axisRX) > 0.05f || Math.abs(axisRY) > 0.05f) {
+                    hasReportedRXRY.add(deviceId)
+                } else {
+                    // Device has never reported RX/RY signal — assume it's an Xbox-style controller
+                    // that uses AXIS_Z/AXIS_RZ for right stick.
+                    axisRX = event.getAxisValue(MotionEvent.AXIS_Z)
+                    axisRY = event.getAxisValue(MotionEvent.AXIS_RZ)
+                }
             }
             val hatX = event.getAxisValue(MotionEvent.AXIS_HAT_X)
             val hatY = event.getAxisValue(MotionEvent.AXIS_HAT_Y)
-            
-            val l2Trigger = event.getAxisValue(MotionEvent.AXIS_BRAKE)
-            val r2Trigger = event.getAxisValue(MotionEvent.AXIS_GAS)
+
+            // BUG-TRIGGER FIX: Read ALL possible trigger axis candidates and pick the max.
+            // Different controllers report triggers via different axes:
+            //   - AXIS_BRAKE/GAS (22/23) — most generic, Xbox Bluetooth, PS4/PS5
+            //   - AXIS_LTRIGGER/RTRIGGER (17/18) — Xbox USB, some clones
+            // Some controllers emit BOTH (one as 0, the other as actual value). Take max
+            // to be robust against whichever axis is active.
+            val l2Brake = event.getAxisValue(MotionEvent.AXIS_BRAKE)
+            val r2Gas = event.getAxisValue(MotionEvent.AXIS_GAS)
+            val l2Trig = event.getAxisValue(MotionEvent.AXIS_LTRIGGER)
+            val r2Trig = event.getAxisValue(MotionEvent.AXIS_RTRIGGER)
+            val l2Trigger = if (Math.abs(l2Brake) >= Math.abs(l2Trig)) l2Brake else l2Trig
+            val r2Trigger = if (Math.abs(r2Gas) >= Math.abs(r2Trig)) r2Gas else r2Trig
 
             // BUG-D1 FIX: Only emit if values changed significantly (avoid 60Hz flood when stick is idle).
             val EPSILON = 0.01f
@@ -100,9 +133,15 @@ class GamepadPlugin : Plugin() {
             notifyListeners("gamepadEvent", ret)
 
             // BUG-SYNC3 FIX: Emit [LX, LY, RX, RY, L2, R2] — consistent with Shizuku path.
+            // BUG-DUAL-JS FIX: When Shizuku getevent path is active, it ALSO emits axis events.
+            // Skip our JS emit to avoid UI spam (axis indicator flickering, log doubling).
+            // NativeGamepadMapper.handleAxes is idempotent via pointer state tracking, so
+            // calling handleAxisBatched as a safety net is safe (no double injection).
             val axes = floatArrayOf(axisX, axisY, axisRX, axisRY, l2Trigger, r2Trigger)
-            TouchInjectionPlugin.emitGamepadAxis(axes)
-            
+            if (!GamepadListenerService.isRunning) {
+                TouchInjectionPlugin.emitGamepadAxis(axes)
+            }
+
             // BUG-FIX: Also call NativeGamepadMapper for analog stick injection.
             // Previously, GamepadPlugin ONLY emitted JS events but did NOT trigger
             // touch injection for analog sticks. Injection only happened via Shizuku.
@@ -141,6 +180,11 @@ class GamepadPlugin : Plugin() {
     
     // BUG-D1 FIX: Cache last axis values to detect significant change.
     private var lastAxis = FloatArray(8)
+
+    // BUG-RIGHTAXIS FIX: Track which device IDs have reported non-zero AXIS_RX/RY signal.
+    // Once a device has reported RX/RY, we trust it as the right-stick source for that device
+    // and never fall back to AXIS_Z/AXIS_RZ (prevents flicker on right-stick release).
+    private val hasReportedRXRY: MutableSet<Int> = mutableSetOf()
 
     private fun isGamepadButton(keyCode: Int): Boolean {
         return KeyEvent.isGamepadButton(keyCode) ||

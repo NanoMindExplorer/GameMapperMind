@@ -293,6 +293,95 @@ class NativeGamepadMapper(private val context: Context) {
         }
     }
 
+    /**
+     * Apply proper radial-stick signal processing pipeline.
+     *
+     * BUG-ANALOG-1/2/3 FIX: Previously this function applied curve PER-AXIS, then computed
+     * magnitude from curved values, then tested deadzone on the curved magnitude. This was
+     * mathematically wrong on three counts:
+     *
+     *   1. Deadzone tested on POST-curve magnitude → concave curve (√x) could push small
+     *      sub-deadzone inputs above the threshold, leaking noise.
+     *   2. No rescaling after deadzone → stick just barely past deadzone jumped to ~15% of
+     *      maxRadius instead of starting near 0.
+     *   3. Per-axis curve distorted direction → atan2(cLy, cLx) ≠ atan2(ly, lx), so diagonal
+     *      inputs bent toward the dominant axis.
+     *
+     * Correct pipeline (standard in input engineering):
+     *
+     *   raw → smooth → radial_deadzone(rawMag) → rescale[deadzone,1]→[0,1] →
+     *        curve(rescaledMag) → unit_vector * curvedMag * maxRadius
+     *
+     * The curve is applied to the SCALAR magnitude only, preserving the original direction.
+     */
+    private fun processStick(
+        rawX: Float,
+        rawY: Float,
+        mapping: JSONObject?,
+        smoothBuffer: FloatArray,
+        smoothOffset: Int,
+        alpha: Float,
+        pointer: PointerState,
+        defaultRadius: Float
+    ) {
+        // 1. Smoothing (exponential moving average)
+        smoothBuffer[smoothOffset]     = alpha * rawX + (1 - alpha) * smoothBuffer[smoothOffset]
+        smoothBuffer[smoothOffset + 1] = alpha * rawY + (1 - alpha) * smoothBuffer[smoothOffset + 1]
+        val sx = smoothBuffer[smoothOffset]
+        val sy = smoothBuffer[smoothOffset + 1]
+
+        // 2. Radial deadzone on RAW (pre-curve) magnitude
+        val rawMag = sqrt(sx * sx + sy * sy)
+        val deadzone = mapping?.optDouble("deadzone", 0.15)?.toFloat() ?: 0.15f
+        val maxRadius = mapping?.optDouble("radius", defaultRadius.toDouble())?.toFloat() ?: defaultRadius
+
+        if (mapping == null || !mapping.has("x") || !mapping.has("y")) {
+            if (pointer.isActive) {
+                pointer.isActive = false
+                try { TouchInjectionPlugin.touchService?.touchUp(pointer.id) } catch(e: Exception) {}
+            }
+            return
+        }
+
+        val (cX, cY) = getScreenCoords(mapping.getDouble("x"), mapping.getDouble("y"))
+
+        if (rawMag <= deadzone) {
+            // Inside deadzone — release pointer if active
+            if (pointer.isActive) {
+                pointer.isActive = false
+                try { TouchInjectionPlugin.touchService?.touchUp(pointer.id) } catch(e: Exception) {}
+            }
+            return
+        }
+
+        // 3. Rescale magnitude from [deadzone, 1] → [0, 1]
+        val rescaledMag = ((rawMag - deadzone) / (1f - deadzone)).coerceIn(0f, 1f)
+
+        // 4. Apply sensitivity curve to magnitude only (direction preserved)
+        val curve = mapping.optString("sensitivityCurve", "linear")
+        val curvePoints = mapping.optJSONArray("curvePoints")
+        val curvedMag = applyCurve(rescaledMag, curve, curvePoints)
+
+        // 5. Reconstruct output vector: unit_vector(rawX, rawY) * curvedMag * maxRadius
+        val invMag = if (rawMag > 1e-6f) 1f / rawMag else 0f
+        val outX = (sx * invMag) * curvedMag * maxRadius
+        val outY = (sy * invMag) * curvedMag * maxRadius
+        val tX = cX + outX
+        val tY = cY + outY
+
+        // 6. Inject
+        if (!pointer.isActive) {
+            pointer.isActive = true
+            try { TouchInjectionPlugin.touchService?.touchDown(pointer.id, cX, cY) } catch(e: Exception) { pointer.isActive = false }
+        }
+        if (pointer.isActive) {
+            try { TouchInjectionPlugin.touchService?.touchMove(pointer.id, tX, tY) } catch(e: Exception) {
+                pointer.isActive = false
+                try { TouchInjectionPlugin.touchService?.touchUp(pointer.id) } catch(_: Exception) {}
+            }
+        }
+    }
+
     fun handleAxes(gamepadIndex: Int, lx: Float, ly: Float, rx: Float, ry: Float, l2: Float, r2: Float) {
         synchronized(syncLock) {
             if (gamepadIndex !in 0..3) return
@@ -309,90 +398,36 @@ class NativeGamepadMapper(private val context: Context) {
             val rMap = findButtonMapping("R_STICK")
 
             // BUG-M8 FIX: Use independent smoothing factors for L and R sticks.
-            // Previously, lMap's smoothing was applied to BOTH sticks, ignoring rMap's smoothing.
             val lSmoothing = lMap?.optDouble("smoothing", 0.0)?.toFloat() ?: 0f
             val rSmoothing = rMap?.optDouble("smoothing", 0.0)?.toFloat() ?: 0f
             val lAlpha = 1f - lSmoothing.coerceIn(0f, 0.95f)
             val rAlpha = 1f - rSmoothing.coerceIn(0f, 0.95f)
 
-            smoothedAxes[gamepadIndex][0] = lAlpha * lx + (1 - lAlpha) * smoothedAxes[gamepadIndex][0]
-            smoothedAxes[gamepadIndex][1] = lAlpha * ly + (1 - lAlpha) * smoothedAxes[gamepadIndex][1]
-            smoothedAxes[gamepadIndex][2] = rAlpha * rx + (1 - rAlpha) * smoothedAxes[gamepadIndex][2]
-            smoothedAxes[gamepadIndex][3] = rAlpha * ry + (1 - rAlpha) * smoothedAxes[gamepadIndex][3]
-
-            val sLxRaw = smoothedAxes[gamepadIndex][0]
-            val sLyRaw = smoothedAxes[gamepadIndex][1]
-            val sRxRaw = smoothedAxes[gamepadIndex][2]
-            val sRyRaw = smoothedAxes[gamepadIndex][3]
-
-            val lCurve = lMap?.optString("sensitivityCurve", "linear")
-            val lPoints = lMap?.optJSONArray("curvePoints")
-            
-            val rCurve = rMap?.optString("sensitivityCurve", "linear")
-            val rPoints = rMap?.optJSONArray("curvePoints")
-
-            val cLx = applyCurve(sLxRaw, lCurve, lPoints)
-            val cLy = applyCurve(sLyRaw, lCurve, lPoints)
-            val cRx = applyCurve(sRxRaw, rCurve, rPoints)
-            val cRy = applyCurve(sRyRaw, rCurve, rPoints)
-            
-            val sLx = cLx
-            val sLy = cLy
-            val sRx = cRx
-            val sRy = cRy
-        
-            val lMag = sqrt(sLx*sLx + sLy*sLy)
             val lp = pointersById[offset + 0] ?: pointers[0]
-            if (lMap != null && lMap.has("x") && lMap.has("y")) {
-                val deadzone = lMap.optDouble("deadzone", 0.15).toFloat()
-                val maxRadius = lMap.optDouble("radius", 100.0).toFloat()
-                
-                val (cX, cY) = getScreenCoords(lMap.getDouble("x"), lMap.getDouble("y"))
-                if (lMag > deadzone) {
-                    val tX = cX + (sLx * maxRadius)
-                    val tY = cY + (sLy * maxRadius)
-                    if (!lp.isActive) {
-                        lp.isActive = true
-                        try { TouchInjectionPlugin.touchService?.touchDown(lp.id, cX, cY) } catch(e: Exception) { lp.isActive = false }
-                    }
-                    if (lp.isActive) {
-                        try { TouchInjectionPlugin.touchService?.touchMove(lp.id, tX, tY) } catch(e: Exception) { lp.isActive = false; try { TouchInjectionPlugin.touchService?.touchUp(lp.id) } catch(_: Exception) {} }
-                    }
-                } else if (lp.isActive) {
-                    lp.isActive = false
-                    try { TouchInjectionPlugin.touchService?.touchUp(lp.id) } catch(e: Exception) {}
-                }
-            } else if (lp.isActive) {
-                lp.isActive = false
-                try { TouchInjectionPlugin.touchService?.touchUp(lp.id) } catch(e: Exception) {}
-            }
-            
-            val rMag = sqrt(sRx*sRx + sRy*sRy)
             val rp = pointersById[offset + 1] ?: pointers[1]
-            if (rMap != null && rMap.has("x") && rMap.has("y")) {
-                val deadzone = rMap.optDouble("deadzone", 0.15).toFloat()
-                val maxRadius = rMap.optDouble("radius", 150.0).toFloat()
-                
-                val (cX, cY) = getScreenCoords(rMap.getDouble("x"), rMap.getDouble("y"))
-                if (rMag > deadzone) {
-                    val tX = cX + (sRx * maxRadius)
-                    val tY = cY + (sRy * maxRadius)
-                    if (!rp.isActive) {
-                        rp.isActive = true
-                        try { TouchInjectionPlugin.touchService?.touchDown(rp.id, cX, cY) } catch(e: Exception) { rp.isActive = false }
-                    }
-                    if (rp.isActive) {
-                        try { TouchInjectionPlugin.touchService?.touchMove(rp.id, tX, tY) } catch(e: Exception) { rp.isActive = false; try { TouchInjectionPlugin.touchService?.touchUp(rp.id) } catch(_: Exception) {} }
-                    }
-                } else if (rp.isActive) {
-                    rp.isActive = false
-                    try { TouchInjectionPlugin.touchService?.touchUp(rp.id) } catch(e: Exception) {}
-                }
-            } else if (rp.isActive) {
-                rp.isActive = false
-                try { TouchInjectionPlugin.touchService?.touchUp(rp.id) } catch(e: Exception) {}
-            }
-            
+
+            // L-stick: smoothing buffer indices [0,1] of smoothedAxes[gamepadIndex]
+            processStick(
+                rawX = lx, rawY = ly,
+                mapping = lMap,
+                smoothBuffer = smoothedAxes[gamepadIndex],
+                smoothOffset = 0,
+                alpha = lAlpha,
+                pointer = lp,
+                defaultRadius = 100f
+            )
+
+            // R-stick: smoothing buffer indices [2,3] of smoothedAxes[gamepadIndex]
+            processStick(
+                rawX = rx, rawY = ry,
+                mapping = rMap,
+                smoothBuffer = smoothedAxes[gamepadIndex],
+                smoothOffset = 2,
+                alpha = rAlpha,
+                pointer = rp,
+                defaultRadius = 150f
+            )
+
             // BUG-F3 FIX: Debounce trigger LT/RT — only set false if analog value stays below threshold
             // for at least 50ms (avoids flicker during transition between digital BTN_TL2 and analog ABS_Z).
             if (l2 > 0.05f) {
@@ -400,7 +435,7 @@ class NativeGamepadMapper(private val context: Context) {
             } else if (l2 < 0.03f) {  // Lower threshold for release (hysteresis)
                 handleButton(gamepadIndex, "LT", false)
             }
-            
+
             if (r2 > 0.05f) {
                 handleButton(gamepadIndex, "RT", true)
             } else if (r2 < 0.03f) {

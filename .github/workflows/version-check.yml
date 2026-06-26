@@ -7,15 +7,41 @@ jobs:
   check-version:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Check versionCode increment
         run: |
-          CURRENT=$(grep "versionCode" android/app/build.gradle | head -1 | awk '{print $2}')
-          PREV=$(git show origin/main:android/app/build.gradle 2>/dev/null | grep "versionCode" | head -1 | awk '{print $2}' || echo "0")
-          if [ "$CURRENT" -le "$PREV" ]; then
-            echo "FAIL: versionCode must increment"
-            exit 1
+          # BUG-CI-VER FIX: versionCode is now computed dynamically via
+          #   Integer.parseInt(System.getenv("GITHUB_RUN_NUMBER") ?: "1")
+          # so static `grep versionCode | awk '{print $2}'` returns the literal
+          # Groovy expression, not an integer — `[ "$CURRENT" -le "$PREV" ]` then
+          # errors with "integer expression expected" and the check fails on every PR.
+          #
+          # Strategy:
+          #   1. Extract the versionCode line.
+          #   2. If it's a literal integer — compare directly.
+          #   3. If it's dynamic (uses System.getenv / Integer.parseInt) — skip the
+          #      strict numeric check (CI will run a unique GITHUB_RUN_NUMBER per build).
+          set -e
+          CURRENT_LINE=$(grep "versionCode" android/app/build.gradle | head -1)
+          PREV_LINE=$(git show origin/main:android/app/build.gradle 2>/dev/null | grep "versionCode" | head -1 || echo "")
+
+          is_integer() {
+            [[ "$1" =~ ^[0-9]+$ ]]
+          }
+
+          CURRENT_VAL=$(echo "$CURRENT_LINE" | sed -E 's/.*versionCode\s+([0-9]+).*/\1/' 2>/dev/null || echo "")
+          PREV_VAL=$(echo "$PREV_LINE" | sed -E 's/.*versionCode\s+([0-9]+).*/\1/' 2>/dev/null || echo "")
+
+          if is_integer "$CURRENT_VAL" && is_integer "$PREV_VAL"; then
+            if [ "$CURRENT_VAL" -le "$PREV_VAL" ]; then
+              echo "FAIL: versionCode must increment (current=$CURRENT_VAL, prev=$PREV_VAL)"
+              exit 1
+            fi
+            echo "PASS: versionCode incremented ($PREV_VAL → $CURRENT_VAL)"
+          else
+            echo "SKIP: versionCode uses dynamic expression (GITHUB_RUN_NUMBER). CI guarantees uniqueness."
+            echo "Current line: $CURRENT_LINE"
+            echo "Prev line:    $PREV_LINE"
           fi
-          echo "PASS: versionCode incremented"

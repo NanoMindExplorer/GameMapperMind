@@ -15,8 +15,10 @@ export const INITIAL_PROFILES: GamepadProfile[] = [
       { id: 'g2', label: 'Skill', type: 'button', x: 78, y: 85, width: 56, height: 56, mappedKey: 'X', androidEventCode: 99, opacity: 0.8 },
       { id: 'g3', label: 'Burst', type: 'button', x: 90, y: 65, width: 56, height: 56, mappedKey: 'Y', androidEventCode: 100, opacity: 0.8 },
       { id: 'g4', label: 'Jump', type: 'button', x: 72, y: 78, width: 56, height: 56, mappedKey: 'B', androidEventCode: 97, opacity: 0.8 },
-      { id: 'g5', label: 'Sprint', type: 'button', x: 60, y: 50, width: 56, height: 56, mappedKey: 'RT', androidEventCode: 111, opacity: 0.8 },
-      { id: 'g6', label: 'Aim', type: 'button', x: 40, y: 50, width: 56, height: 56, mappedKey: 'LT', androidEventCode: 110, opacity: 0.8 },
+      // BUG-EFOOTBALL-ECODE FIX: LT/RT use KEYCODE_BUTTON_L2=104 / KEYCODE_BUTTON_R2=105.
+      // Previous values (110=KEYCODE_BUTTON_MODE, 111=KEYCODE_ESCAPE) were wrong.
+      { id: 'g5', label: 'Sprint', type: 'button', x: 60, y: 50, width: 56, height: 56, mappedKey: 'RT', androidEventCode: 105, opacity: 0.8 },
+      { id: 'g6', label: 'Aim', type: 'button', x: 40, y: 50, width: 56, height: 56, mappedKey: 'LT', androidEventCode: 104, opacity: 0.8 },
       { id: 'g7', label: 'Menu', type: 'button', x: 50, y: 15, width: 48, height: 48, mappedKey: 'START', androidEventCode: 108, opacity: 0.7 },
       { id: 'g8', label: 'Map', type: 'button', x: 10, y: 15, width: 48, height: 48, mappedKey: 'SELECT', androidEventCode: 109, opacity: 0.7 },
       { id: 'g9', label: 'Movement', type: 'analog_stick', x: 20, y: 70, width: 120, height: 120, mappedKey: 'L_STICK', androidEventCode: 0, opacity: 0.5, deadzone: 0.15 },
@@ -33,8 +35,9 @@ export const INITIAL_PROFILES: GamepadProfile[] = [
     deadzone: 0.15,
     smoothing: 0.2,
     buttons: [
-      { id: 'p1', label: 'Fire', type: 'button', x: 85, y: 75, width: 64, height: 64, mappedKey: 'RT', androidEventCode: 111, opacity: 0.8 },
-      { id: 'p2', label: 'Aim', type: 'button', x: 20, y: 75, width: 64, height: 64, mappedKey: 'LT', androidEventCode: 110, opacity: 0.8 },
+      // BUG-EFOOTBALL-ECODE FIX: LT/RT use 104/105 (KEYCODE_BUTTON_L2/R2).
+      { id: 'p1', label: 'Fire', type: 'button', x: 85, y: 75, width: 64, height: 64, mappedKey: 'RT', androidEventCode: 105, opacity: 0.8 },
+      { id: 'p2', label: 'Aim', type: 'button', x: 20, y: 75, width: 64, height: 64, mappedKey: 'LT', androidEventCode: 104, opacity: 0.8 },
       { id: 'p3', label: 'Crouch', type: 'button', x: 75, y: 60, width: 48, height: 48, mappedKey: 'B', androidEventCode: 97, opacity: 0.7 },
       { id: 'p4', label: 'Prone', type: 'button', x: 80, y: 50, width: 48, height: 48, mappedKey: 'X', androidEventCode: 99, opacity: 0.7 },
       { id: 'p5', label: 'Jump', type: 'button', x: 70, y: 80, width: 48, height: 48, mappedKey: 'A', androidEventCode: 96, opacity: 0.7 },
@@ -77,8 +80,9 @@ export const INITIAL_PROFILES: GamepadProfile[] = [
     deadzone: 0.12,
     smoothing: 0.2,
     buttons: [
-      { id: 'c1', label: 'Fire', type: 'button', x: 85, y: 75, width: 64, height: 64, mappedKey: 'RT', androidEventCode: 111, opacity: 0.8 },
-      { id: 'c2', label: 'ADS', type: 'button', x: 20, y: 75, width: 64, height: 64, mappedKey: 'LT', androidEventCode: 110, opacity: 0.8 },
+      // BUG-EFOOTBALL-ECODE FIX: LT/RT use 104/105 (KEYCODE_BUTTON_L2/R2).
+      { id: 'c1', label: 'Fire', type: 'button', x: 85, y: 75, width: 64, height: 64, mappedKey: 'RT', androidEventCode: 105, opacity: 0.8 },
+      { id: 'c2', label: 'ADS', type: 'button', x: 20, y: 75, width: 64, height: 64, mappedKey: 'LT', androidEventCode: 104, opacity: 0.8 },
       { id: 'c3', label: 'Crouch', type: 'button', x: 75, y: 60, width: 48, height: 48, mappedKey: 'B', androidEventCode: 97, opacity: 0.7 },
       { id: 'c4', label: 'Slide', type: 'button', x: 80, y: 50, width: 48, height: 48, mappedKey: 'X', androidEventCode: 99, opacity: 0.7 },
       { id: 'c5', label: 'Jump', type: 'button', x: 70, y: 80, width: 48, height: 48, mappedKey: 'A', androidEventCode: 96, opacity: 0.7 },
@@ -99,8 +103,9 @@ export const INITIAL_PROFILES: GamepadProfile[] = [
     deadzone: 0.15,
     smoothing: 0.2,
     buttons: [
-      { id: 'f1', label: 'Fire', type: 'button', x: 85, y: 75, width: 64, height: 64, mappedKey: 'RT', androidEventCode: 111, opacity: 0.8 },
-      { id: 'f2', label: 'Aim', type: 'button', x: 20, y: 75, width: 64, height: 64, mappedKey: 'LT', androidEventCode: 110, opacity: 0.8 },
+      // BUG-EFOOTBALL-ECODE FIX: LT/RT use 104/105 (KEYCODE_BUTTON_L2/R2).
+      { id: 'f1', label: 'Fire', type: 'button', x: 85, y: 75, width: 64, height: 64, mappedKey: 'RT', androidEventCode: 105, opacity: 0.8 },
+      { id: 'f2', label: 'Aim', type: 'button', x: 20, y: 75, width: 64, height: 64, mappedKey: 'LT', androidEventCode: 104, opacity: 0.8 },
       { id: 'f3', label: 'Crouch', type: 'button', x: 75, y: 60, width: 48, height: 48, mappedKey: 'B', androidEventCode: 97, opacity: 0.7 },
       { id: 'f4', label: 'Jump', type: 'button', x: 70, y: 80, width: 48, height: 48, mappedKey: 'A', androidEventCode: 96, opacity: 0.7 },
       { id: 'f5', label: 'Grenade', type: 'button', x: 60, y: 65, width: 48, height: 48, mappedKey: 'Y', androidEventCode: 100, opacity: 0.7 },

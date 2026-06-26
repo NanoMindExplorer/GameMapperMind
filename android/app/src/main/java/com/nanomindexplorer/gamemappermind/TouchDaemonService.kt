@@ -417,13 +417,26 @@ class TouchDaemonService : ITouchService.Stub {
     // BUG-A1/M6 FIX: Use range 100-199 (100 slots) to avoid collision with gamepad pointers (0-63)
     // AND provide enough slots for concurrent taps (was 100-109, only 10 slots — risky if user
     // rapidly taps 10+ times within 60ms each).
-    private var nextTapId = 100
+    // BUG-RACE FIX: nextTapId access must be atomic. injectTap() is called from Shizuku binder
+    // thread pool — multiple binder threads can call injectTap() concurrently. Previously,
+    // nextTapId was a plain var (not @Volatile, not synchronized), so two concurrent calls
+    // could both read the same id value before either incremented, causing both taps to share
+    // the same pointer id (one tap "ghosts" the other). Now: use AtomicInteger to guarantee
+    // unique IDs across concurrent threads.
+    private val nextTapId = java.util.concurrent.atomic.AtomicInteger(100)
     @Volatile private var isInitialized = true
 
+    private fun nextTapIdAndWrap(): Int {
+        // Atomically increment and wrap around 100..199 (100 slots).
+        // getAndUpdate is atomic — concurrent callers always receive distinct IDs.
+        return nextTapId.getAndUpdate { cur ->
+            val nxt = cur + 1
+            if (nxt > 199) 100 else nxt
+        }
+    }
+
     override fun injectTap(x: Float, y: Float, duration: Long): Boolean {
-        val id = nextTapId
-        nextTapId++
-        if (nextTapId > 199) nextTapId = 100
+        val id = nextTapIdAndWrap()
         val downRes = touchDown(id, x, y)
         // BUG-A2 FIX: Wrap touchUp in try-catch; check service is still alive before calling.
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({

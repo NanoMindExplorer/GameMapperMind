@@ -34,9 +34,10 @@
 -keep class android.view.MotionEvent$PointerProperties { *; }
 -keep class android.view.MotionEvent$PointerCoords { *; }
 
-# Choreographer used in GamepadJniPlugin
--keep class android.view.Choreographer { *; }
--keep class android.view.Choreographer$FrameCallback { *; }
+# BUG-PROGUARD-DEAD FIX: Removed Choreographer keep rules — GamepadJniPlugin now uses
+# Handler(Looper.getMainLooper()) for event batching (Choreographer crashed on binder threads
+# because it requires a Looper). The Choreographer class is no longer referenced anywhere
+# in the codebase, so the rules were dead weight and misled readers.
 
 # AIDL generated classes (must be kept for Shizuku IPC)
 -keep class com.nanomindexplorer.gamemappermind.ITouchService { *; }

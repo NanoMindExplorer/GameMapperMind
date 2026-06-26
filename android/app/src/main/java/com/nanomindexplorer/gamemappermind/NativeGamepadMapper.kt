@@ -93,27 +93,14 @@ class NativeGamepadMapper(private val context: Context) {
     }
 
     private fun getScreenCoords(pctX: Double, pctY: Double): Pair<Float, Float> {
-        // BUG-M15 FIX: WindowMetrics.currentWindowMetrics is stable since API 30 (R), not API 31 (S).
-        // Use VERSION_CODES.R as the threshold for the modern API path.
-        val (sw, sh) = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-            try {
-                val windowMetrics = windowManager.currentWindowMetrics
-                val bounds = windowMetrics.bounds
-                Pair(bounds.width().toFloat(), bounds.height().toFloat())
-            } catch (e: Exception) {
-                // BUG-M9 FALLBACK: If WindowMetrics fails (e.g., on some MIUI/EMUI devices),
-                // fall back to deprecated Display API with rotation handling.
-                val dm = android.util.DisplayMetrics()
-                @Suppress("DEPRECATION")
-                windowManager.defaultDisplay.getRealMetrics(dm)
-                val rotation = windowManager.defaultDisplay.rotation
-                when (rotation) {
-                    android.view.Surface.ROTATION_90, android.view.Surface.ROTATION_270 ->
-                        Pair(dm.heightPixels.toFloat(), dm.widthPixels.toFloat())
-                    else -> Pair(dm.widthPixels.toFloat(), dm.heightPixels.toFloat())
-                }
-            }
-        } else {
+        // REBUILD: minSdk=31 (Android 12), so WindowMetrics API is always available.
+        // Use currentWindowMetrics for accurate screen dimensions (includes system bars).
+        val (sw, sh) = try {
+            val windowMetrics = windowManager.currentWindowMetrics
+            val bounds = windowMetrics.bounds
+            Pair(bounds.width().toFloat(), bounds.height().toFloat())
+        } catch (e: Exception) {
+            // Fallback: if WindowMetrics fails on some OEM ROM, use deprecated Display API.
             val dm = android.util.DisplayMetrics()
             @Suppress("DEPRECATION")
             windowManager.defaultDisplay.getRealMetrics(dm)

@@ -1,5 +1,8 @@
 ext {
-    minSdkVersion = 24
+    // REBUILD: Minimum Android 12 (API 31). Dropped support for older versions
+    // and HarmonyOS-specific defensive code. Android 12+ has stable InputManager
+    // APIs and Shizuku shell-uid bypasses hidden API restrictions cleanly.
+    minSdkVersion = 31
     compileSdkVersion = 36
     targetSdkVersion = 36
     androidxActivityVersion = '1.11.0'

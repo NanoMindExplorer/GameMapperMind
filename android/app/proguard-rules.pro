@@ -26,17 +26,24 @@
 -keep class com.nanomindexplorer.gamemappermind.** { *; }
 -keep class com.getcapacitor.** { *; }
 
-# BUG-K3 FIX: Reflection targets used in TouchDaemonService (InputManager.getInstance, injectInputEvent)
-# Without these rules, R8 may strip/rename these methods and touch injection will fail at runtime.
--keep class android.view.InputManager { *; }
+# REBUILD: Reflection targets used in TouchDaemonService for multi-path injection.
+# These must be kept so R8 doesn't rename/strip them in release builds.
+
+# Path A: IInputManager AIDL via ServiceManager
+-keep class android.os.ServiceManager { *; }
+-keep class android.os.IServiceManager { *; }
+-keep class android.hardware.input.IInputManager { *; }
+-keep class android.hardware.input.IInputManager$Stub { *; }
+-keep class android.hardware.input.IInputManager$Stub$Proxy { *; }
+
+# Path B: InputManager class reflection
+-keep class android.hardware.input.InputManager { *; }
 -keep class android.view.InputEvent { *; }
 -keep class android.view.MotionEvent { *; }
 -keep class android.view.MotionEvent$PointerProperties { *; }
 -keep class android.view.MotionEvent$PointerCoords { *; }
 
-# BUG-INJECT-REFLECT FIX: ActivityThread.currentApplication() is used to obtain Context in the
-# Shizuku user service (which has no-arg constructor). Without this keep rule, R8 may rename
-# the method and reflection fails → InputManager null → zero injection.
+# Context acquisition in Shizuku user service (no-arg constructor)
 -keep class android.app.ActivityThread { *; }
 
 # BUG-PROGUARD-DEAD FIX: Removed Choreographer keep rules — GamepadJniPlugin now uses

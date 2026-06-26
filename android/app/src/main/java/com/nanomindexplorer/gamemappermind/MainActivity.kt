@@ -16,6 +16,7 @@ class MainActivity : BridgeActivity() {
         registerPlugin(TouchInjectionPlugin::class.java)
         registerPlugin(GamepadPlugin::class.java)
         registerPlugin(GyroPlugin::class.java)
+        registerPlugin(InstalledGamesPlugin::class.java)
         super.onCreate(savedInstanceState)
         
         bridge?.webView?.let { webView ->

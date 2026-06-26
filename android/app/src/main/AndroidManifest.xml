@@ -74,10 +74,18 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-    
+
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30"/>
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN"/>
+
+    <!-- BUG-FEATURE-INSTALLED-GAMES: Query all packages so InstalledGamesPlugin can list
+         installed games and let user launch them directly from the app.
+         NOTE: Google Play has restrictions on this permission — must declare in Play Console
+         that the app needs it for the "display installed apps and let user launch them" use case.
+         For sideloaded APKs (like the user's MatePad Pro 12.2 with HarmonyOS), this works as-is. -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
 
     <uses-feature android:name="android.hardware.gamepad" android:required="false"/>
     <uses-feature android:name="android.hardware.bluetooth" android:required="false"/>

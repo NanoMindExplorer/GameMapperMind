@@ -5,8 +5,8 @@
  */
 
 import React from 'react';
-import { 
-  GamepadProfile, GamepadMacro, ShizukuState 
+import {
+  GamepadProfile, GamepadMacro, ShizukuState
 } from './types';
 import { INITIAL_PROFILES, INITIAL_MACROS } from './defaults';
 import ShizukuPanel from './components/ShizukuPanel';
@@ -15,8 +15,9 @@ import MacroEngine from './components/MacroEngine';
 import GamepadTester from './components/GamepadTester';
 import GameSelector from './components/GameSelector';
 import CreditsPanel from './components/CreditsPanel';
+import InstalledGamesPanel from './components/InstalledGamesPanel';
 
-import { Terminal, Shield, Settings, Activity, Compass, Cpu, HelpCircle, ChevronRight, Sparkles, BookOpen, Layers, Bot, ShieldAlert, Heart, AlertTriangle } from 'lucide-react';
+import { Terminal, Shield, Settings, Activity, Compass, Cpu, HelpCircle, ChevronRight, Sparkles, BookOpen, Layers, Bot, ShieldAlert, Heart, AlertTriangle, Gamepad2 } from 'lucide-react';
 import { KeepAwake } from '@capacitor-community/keep-awake';
 import { ScreenOrientation } from '@capacitor/screen-orientation';
 // Use public path directly for AppIcon instead of importing it
@@ -41,7 +42,7 @@ export default function App() {
 
   const [profiles, setProfiles] = React.useState<GamepadProfile[]>(INITIAL_PROFILES);
   const [activeProfileId, setActiveProfileId] = React.useState('genshin');
-  const [selectedMainView, setSelectedMainView] = React.useState<'shizuku' | 'overlay' | 'profile' | 'macro' | 'tester' | 'credits'>('shizuku');
+  const [selectedMainView, setSelectedMainView] = React.useState<'shizuku' | 'overlay' | 'profile' | 'macro' | 'tester' | 'credits' | 'games'>('shizuku');
   const [isKilling, setIsKilling] = React.useState(false);
 
   // Recovery Engine for Shizuku
@@ -560,13 +561,24 @@ export default function App() {
           <button
             onClick={() => setSelectedMainView('tester')}
             className={`px-4 py-2 text-xs font-semibold rounded-lg flex items-center gap-2 transition-all ${
-              selectedMainView === 'tester' 
-                ? 'bg-slate-900 text-indigo-400 border border-slate-800' 
+              selectedMainView === 'tester'
+                ? 'bg-slate-900 text-indigo-400 border border-slate-800'
                 : 'text-slate-400 hover:text-slate-200 hover:bg-slate-950/40'
             }`}
           >
             <Compass className="w-3.5 h-3.5" />
             Sensor & Input Diagnostics
+          </button>
+          <button
+            onClick={() => setSelectedMainView('games')}
+            className={`px-4 py-2 text-xs font-semibold rounded-lg flex items-center gap-2 transition-all ${
+              selectedMainView === 'games'
+                ? 'bg-slate-900 text-emerald-400 border border-slate-800'
+                : 'text-slate-400 hover:text-emerald-300 hover:bg-slate-950/40'
+            }`}
+          >
+            <Gamepad2 className="w-3.5 h-3.5" />
+            Installed Games
           </button>
           <button
             onClick={() => setSelectedMainView('credits')}
@@ -624,6 +636,15 @@ export default function App() {
           {selectedMainView === 'tester' && (
             <GamepadTester
               onLogMessage={handleLogMessage}
+            />
+          )}
+
+          {selectedMainView === 'games' && (
+            <InstalledGamesPanel
+              onLogMessage={handleLogMessage}
+              profiles={profiles}
+              onProfileSelect={handleProfileSelect}
+              onCreateProfile={handleCreateProfile}
             />
           )}
 

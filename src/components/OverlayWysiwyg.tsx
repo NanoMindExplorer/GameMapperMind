@@ -114,6 +114,11 @@ export default function OverlayWysiwyg(props: OverlayWysiwygProps) {
           {/* Button nodes */}
           {!h.hideAllNodes && h.activeProfile?.buttons?.map((btn: any) => {
             const isSel = h.selectedButtonId === btn.id;
+            // BUG-CANVAS-FEEDBACK FIX: Highlight button when its mappedKey is in activeKeys.
+            // Previously, OverlayWysiwyg received activeKeys prop but never used it to highlight
+            // pressed buttons — the canvas appeared dead even when gamepad was working.
+            // Now: when user presses 'A' on gamepad, the button with mappedKey='A' lights up.
+            const isPressed = h.activeKeys.includes(btn.mappedKey);
             let radius = "rounded-full";
             if (btn.type === 'swipe') radius = "rounded-lg";
 
@@ -139,7 +144,13 @@ export default function OverlayWysiwyg(props: OverlayWysiwygProps) {
               <div
                 key={btn.id}
                 data-btn-node={btn.id}
-                className={`absolute ${radius} flex flex-col items-center justify-center cursor-move select-none touch-none ${isSel ? 'border-2 border-indigo-400 z-40 bg-indigo-500/30' : 'border border-slate-400/40 z-20 bg-slate-900/50'}`}
+                className={`absolute ${radius} flex flex-col items-center justify-center cursor-move select-none touch-none transition-colors duration-75 ${
+                  isSel
+                    ? 'border-2 border-indigo-400 z-40 bg-indigo-500/30'
+                    : isPressed
+                      ? 'border-2 border-emerald-400 z-30 bg-emerald-500/50 shadow-[0_0_18px_rgba(16,185,129,0.65)]'
+                      : 'border border-slate-400/40 z-20 bg-slate-900/50'
+                }`}
                 style={{
                   left: `${btn.x}%`,
                   top: `${btn.y}%`,
@@ -154,7 +165,7 @@ export default function OverlayWysiwyg(props: OverlayWysiwygProps) {
                 onTouchStart={(e) => { e.preventDefault(); e.stopPropagation(); h.handleDragStart(btn.id, e); }}
                 onClick={(e) => e.stopPropagation()}
               >
-                <span className={`text-[10px] font-bold ${isSel ? 'text-white' : 'text-slate-300'}`}>{btn.label}</span>
+                <span className={`text-[10px] font-bold ${isSel ? 'text-white' : isPressed ? 'text-emerald-200' : 'text-slate-300'}`}>{btn.label}</span>
                 <span className="text-[8px] font-mono opacity-50 whitespace-nowrap">{btn.mappedKey}</span>
                 {analogCap}
               </div>

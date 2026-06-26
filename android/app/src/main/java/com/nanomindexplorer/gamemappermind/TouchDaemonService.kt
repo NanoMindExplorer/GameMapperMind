@@ -15,7 +15,11 @@ class TouchDaemonService : ITouchService.Stub {
 
     constructor() : super()
 
-    constructor(context: android.content.Context?) : super()
+    constructor(context: android.content.Context?) : super() {
+        // BUG-INJECT-REFLECT FIX: Capture context so InputManager can be obtained via
+        // the PUBLIC getSystemService API (not the hidden getInstance reflection).
+        this.ctx = context
+    }
 
     override fun executeShellCommand(command: String): String {
         return try {
@@ -152,22 +156,86 @@ class TouchDaemonService : ITouchService.Stub {
         System.exit(0)
     }
 
+    // BUG-INJECT-REFLECT FIX: InputManager.getInstance() reflection is BLOCKED on Android 10+
+    // (and especially HarmonyOS 4.2) by the hidden API restriction list. The `getMethod("getInstance")`
+    // call throws NoSuchMethodException, which `by lazy` swallows → inputManager = null → all
+    // injectInputEvent calls silently return false → ZERO INJECTION.
+    //
+    // Fix: Use the PUBLIC API `context.getSystemService(Context.INPUT_SERVICE) as InputManager`.
+    // This has been available since API 16 and returns the SAME singleton as the hidden getInstance().
+    // The `injectInputEvent` method itself is still hidden (signature varies by Android version),
+    // so we still need reflection for that — but we try ALL known signatures.
+    //
+    // Shizuku constructs the UserService with the no-arg constructor (Context is NOT passed).
+    // We obtain Context via `ActivityThread.currentApplication()` (hidden API, but Shizuku runs
+    // as shell uid so hidden API restrictions are bypassed). If that fails, we fall back to
+    // the deprecated getInstance() reflection.
+    private var ctx: android.content.Context? = null
     private val inputManager: InputManager? by lazy {
+        // Path 1 (preferred): Public API via Context.getSystemService
+        // Get Context via ActivityThread.currentApplication() (works in Shizuku shell-uid process)
+        var context = ctx
+        if (context == null) {
+            try {
+                val atClass = Class.forName("android.app.ActivityThread")
+                val currentApp = atClass.getMethod("currentApplication").invoke(null)
+                if (currentApp is android.content.Context) {
+                    context = currentApp
+                    ctx = context  // cache for future calls
+                }
+            } catch (e: Exception) {
+                Log.w("GameMapper", "ActivityThread.currentApplication() failed: ${e.message}")
+            }
+        }
         try {
-            InputManager::class.java.getMethod("getInstance").invoke(null) as InputManager
+            val im = context?.getSystemService(android.content.Context.INPUT_SERVICE) as? InputManager
+            if (im != null) {
+                Log.i("GameMapper", "InputManager obtained via Context.getInputService (public API)")
+                return@lazy im
+            }
         } catch (e: Exception) {
-            Log.e("GameMapper", "Failed to get InputManager", e)
+            Log.w("GameMapper", "Context.getInputService failed: ${e.message}, falling back to reflection")
+        }
+        // Path 2 (fallback): Hidden reflection — may fail on Android 10+ but worth trying
+        try {
+            val im = InputManager::class.java.getMethod("getInstance").invoke(null) as? InputManager
+            if (im != null) Log.i("GameMapper", "InputManager obtained via reflection (getInstance)")
+            im
+        } catch (e: Exception) {
+            Log.e("GameMapper", "InputManager.getInstance() reflection FAILED — injection will NOT work. " +
+                "This is expected on Android 10+ with hidden API restrictions. " +
+                "Device may need Shizuku running as ROOT, or app must target SDK <= 28.", e)
             null
         }
     }
 
     private val injectInputEventMethod by lazy {
-        try {
-            InputManager::class.java.getMethod("injectInputEvent", android.view.InputEvent::class.java, Int::class.javaPrimitiveType)
-        } catch (e: Exception) {
-            Log.e("GameMapper", "Failed to get injectInputEvent method", e)
-            null
+        if (inputManager == null) {
+            Log.e("GameMapper", "injectInputEventMethod: inputManager is null — cannot reflect method")
+            return@lazy null
         }
+        // Try ALL known signatures of injectInputEvent across Android versions:
+        // - API 16+:  injectInputEvent(InputEvent, int)
+        // - Some OEMs: injectInputEvent(InputEvent, int, int)  (mode + flags)
+        // - Huawei HarmonyOS may have a custom signature
+        val signatures = listOf(
+            arrayOf(android.view.InputEvent::class.java, Int::class.javaPrimitiveType) to "injectInputEvent(InputEvent, int)",
+            arrayOf(android.view.InputEvent::class.java, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType) to "injectInputEvent(InputEvent, int, int)",
+            arrayOf(android.view.InputEvent::class.java, java.lang.Integer::class.java) to "injectInputEvent(InputEvent, Integer)"
+        )
+        for ((paramTypes, sigName) in signatures) {
+            try {
+                val m = InputManager::class.java.getMethod("injectInputEvent", *paramTypes)
+                m.isAccessible = true
+                Log.i("GameMapper", "injectInputEvent method found: $sigName")
+                return@lazy m
+            } catch (e: NoSuchMethodException) {
+                // try next signature
+            }
+        }
+        Log.e("GameMapper", "injectInputEvent: NO matching signature found on this device. " +
+            "Touch injection is NOT possible on this Android version / OEM.", null)
+        null
     }
 
     class PointerState {
@@ -281,11 +349,31 @@ class TouchDaemonService : ITouchService.Stub {
         )
 
         return try {
-            val result = injectInputEventMethod?.invoke(inputManager, event, 0) as? Boolean ?: false
-            if (!result) Log.w("GameMapper", "injectInputEvent returned false")
+            // BUG-INJECT-REFLECT FIX: Handle multiple injectInputEvent signatures.
+            // The method may take (InputEvent, int) or (InputEvent, int, int) or (InputEvent, Integer).
+            // We discovered the signature in the lazy init — now invoke based on parameter count.
+            val method = injectInputEventMethod
+            val im = inputManager
+            if (method == null || im == null) {
+                Log.e("GameMapper", "injectMotionEvent: method=$method inputManager=$im — cannot inject")
+                return false
+            }
+            val result: Boolean = when (method.parameterCount) {
+                2 -> method.invoke(im, event, 0) as? Boolean ?: false
+                3 -> method.invoke(im, event, 0, 0) as? Boolean ?: false  // (event, mode, flags)
+                else -> {
+                    // Fallback: assume 2-arg signature
+                    method.invoke(im, event, 0) as? Boolean ?: false
+                }
+            }
+            if (!result) {
+                Log.w("GameMapper", "injectInputEvent returned false — event may have been filtered " +
+                    "(source=${currentInputSource}, action=0x${action.toString(16)}, pointerCount=$pointerCount, " +
+                    "coords=(${pointerCoords[0].x},${pointerCoords[0].y}))")
+            }
             result
         } catch (e: Exception) {
-            Log.e("GameMapper", "Injection failed", e)
+            Log.e("GameMapper", "Injection failed: ${e.javaClass.simpleName}: ${e.message}", e)
             false
         } finally {
             event.recycle()

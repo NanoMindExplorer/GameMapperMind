@@ -1,6 +1,0 @@
-{
-  "name": "Gamepad Mapper Mind – Nexion",
-  "description": "Ultra-low latency gamepad mapper offering physical touch injection via evdev/uinput daemon, sensor fusion, WYSIWYG calibration, profile triggers, and macro recording.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}

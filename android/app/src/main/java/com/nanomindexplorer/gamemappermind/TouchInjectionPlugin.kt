@@ -134,29 +134,34 @@ class TouchInjectionPlugin : Plugin() {
                 return
             }
             if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
-                val serviceAlive = touchService != null && touchService!!.asBinder().isBinderAlive
-                if (!isBound || !serviceAlive) {
-                    synchronized(pendingLock) { pendingBindCalls.add(call) }
-                    try {
-                        if (isBound) {
-                            // daemon(true) means service may still be alive even if our binder died.
-                            // Use false (don't remove) — just unbind our connection, keep service running.
-                            // Then re-bind with bindUserService below.
-                            Shizuku.unbindUserService(USER_SERVICE_ARGS, serviceConnection, false)
-                        }
-                    } catch (e: Exception) {}
-                    try {
-                        Shizuku.bindUserService(USER_SERVICE_ARGS, serviceConnection)
-                        isBound = true
-                    } catch (e: Exception) {
-                        // BUG-B1 FIX: Remove from pending and reject on error.
-                        synchronized(pendingLock) {
-                            pendingBindCalls.remove(call)
-                        }
-                        call.reject("Failed to bind Shizuku service: ${e.message}")
-                    }
-                } else {
+                val serviceAlive = touchService != null && try { touchService!!.asBinder().isBinderAlive } catch(e: Exception) { false }
+                if (isBound && serviceAlive) {
+                    // Already bound and alive — nothing to do.
                     call.resolve()
+                    return
+                }
+                // BUG-SHIZUKU-PERSIST FIX: Do NOT call unbindUserService before rebind.
+                // Previously, this code called `Shizuku.unbindUserService(..., false)` to "clean up"
+                // before re-binding. That call is what causes the app to disappear from Shizuku's
+                // "App Management" tab — every unbind (even with `remove=false`) momentarily removes
+                // the binding entry from Shizuku's tracker. With the 5-second polling interval in
+                // App.tsx, this created a constant bind/unbind churn, and Shizuku's UI showed the app
+                // as "not bound" during each churn window.
+                //
+                // Correct approach: if `isBound` is true but `serviceAlive` is false, the binder
+                // died but our `ServiceConnection` is still registered. Shizuku will auto-deadlock
+                // the old connection when we call `bindUserService` again — no need to manually unbind.
+                // If `isBound` is false, just bind fresh.
+                synchronized(pendingLock) { pendingBindCalls.add(call) }
+                try {
+                    Shizuku.bindUserService(USER_SERVICE_ARGS, serviceConnection)
+                    isBound = true
+                } catch (e: Exception) {
+                    // BUG-B1 FIX: Remove from pending and reject on error.
+                    synchronized(pendingLock) {
+                        pendingBindCalls.remove(call)
+                    }
+                    call.reject("Failed to bind Shizuku service: ${e.message}")
                 }
             } else {
                 call.reject("Shizuku permission not granted")

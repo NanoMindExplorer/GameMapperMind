@@ -34,6 +34,11 @@
 -keep class android.view.MotionEvent$PointerProperties { *; }
 -keep class android.view.MotionEvent$PointerCoords { *; }
 
+# BUG-INJECT-REFLECT FIX: ActivityThread.currentApplication() is used to obtain Context in the
+# Shizuku user service (which has no-arg constructor). Without this keep rule, R8 may rename
+# the method and reflection fails → InputManager null → zero injection.
+-keep class android.app.ActivityThread { *; }
+
 # BUG-PROGUARD-DEAD FIX: Removed Choreographer keep rules — GamepadJniPlugin now uses
 # Handler(Looper.getMainLooper()) for event batching (Choreographer crashed on binder threads
 # because it requires a Looper). The Choreographer class is no longer referenced anywhere

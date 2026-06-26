@@ -43,24 +43,25 @@ export const useShizuku = () => {
       try {
         const { granted, touchServiceAlive, isBound } = await TouchInjection.checkPermission();
         const { daemonRunning } = await TouchInjection.checkDaemonRunning();
-        
-        // BUG-FIX: Auto-rebind if permission granted but service not alive.
-        // With daemon(true), service process persists even after app is killed.
-        // But our binder connection (touchService) is null after app restart.
-        // Re-bind to reconnect to the still-running daemon service.
-        if (granted && !touchServiceAlive && !isBindingRef.current) {
-            isBindingRef.current = true;
-            try {
-              await bindAndStart();
-            } finally {
-              setTimeout(() => { isBindingRef.current = false; }, 5000);
-            }
-        }
 
-        // BUG-FIX: If service is alive but GamepadListener not running, start it.
-        // This happens when daemon(true) service survives but foreground service
-        // (GamepadListenerService) was killed. Without foreground service, app
-        // process can be killed by OS → binder dies → app disappears from Shizuku.
+        // BUG-SHIZUKU-PERSIST FIX: Removed the auto-rebind logic that fired every 5 seconds.
+        // Previously, if `!touchServiceAlive`, this code called `bindAndStart()` which internally
+        // calls `bindService()` — and the old `bindService()` impl called `unbindUserService` before
+        // re-binding. That unbind-then-bind churn is what made the app disappear from Shizuku's
+        // "App Management" tab every 5 seconds.
+        //
+        // New strategy:
+        //   - Polling (this function) is READ-ONLY — it checks status but does NOT mutate binding state.
+        //   - Auto-rebind only happens on explicit triggers:
+        //       (a) User grants permission via dialog (onShizukuPermissionResult listener)
+        //       (b) User clicks "Start Daemon" button (startDaemon → bindAndStart)
+        //       (c) App resumes from background AND permission was granted but never bound (one-shot)
+        //   - If service dies mid-session, user must manually tap "Start Daemon" again. This is
+        //     better than silent churn that breaks Shizuku's app tracking.
+        //
+        // We still auto-start GamepadListenerService if touchService is alive but foreground service
+        // died — that's safe (doesn't touch Shizuku binding state).
+
         if (granted && touchServiceAlive && !daemonRunning) {
             try {
               await TouchInjection.startGamepadListener();
@@ -77,7 +78,7 @@ export const useShizuku = () => {
 
         return {
           ...currentState,
-          daemonRunning: !!daemonRunning, 
+          daemonRunning: !!daemonRunning,
           status: granted ? 'CONNECTED_SHIZUKU' : 'DISCONNECTED',
           recoveryState: newState
         };

@@ -231,10 +231,100 @@ class NativeGamepadMapper(private val context: Context) {
                 // Gesture: sequence of touchMove points
                 if (isDown) handleGesture(mapping, offset)
             }
+            "macro" -> {
+                // Macro: trigger recorded macro sequence (one-shot on press)
+                if (isDown) handleMacro(mapping, offset)
+            }
             else -> {
                 // "hold" (default) — same as existing button behavior: touchDown on press, touchUp on release
                 handleHoldInteraction(mapping, isDown, offset)
             }
+        }
+    }
+
+    /**
+     * INTERACTION-EXPANSION: Macro trigger — plays back a recorded macro sequence.
+     * Macros are stored in the profile JSON under "macros" array. Each macro has:
+     *   id, name, actions: [{type: 'touch_down'|'touch_move'|'touch_up'|'delay', x?, y?, delayMs?, pointerId}]
+     * The macroId field in the mapping selects which macro to play.
+     */
+    private fun handleMacro(mapping: JSONObject, offset: Int) {
+        val macroId = mapping.optString("macroId", "")
+        if (macroId.isEmpty()) {
+            Log.w("GameMapper", "handleMacro: no macroId specified")
+            return
+        }
+
+        // Find the macro in the profile JSON
+        val jsonStr = GamepadListenerService.activeProfileJson ?: return
+        try {
+            val root = JSONObject(jsonStr)
+            // Macros might be stored at root level or we need to look in a separate store.
+            // For now, check if there's a "macros" array in the profile.
+            val macrosArray = root.optJSONArray("macros")
+            if (macrosArray == null) {
+                Log.w("GameMapper", "handleMacro: no macros array in profile")
+                return
+            }
+
+            var macro: JSONObject? = null
+            for (i in 0 until macrosArray.length()) {
+                val m = macrosArray.optJSONObject(i)
+                if (m?.optString("id") == macroId) {
+                    macro = m
+                    break
+                }
+            }
+
+            if (macro == null) {
+                Log.w("GameMapper", "handleMacro: macro '$macroId' not found")
+                return
+            }
+
+            val actions = macro.optJSONArray("actions")
+            if (actions == null || actions.length() == 0) {
+                Log.w("GameMapper", "handleMacro: macro '$macroId' has no actions")
+                return
+            }
+
+            val playbackSpeed = macro.optDouble("playbackSpeed", 1.0)
+            Log.i("GameMapper", "handleMacro: playing macro '$macroId' (${actions.length()} actions, speed=$playbackSpeed)")
+
+            // Schedule each action sequentially with delays
+            var cumulativeDelay = 0L
+            for (i in 0 until actions.length()) {
+                val action = actions.optJSONObject(i) ?: continue
+                val type = action.optString("type", "")
+                val actionDelay = (action.optLong("delayMs", 33L) / playbackSpeed).toLong()
+                cumulativeDelay += actionDelay
+
+                mainHandler.postDelayed({
+                    synchronized(syncLock) {
+                        try {
+                            val ts = TouchInjectionPlugin.touchService ?: return@synchronized
+                            val pointerId = action.optInt("pointerId", 200) + offset
+                            when (type) {
+                                "touch_down" -> {
+                                    val (x, y) = getScreenCoords(action.optDouble("x", 50.0), action.optDouble("y", 50.0))
+                                    ts.touchDown(pointerId, x, y)
+                                }
+                                "touch_move" -> {
+                                    val (x, y) = getScreenCoords(action.optDouble("x", 50.0), action.optDouble("y", 50.0))
+                                    ts.touchMove(pointerId, x, y)
+                                }
+                                "touch_up" -> {
+                                    ts.touchUp(pointerId)
+                                }
+                                "delay" -> { /* delay is handled by cumulativeDelay */ }
+                            }
+                        } catch (e: Exception) {
+                            Log.w("GameMapper", "macro action '$type' failed: ${e.message}")
+                        }
+                    }
+                }, cumulativeDelay)
+            }
+        } catch (e: Exception) {
+            Log.e("GameMapper", "handleMacro: failed to parse macro", e)
         }
     }
 
@@ -636,18 +726,26 @@ class NativeGamepadMapper(private val context: Context) {
         val curvedMag = applyCurve(rescaledMag, curve, curvePoints)
 
         // FIX: Apply sensitivity multiplier from ButtonPropertyPanel slider.
-        // Previously, the "sensitivity" field was written by the UI slider but NEVER read
-        // by the injection pipeline — the slider had no effect. Now: multiply curvedMag
-        // by sensitivity (default 1.0 = no change, 2.0 = double distance, 0.5 = half).
         val sensitivity = mapping.optDouble("sensitivity", 1.0).toFloat().coerceIn(0.1f, 5.0f)
         val finalMag = (curvedMag * sensitivity).coerceIn(0f, 1f)
 
-        // 5. Reconstruct output vector: unit_vector(rawX, rawY) * finalMag * maxRadius
-        val invMag = if (rawMag > 1e-6f) 1f / rawMag else 0f
-        val outX = (sx * invMag) * finalMag * maxRadius
-        val outY = (sy * invMag) * finalMag * maxRadius
-        val tX = cX + outX
-        val tY = cY + outY
+        // STICK-MODE-DRAG: In 'drag' mode, the stick moves the touch point ABSOLUTELY
+        // across the screen (like dragging a finger), not relative to a center point.
+        // Useful for mortar/sniper aim where you need continuous full-screen movement.
+        // In 'joystick' mode (default), the touch stays within maxRadius of center.
+        val stickMode = mapping.optString("stickMode", "joystick")
+        val (tX, tY) = if (stickMode == "drag") {
+            // Drag mode: multiply stick deflection by screen dimensions for full-screen move.
+            val dragX = cX + (sx * finalMag * cX * 0.8f)
+            val dragY = cY + (sy * finalMag * cY * 0.8f)
+            Pair(dragX, dragY)
+        } else {
+            // Joystick mode (default): relative to center, bounded by maxRadius
+            val invMag = if (rawMag > 1e-6f) 1f / rawMag else 0f
+            val outX = (sx * invMag) * finalMag * maxRadius
+            val outY = (sy * invMag) * finalMag * maxRadius
+            Pair(cX + outX, cY + outY)
+        }
 
         // 6. Inject
         if (!pointer.isActive) {

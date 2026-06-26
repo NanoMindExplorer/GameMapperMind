@@ -114,13 +114,41 @@ export default function OverlayWysiwyg(props: OverlayWysiwygProps) {
           {/* Button nodes */}
           {!h.hideAllNodes && h.activeProfile?.buttons?.map((btn: any) => {
             const isSel = h.selectedButtonId === btn.id;
-            // BUG-CANVAS-FEEDBACK FIX: Highlight button when its mappedKey is in activeKeys.
-            // Previously, OverlayWysiwyg received activeKeys prop but never used it to highlight
-            // pressed buttons — the canvas appeared dead even when gamepad was working.
-            // Now: when user presses 'A' on gamepad, the button with mappedKey='A' lights up.
-            const isPressed = h.activeKeys.includes(btn.mappedKey);
+            const isPressed = h.activeKeys.includes(btn.mappedKey) ||
+              (btn.trigger?.inputs && btn.trigger.inputs.some((inp: string) => h.activeKeys.includes(inp)));
             let radius = "rounded-full";
             if (btn.type === 'swipe') radius = "rounded-lg";
+
+            // INTERACTION-EXPANSION: Visual indicator for interaction type
+            const interactionType = btn.interactionType || 'hold';
+            let interactionIcon = null;
+            let interactionBadge = '';
+            if (btn.type !== 'analog_stick') {
+              switch (interactionType) {
+                case 'turbo':
+                  interactionBadge = 'TURBO';
+                  interactionIcon = <span className="absolute -top-2 -right-2 text-[7px] font-bold text-amber-400 bg-amber-950 px-1 rounded border border-amber-700 z-20">⚡</span>;
+                  break;
+                case 'toggle':
+                  interactionBadge = 'TOGGLE';
+                  interactionIcon = <span className="absolute -top-2 -right-2 text-[7px] font-bold text-purple-400 bg-purple-950 px-1 rounded border border-purple-700 z-20">⊕</span>;
+                  break;
+                case 'charge':
+                  interactionBadge = 'CHARGE';
+                  interactionIcon = <span className="absolute -top-2 -right-2 text-[7px] font-bold text-blue-400 bg-blue-950 px-1 rounded border border-blue-700 z-20">⏱</span>;
+                  break;
+                case 'gesture':
+                  interactionBadge = 'GESTURE';
+                  interactionIcon = <span className="absolute -top-2 -right-2 text-[7px] font-bold text-cyan-400 bg-cyan-950 px-1 rounded border border-cyan-700 z-20">~</span>;
+                  break;
+                case 'tap':
+                  interactionIcon = <span className="absolute -top-2 -right-2 text-[7px] font-bold text-green-400 bg-green-950 px-1 rounded border border-green-700 z-20">▸</span>;
+                  break;
+                case 'macro':
+                  interactionIcon = <span className="absolute -top-2 -right-2 text-[7px] font-bold text-pink-400 bg-pink-950 px-1 rounded border border-pink-700 z-20">M</span>;
+                  break;
+              }
+            }
 
             // Analog stick visual
             let analogCap = null;
@@ -129,14 +157,43 @@ export default function OverlayWysiwyg(props: OverlayWysiwygProps) {
               if (btn.mappedKey === 'L_STICK') { sx = h.activeAxes.lx * (btn.width / 3.5); sy = h.activeAxes.ly * (btn.height / 3.5); }
               else if (btn.mappedKey === 'R_STICK') { sx = h.activeAxes.rx * (btn.width / 3.5); sy = h.activeAxes.ry * (btn.height / 3.5); }
               const isLeft = btn.mappedKey === 'L_STICK';
+              // Drag mode indicator
+              const dragMode = btn.stickMode === 'drag';
               analogCap = (
                 <React.Fragment>
                   <div className="absolute inset-3 border border-white/10 rounded-full pointer-events-none" />
                   <div
-                    className={`absolute w-[45%] h-[45%] ${isLeft ? 'bg-indigo-500 border-indigo-400' : 'bg-pink-500 border-pink-400'} rounded-full border-[2.5px] z-10 pointer-events-none`}
+                    className={`absolute w-[45%] h-[45%] ${isLeft ? 'bg-indigo-500 border-indigo-400' : 'bg-pink-500 border-pink-400'} ${dragMode ? 'opacity-60' : ''} rounded-full border-[2.5px] z-10 pointer-events-none`}
                     style={{ transform: `translate(${sx}px, ${sy}px)`, transition: h.isDragging ? 'none' : 'transform 80ms ease-out' }}
                   />
+                  {dragMode && (
+                    <span className="absolute -top-2 -right-2 text-[7px] font-bold text-orange-400 bg-orange-950 px-1 rounded border border-orange-700 z-20">DRAG</span>
+                  )}
                 </React.Fragment>
+              );
+            }
+
+            // Gesture path visualization
+            let gesturePath = null;
+            if (interactionType === 'gesture' && btn.gesturePoints && btn.gesturePoints.length > 0) {
+              gesturePath = (
+                <svg className="absolute inset-0 pointer-events-none z-0" style={{ width: '100%', height: '100%', overflow: 'visible' }}>
+                  <line x1="50%" y1="50%" x2={`${btn.gesturePoints[0].x - btn.x + 50}%`} y2={`${btn.gesturePoints[0].y - btn.y + 50}%`} stroke="rgba(34,211,238,0.4)" strokeWidth="1.5" strokeDasharray="3,2" />
+                  {btn.gesturePoints.map((pt: any, i: number) => {
+                    if (i === 0) return null;
+                    const prev = btn.gesturePoints[i - 1];
+                    return (
+                      <line key={i}
+                        x1={`${prev.x - btn.x + 50}%`} y1={`${prev.y - btn.y + 50}%`}
+                        x2={`${pt.x - btn.x + 50}%`} y2={`${pt.y - btn.y + 50}%`}
+                        stroke="rgba(34,211,238,0.4)" strokeWidth="1.5" strokeDasharray="3,2"
+                      />
+                    );
+                  })}
+                  {btn.gesturePoints.map((pt: any, i: number) => (
+                    <circle key={`p${i}`} cx={`${pt.x - btn.x + 50}%`} cy={`${pt.y - btn.y + 50}%`} r="2" fill="rgba(34,211,238,0.7)" />
+                  ))}
+                </svg>
               );
             }
 
@@ -165,8 +222,10 @@ export default function OverlayWysiwyg(props: OverlayWysiwygProps) {
                 onTouchStart={(e) => { e.preventDefault(); e.stopPropagation(); h.handleDragStart(btn.id, e); }}
                 onClick={(e) => e.stopPropagation()}
               >
+                {interactionIcon}
+                {gesturePath}
                 <span className={`text-[10px] font-bold ${isSel ? 'text-white' : isPressed ? 'text-emerald-200' : 'text-slate-300'}`}>{btn.label}</span>
-                <span className="text-[8px] font-mono opacity-50 whitespace-nowrap">{btn.mappedKey}</span>
+                <span className="text-[8px] font-mono opacity-50 whitespace-nowrap">{btn.trigger?.inputs?.join('+') || btn.mappedKey}</span>
                 {analogCap}
               </div>
             );

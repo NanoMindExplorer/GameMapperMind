@@ -1,4 +1,16 @@
 <?xml version="1.0" encoding="utf-8" ?>
+<!--
+  REBUILD: AndroidManifest.xml for Android 12+ (minSdk=31) with 3-path injection scheme.
+
+  Architecture:
+  - MainActivity: Capacitor WebView host, intercepts gamepad KeyEvents/MotionEvents
+  - FloatingOverlayService: transparent overlay for in-game button visualization
+  - GamepadListenerService: foreground service that runs Shizuku getevent stream
+  - TouchDaemonService: Shizuku user service (NOT declared here — Shizuku manages it)
+    Runs as shell uid, performs 3-path touch injection (AIDL → InputManager → shell)
+  - ShizukuProvider: allows app to communicate with Shizuku binder
+  - InstalledGamesPlugin: lists installed games + launches them via Intent
+-->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
           xmlns:tools="http://schemas.android.com/tools">
     <application
@@ -8,9 +20,11 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/AppTheme"
-        android:usesCleartextTraffic="false"
-        tools:replace="android:usesCleartextTraffic"
+        android:largeHeap="true"
+        android:hardwareAccelerated="true"
+        android:usesCleartextTraffic="true"
         android:networkSecurityConfig="@xml/network_security_config">
+
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
             android:name=".MainActivity"
@@ -68,35 +82,49 @@
         />
     </application>
 
-    <!-- Permissions -->
+    <!-- ============ PERMISSIONS ============ -->
+
+    <!-- Overlay window for in-game button visualization -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+    <!-- Server (dev mode) + Capacitor WebView asset loading -->
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Foreground services (GamepadListenerService + FloatingOverlayService) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
+    <!-- Keep app alive in background (prevents Android from killing the binder) -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
-    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30"/>
+    <!-- Bluetooth gamepad support (Android 12+ runtime permissions).
+         NOTE: The app itself does NOT use BluetoothAdapter directly — gamepad
+         Bluetooth pairing is handled by Android system. These permissions are
+         declared so the system routes gamepad input to the app correctly. -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
-    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation"
+        tools:targetApi="s" />
 
-    <!-- BUG-FEATURE-INSTALLED-GAMES: Query all packages so InstalledGamesPlugin can list
-         installed games and let user launch them directly from the app.
-         NOTE: Google Play has restrictions on this permission — must declare in Play Console
-         that the app needs it for the "display installed apps and let user launch them" use case.
-         For sideloaded APKs (like the user's MatePad Pro 12.2 with HarmonyOS), this works as-is. -->
+    <!-- InstalledGamesPlugin: list installed games + launch them -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
+
+    <!-- Shizuku binder permission -->
+    <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
+
+    <!-- ============ HARDWARE FEATURES ============ -->
 
     <uses-feature android:name="android.hardware.gamepad" android:required="false"/>
     <uses-feature android:name="android.hardware.bluetooth" android:required="false"/>
     <uses-feature android:name="android.hardware.usb.host" android:required="false"/>
+    <uses-feature android:name="android.hardware.touchscreen" android:required="true"/>
 
-    <!-- Shizuku Permission -->
-    <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
+    <!-- ============ QUERIES (Android 11+ package visibility) ============ -->
 
-    <!-- Allows the app to see Shizuku on Android 11+ -->
     <queries>
         <provider android:authorities="moe.shizuku.manager.shizuku.provider" />
         <package android:name="moe.shizuku.privileged.api" />
     </queries>
 </manifest>
+

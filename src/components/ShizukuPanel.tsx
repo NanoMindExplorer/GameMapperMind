@@ -131,12 +131,12 @@ export default function ShizukuPanel({ shizukuState, setShizukuState, onLogMessa
     const res = await executeShizukuCommand(customLog);
     if (res) {
        if (res.output) {
-           const lines = res.output.split('\n').filter(l => l.trim() !== '');
-           lines.forEach(line => onLogMessage(`[sh] ${line}`));
+           const lines = res.output.split('\n').filter((l: string) => l.trim() !== '');
+           lines.forEach((line: string) => onLogMessage(`[sh] ${line}`));
        }
        if (res.error) {
-           const lines = res.error.split('\n').filter(l => l.trim() !== '');
-           lines.forEach(line => onLogMessage(`[sh ERROR] ${line}`));
+           const lines = res.error.split('\n').filter((l: string) => l.trim() !== '');
+           lines.forEach((line: string) => onLogMessage(`[sh ERROR] ${line}`));
        }
        if (!res.output && !res.error && res.exitCode === 0) {
            onLogMessage(`[sh] Command completed with exit code 0`);

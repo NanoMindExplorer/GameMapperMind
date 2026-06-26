@@ -12,7 +12,7 @@ declare global {
       setInteractive: (interactive: boolean) => void;
       closeOverlay: () => void;
     };
-    injectConfig: (configJson: string) => void;
+    injectConfig?: (configJson: string) => void;
     togglePalette?: (isOpen: boolean) => void;
   }
 }

@@ -11,5 +11,5 @@
     "resolveJsonModule": true,
     "types": ["node"]
   },
-  "include": ["server.ts", "src/types/**/*", "src/persistence/**/*", "src/server/**/*", "src/types.ts"]
+  "include": ["server.ts", "src/types/**/*", "src/types.ts"]
 }

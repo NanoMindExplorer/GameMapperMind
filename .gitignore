@@ -1,14 +1,23 @@
+# Dependencies
 node_modules/
+
+# Build outputs
 build/
 dist/
 coverage/
+
+# OS files
 .DS_Store
 *.log
+
+# Environment files
 .env*
 !.env.example
 .env.local
 .env.*.local
 .env.production
+
+# Server state files
 state.json
 data/
 *.db
@@ -23,25 +32,23 @@ app_data.json
 *.backup
 _*.backup
 
-# Scratch scripts (move to scripts/ temp, delete after use)
-/split*.cjs
-/split*.js
-/fix_tabs.cjs
-/fix_*.cjs
-/jsx_dump.txt
-/jsx_*.txt
-/gen_*.cjs
-/extractor*.js
-
-# Scripts directory scratch (only keep permanent scripts)
-scripts/split_*
-scripts/gen_*
-scripts/extractor*
-scripts/run_ui_*
-
-# Patch files - should not be committed
+# Patch files — should not be committed (use git format-patch + send-email instead)
 *.patch
 
-# Build artifact files - should not be committed
+# Build artifact files
 fix-compile*.txt
 *.b64
+
+# IDE / editor scratch files
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+*~
+
+# Capacitor generated (synced from capacitor.config.ts)
+android/app/src/main/assets/capacitor.config.json
+android/app/src/main/assets/capacitor.plugins.json
+android/app/src/main/res/xml/config.xml
+

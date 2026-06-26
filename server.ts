@@ -5,7 +5,16 @@ import crypto from "crypto";
 import { z } from "zod";
 import rateLimit from "express-rate-limit";
 import fs from "fs";
-import { SimAction, MacroProfile, SafeAiTunnelState } from "./src/types/simulation.js";
+import { MacroProfile } from "./src/types/macro.js";
+
+// DEAD-CODE CLEANUP: Removed `SimAction` and `SafeAiTunnelState` imports from
+// `./src/types/simulation.js`. That file was a duplicate of `src/types/macro.ts`
+// (MacroProfile/MacroStep defined twice), and `SimAction` was only referenced
+// by the dead `/api/simulation/execute` endpoint (also removed in this commit).
+// `SafeAiTunnelState` was just `{ logs: string[] }` — inlined below.
+interface SafeAiTunnelState {
+  logs: string[];
+}
 
 // Port config via env var
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
@@ -219,10 +228,11 @@ app.post("/api/daemon/log", requireAuth, (req: Request, res: Response) => {
   res.json({ success: true });
 });
 
-// Endpoint kalibrasi gyro palsu diganti yang sesungguhnya di app (Mandat 14), endpoint ini cuma untuk testing auth
-app.post("/api/daemon/calibrate", requireAuth, (req: Request, res: Response) => {
-  res.json({ success: true, message: 'Calibrated payload received' });
-});
+// DEAD-CODE CLEANUP: Removed `/api/daemon/calibrate` endpoint.
+// Its own comment admitted it was a dummy: "endpoint kalibrasi gyro palsu diganti
+// yang sesungguhnya di app (Mandat 14), endpoint ini cuma untuk testing auth".
+// Real gyro calibration is handled entirely client-side by GyroPlugin (native
+// Android SensorEventListener). No client code calls this endpoint anymore.
 
 const LogSchema = z.object({
   message: z.string(),
@@ -292,12 +302,11 @@ app.delete("/api/macros/:id", requireAuth, (req: Request, res: Response) => {
     res.json({ success: true });
 });
 
-app.post("/api/simulation/execute", requireAuth, (req: Request, res: Response) => {
-    const customAction: SimAction = { cmd: "tap", params: { x: 500, y: 500 } };
-    addLog(StateStore.state.logs, `Executing sim action: ${customAction.cmd}`);
-    res.json({ success: true, executed: customAction });
-});
-
+// DEAD-CODE CLEANUP: Removed `/api/simulation/execute` endpoint.
+// It was a stub that returned a hardcoded `{ cmd: "tap", params: { x: 500, y: 500 } }`
+// action regardless of input. It did not execute any real simulation, did not
+// call the touch injection pipeline, and was not called from any frontend code
+// (grep /api/simulation/execute in src/ returns 0 matches). Pure dead weight.
 
 app.all("/api/*", (req: Request, res: Response) => {
   res.status(404).json({ error: "API route not found", path: req.path });

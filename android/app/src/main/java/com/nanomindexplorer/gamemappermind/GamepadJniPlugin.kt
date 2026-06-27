@@ -29,6 +29,13 @@ object GamepadJniPlugin {
     }
 
     fun queueEvent(eventAction: () -> Unit) {
+        // LATENCY-FIX: If already on main thread, execute immediately instead of batching.
+        // This eliminates ~16ms delay from Handler.post scheduling.
+        // Only batch when called from binder/background threads.
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            eventAction.invoke()
+            return
+        }
         var needsPost = false
         synchronized(batchedEvents) {
             batchedEvents.add(eventAction)
@@ -38,7 +45,6 @@ object GamepadJniPlugin {
             }
         }
         if (needsPost) {
-            // Post to main thread Handler — works from ANY thread (main, binder, background).
             mainHandler.post(processRunnable)
         }
     }

@@ -77,16 +77,21 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, connected: boo
     let isCleanedUp = false;
 
     const setupShizuku = async () => {
-      if (!connected || !mapProfile) return;
+      if (!mapProfile) return;
+      // FIX: Always deliver profile to native, even if not "connected" yet.
+      // Previously, if connected=false (daemon not started), profile was NEVER
+      // sent to NativeGamepadMapper → buttonMapCache empty → NO injection.
+      // Now: send profile regardless of connected state. The native side will
+      // use it as soon as daemon is started. bindService is only called if connected.
       try {
-        await TouchInjection.bindService().catch(() => {});
-        if (isCleanedUp) return;
-        await TouchInjection.startGamepadListener().catch(() => {});
-        if (isCleanedUp) return;
-
-        // CACAT #2 FIX: Always send profile JSON (not "{}") when connected.
-        // Profile must be loaded into NativeGamepadMapper.buttonMapCache for
-        // findButtonMapping to work. Without this, no touch injection occurs.
+        if (connected) {
+          await TouchInjection.bindService().catch(() => {});
+          if (isCleanedUp) return;
+          await TouchInjection.startGamepadListener().catch(() => {});
+          if (isCleanedUp) return;
+        }
+        // Always send profile — this updates GamepadListenerService.activeProfileJson
+        // which NativeGamepadMapper reads on buildMapCache()
         const profileStr = JSON.stringify(mapProfile);
         await TouchInjection.updateActiveProfile({ profileJson: profileStr });
       } catch (err) {

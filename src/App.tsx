@@ -40,7 +40,7 @@ export default function App() {
   });
 
   const [profiles, setProfiles] = React.useState<GamepadProfile[]>(INITIAL_PROFILES);
-  const [activeProfileId, setActiveProfileId] = React.useState('genshin');
+  const [activeProfileId, setActiveProfileId] = React.useState('efootball');
   const [selectedMainView, setSelectedMainView] = React.useState<'shizuku' | 'overlay' | 'profile' | 'macro' | 'tester' | 'credits' | 'games'>('shizuku');
   const [isKilling, setIsKilling] = React.useState(false);
 

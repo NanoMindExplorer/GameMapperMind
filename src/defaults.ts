@@ -127,28 +127,21 @@ export const INITIAL_PROFILES: GamepadProfile[] = [
     isCustom: false,
     gyroSensitivity: 1.0,
     deadzone: 0.15,
-    smoothing: 0.3,
+    smoothing: 0.0,
     orientation: 'landscape',
     screenshotMode: 'efootball',
     buttons: [
-      // Action buttons (right side, bottom) — typical football game layout
       { id: 'e1', label: 'Pass', type: 'button', x: 85, y: 78, width: 56, height: 56, mappedKey: 'A', androidEventCode: 96, opacity: 0.8 },
       { id: 'e2', label: 'Shoot', type: 'button', x: 90, y: 68, width: 64, height: 64, mappedKey: 'B', androidEventCode: 97, opacity: 0.85 },
       { id: 'e3', label: 'Through', type: 'button', x: 78, y: 88, width: 52, height: 52, mappedKey: 'X', androidEventCode: 99, opacity: 0.8 },
       { id: 'e4', label: 'Lob/Cross', type: 'button', x: 72, y: 75, width: 52, height: 52, mappedKey: 'Y', androidEventCode: 100, opacity: 0.8 },
-      // Sprint (RT) — hold to run faster
       { id: 'e5', label: 'Sprint', type: 'button', x: 60, y: 50, width: 56, height: 56, mappedKey: 'RT', androidEventCode: 105, opacity: 0.75 },
-      // Skill move (LT) — for fancy footwork
       { id: 'e6', label: 'Skill', type: 'button', x: 40, y: 50, width: 56, height: 56, mappedKey: 'LT', androidEventCode: 104, opacity: 0.75 },
-      // LB/RB — switch player / tactics
       { id: 'e7', label: 'Switch', type: 'button', x: 50, y: 30, width: 48, height: 48, mappedKey: 'LB', androidEventCode: 102, opacity: 0.7 },
       { id: 'e8', label: 'Tactics', type: 'button', x: 50, y: 18, width: 48, height: 48, mappedKey: 'RB', androidEventCode: 103, opacity: 0.7 },
-      // Menu buttons
       { id: 'e9', label: 'Pause', type: 'button', x: 50, y: 5, width: 44, height: 44, mappedKey: 'START', androidEventCode: 108, opacity: 0.6 },
-      // Movement stick (left side)
-      { id: 'e10', label: 'Move', type: 'analog_stick', x: 22, y: 70, width: 120, height: 120, mappedKey: 'L_STICK', androidEventCode: 0, opacity: 0.5, deadzone: 0.15, radius: 100 },
-      // Camera/view stick (right side, upper) — for replays/camera angle
-      { id: 'e11', label: 'Camera', type: 'analog_stick', x: 80, y: 35, width: 100, height: 100, mappedKey: 'R_STICK', androidEventCode: 0, opacity: 0.4, deadzone: 0.15, radius: 150 }
+      { id: 'e10', label: 'Move', type: 'analog_stick', x: 22, y: 70, width: 120, height: 120, mappedKey: 'L_STICK', androidEventCode: 0, opacity: 0.5, deadzone: 0.15, radius: 100, sensitivity: 1.0, sensitivityCurve: 'linear' },
+      { id: 'e11', label: 'Camera', type: 'analog_stick', x: 80, y: 35, width: 100, height: 100, mappedKey: 'R_STICK', androidEventCode: 0, opacity: 0.4, deadzone: 0.15, radius: 150, sensitivity: 1.0, sensitivityCurve: 'linear' }
     ]
   }
 ];

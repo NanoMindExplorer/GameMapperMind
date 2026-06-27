@@ -64,43 +64,28 @@ class GamepadPlugin : Plugin() {
             (src and android.view.InputDevice.SOURCE_GAMEPAD) != 0 ||
             (src and android.view.InputDevice.SOURCE_CLASS_JOYSTICK) != 0 ||
             (src and android.view.InputDevice.SOURCE_DPAD) != 0) {
-            val axisX = event.getAxisValue(MotionEvent.AXIS_X)   // Left stick X
-            val axisY = event.getAxisValue(MotionEvent.AXIS_Y)   // Left stick Y
-            // BUG-FIX: Right stick — try AXIS_RX/AXIS_RY first, fallback to AXIS_Z/AXIS_RZ.
-            // Beberapa gamepad (terutama Xbox via Bluetooth) hanya emit AXIS_Z/AXIS_RZ untuk right stick.
-            // Gamepad standar PS4/PS5 pakai AXIS_RX/AXIS_RY. Cek mana yang ada.
-            var axisRX = event.getAxisValue(MotionEvent.AXIS_RX)
-            var axisRY = event.getAxisValue(MotionEvent.AXIS_RY)
-            // BUG-RIGHTAXIS FIX: Only fall back to AXIS_Z/AXIS_RZ if this device has EVER reported
-            // a non-zero value on AXIS_RX/AXIS_RY. Previously, falling back when stick was momentarily
-            // at (0, 0) caused flicker on right-stick release. Now: latch `hasReportedRXRY` per
-            // device id — once we've seen RX/RY signal, we trust RX/RY as the right-stick source.
-            val deviceId = event.deviceId
-            if (!hasReportedRXRY.contains(deviceId)) {
-                if (Math.abs(axisRX) > 0.05f || Math.abs(axisRY) > 0.05f) {
-                    hasReportedRXRY.add(deviceId)
-                } else {
-                    // Device has never reported RX/RY signal — assume it's an Xbox-style controller
-                    // that uses AXIS_Z/AXIS_RZ for right stick.
-                    axisRX = event.getAxisValue(MotionEvent.AXIS_Z)
-                    axisRY = event.getAxisValue(MotionEvent.AXIS_RZ)
-                }
-            }
+            val axisX = event.getAxisValue(MotionEvent.AXIS_X)
+            val axisY = event.getAxisValue(MotionEvent.AXIS_Y)
+            // FIX: Right stick — read BOTH AXIS_RX/RY AND AXIS_Z/RZ, pick whichever has
+            // larger magnitude. This handles ALL controller types without needing a latch.
+            val rx1 = event.getAxisValue(MotionEvent.AXIS_RX)
+            val ry1 = event.getAxisValue(MotionEvent.AXIS_RY)
+            val rx2 = event.getAxisValue(MotionEvent.AXIS_Z)
+            val ry2 = event.getAxisValue(MotionEvent.AXIS_RZ)
+            // Use whichever pair has non-zero values (some controllers report on one pair only)
+            val axisRX = if (Math.abs(rx1) > 0.01f || Math.abs(ry1) > 0.01f) rx1 else rx2
+            val axisRY = if (Math.abs(rx1) > 0.01f || Math.abs(ry1) > 0.01f) ry1 else ry2
+
             val hatX = event.getAxisValue(MotionEvent.AXIS_HAT_X)
             val hatY = event.getAxisValue(MotionEvent.AXIS_HAT_Y)
 
-            // BUG-TRIGGER FIX: Read ALL possible trigger axis candidates and pick the max.
-            // Different controllers report triggers via different axes:
-            //   - AXIS_BRAKE/GAS (22/23) — most generic, Xbox Bluetooth, PS4/PS5
-            //   - AXIS_LTRIGGER/RTRIGGER (17/18) — Xbox USB, some clones
-            // Some controllers emit BOTH (one as 0, the other as actual value). Take max
-            // to be robust against whichever axis is active.
+            // FIX: Trigger — read ALL possible trigger axis candidates and pick the max.
             val l2Brake = event.getAxisValue(MotionEvent.AXIS_BRAKE)
             val r2Gas = event.getAxisValue(MotionEvent.AXIS_GAS)
             val l2Trig = event.getAxisValue(MotionEvent.AXIS_LTRIGGER)
             val r2Trig = event.getAxisValue(MotionEvent.AXIS_RTRIGGER)
-            val l2Trigger = if (Math.abs(l2Brake) >= Math.abs(l2Trig)) l2Brake else l2Trig
-            val r2Trigger = if (Math.abs(r2Gas) >= Math.abs(r2Trig)) r2Gas else r2Trig
+            val l2Trigger = Math.max(Math.abs(l2Brake), Math.abs(l2Trig))
+            val r2Trigger = Math.max(Math.abs(r2Gas), Math.abs(r2Trig))
 
             // BUG-D1 FIX: Only emit if values changed significantly (avoid 60Hz flood when stick is idle).
             val EPSILON = 0.01f
@@ -165,13 +150,8 @@ class GamepadPlugin : Plugin() {
         return false
     }
     
-    // BUG-D1 FIX: Cache last axis values to detect significant change.
+    // Cache last axis values to detect significant change.
     private var lastAxis = FloatArray(8)
-
-    // BUG-RIGHTAXIS FIX: Track which device IDs have reported non-zero AXIS_RX/RY signal.
-    // Once a device has reported RX/RY, we trust it as the right-stick source for that device
-    // and never fall back to AXIS_Z/AXIS_RZ (prevents flicker on right-stick release).
-    private val hasReportedRXRY: MutableSet<Int> = mutableSetOf()
 
     private fun isGamepadButton(keyCode: Int): Boolean {
         return KeyEvent.isGamepadButton(keyCode) ||

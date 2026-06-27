@@ -230,6 +230,19 @@ class TouchInjectionPlugin : Plugin() {
 
     @PluginMethod
     fun startOverlay(call: PluginCall) {
+        // BUG-HIGH-17 FIX: Check SYSTEM_ALERT_WINDOW permission before starting overlay.
+        // Without this, windowManager.addView() throws BadTokenException → crash.
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+            if (!android.provider.Settings.canDrawOverlays(context)) {
+                val settingsIntent = Intent(
+                    android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    android.net.Uri.parse("package:" + context.packageName)
+                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(settingsIntent)
+                call.reject("Overlay permission (SYSTEM_ALERT_WINDOW) belum di-grant. Buka Settings untuk mengizinkan.")
+                return
+            }
+        }
         val profileObj = call.getObject("profile")
         val profileJson = profileObj?.toString() ?: "{}"
         val intent = Intent(context, FloatingOverlayService::class.java)

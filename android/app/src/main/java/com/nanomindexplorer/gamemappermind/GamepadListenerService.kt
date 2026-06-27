@@ -94,13 +94,23 @@ class GamepadListenerService : Service() {
         isListening = true
         Thread {
             try {
-                // BUG-FIX #1: Create NativeGamepadMapper IMMEDIATELY, before getevent -lp.
-                // Previously, NativeGamepadMapper was created AFTER getevent -lp (which takes
-                // 100-500ms). During that time, all button events were silently dropped
-                // (instance was null). Also, if getevent -lp found no gamepad, the thread
-                // returned early and NativeGamepadMapper was NEVER created.
-                // Now: Create first, then parse getevent, then start stream.
-                val nativeMapper = NativeGamepadMapper(this@GamepadListenerService)
+                // BUG-CRITICAL-5 FIX: Wait for profile to be available before creating mapper.
+                // Previously, mapper was created before updateActiveProfile() finished writing,
+                // so buildMapCache() read null → buttonMapCache empty → ZERO injection.
+                val deadline = System.currentTimeMillis() + 3000L
+                while (System.currentTimeMillis() < deadline) {
+                    if (activeProfileJson != null) break
+                    Thread.sleep(50)
+                }
+                if (activeProfileJson == null) {
+                    Log.w("GameMapper", "Profile not available after 3s wait, continuing with empty cache")
+                }
+
+                // BUG-HIGH-19 FIX: Don't create new NativeGamepadMapper if instance already exists.
+                val nativeMapper = NativeGamepadMapper.instance
+                    ?: NativeGamepadMapper(this@GamepadListenerService)
+                // Always rebuild cache with latest profile
+                nativeMapper.buildMapCache()
 
                 // Get min/max first using getevent -p
                 val absRanges = mutableMapOf<String, Pair<Int, Int>>()
@@ -380,6 +390,9 @@ class GamepadListenerService : Service() {
             evdevName.contains("BTN_TR") || evdevName.contains("BTN_R1") -> "RB"
             evdevName.contains("BTN_THUMBL") -> "L3"
             evdevName.contains("BTN_THUMBR") -> "R3"
+            // BUG-HIGH-18 FIX: Fallback for gamepads that use BTN_THUMB/BTN_THUMB2
+            evdevName == "BTN_THUMB" -> "L3"
+            evdevName == "BTN_THUMB2" -> "R3"
             evdevName.contains("BTN_START") -> "START"
             evdevName.contains("BTN_SELECT") -> "SELECT"
             evdevName.contains("BTN_MODE") -> "HOME"

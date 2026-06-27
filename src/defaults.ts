@@ -140,8 +140,10 @@ export const INITIAL_PROFILES: GamepadProfile[] = [
       { id: 'e7', label: 'Switch', type: 'button', x: 50, y: 30, width: 48, height: 48, mappedKey: 'LB', androidEventCode: 102, opacity: 0.7 },
       { id: 'e8', label: 'Tactics', type: 'button', x: 50, y: 18, width: 48, height: 48, mappedKey: 'RB', androidEventCode: 103, opacity: 0.7 },
       { id: 'e9', label: 'Pause', type: 'button', x: 50, y: 5, width: 44, height: 44, mappedKey: 'START', androidEventCode: 108, opacity: 0.6 },
-      { id: 'e10', label: 'Move', type: 'analog_stick', x: 22, y: 70, width: 120, height: 120, mappedKey: 'L_STICK', androidEventCode: 0, opacity: 0.5, deadzone: 0.15, radius: 100, sensitivity: 1.0, sensitivityCurve: 'linear' },
-      { id: 'e11', label: 'Camera', type: 'analog_stick', x: 80, y: 35, width: 100, height: 100, mappedKey: 'R_STICK', androidEventCode: 0, opacity: 0.4, deadzone: 0.15, radius: 150, sensitivity: 1.0, sensitivityCurve: 'linear' }
+      { id: 'e10', label: 'Move', type: 'analog_stick', x: 22, y: 70, width: 130, height: 130, mappedKey: 'L_STICK', androidEventCode: 0, opacity: 0.5, deadzone: 0.15, radius: 200, sensitivity: 1.0, sensitivityCurve: 'linear' },
+      // BUG-HIGH-14 FIX: R_STICK repositioned to match eFootball camera area (right-center, not right-top)
+      // BUG-HIGH-15 FIX: Radius increased from 150 to 250 for better camera range
+      { id: 'e11', label: 'Camera', type: 'analog_stick', x: 75, y: 62, width: 120, height: 120, mappedKey: 'R_STICK', androidEventCode: 0, opacity: 0.4, deadzone: 0.12, radius: 250, sensitivity: 1.2, sensitivityCurve: 'linear' }
     ]
   }
 ];

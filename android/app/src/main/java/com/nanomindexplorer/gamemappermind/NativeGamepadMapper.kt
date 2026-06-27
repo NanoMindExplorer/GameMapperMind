@@ -736,9 +736,14 @@ class NativeGamepadMapper(private val context: Context) {
         // In 'joystick' mode (default), the touch stays within maxRadius of center.
         val stickMode = mapping.optString("stickMode", "joystick")
         val (tX, tY) = if (stickMode == "drag") {
-            // Drag mode: multiply stick deflection by screen dimensions for full-screen move.
-            val dragX = cX + (sx * finalMag * cX * 0.8f)
-            val dragY = cY + (sy * finalMag * cY * 0.8f)
+            // BUG-HIGH-13 FIX: Use screen dimensions (not cX/cY) for drag offset.
+            // Previous formula cX + (sx * finalMag * cX * 0.8) was dimensionally wrong —
+            // cX was used both as position AND as screen width proxy.
+            // Now: offset proportional to screen size, clamped to screen bounds.
+            val screenW = cX * 2f  // approximate screen width (cX is ~50% of screen)
+            val screenH = cY * 2f
+            val dragX = (cX + (sx * finalMag * screenW * 0.3f)).coerceIn(0f, screenW)
+            val dragY = (cY + (sy * finalMag * screenH * 0.3f)).coerceIn(0f, screenH)
             Pair(dragX, dragY)
         } else {
             // Joystick mode (default): relative to center, bounded by maxRadius

@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "tsx server.ts",
     "prebuild": "rimraf dist && npm run lint",
-    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "build": "vite build",
+    "build:full": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "postbuild": "node -e \"const fs=require('fs'); if(!fs.existsSync('dist/client/index.html')){console.error('FAIL: dist/client/index.html missing'); process.exit(1);} console.log('PASS: dist/client/index.html exists');\"",
     "start": "node dist/server.cjs",
     "clean": "rm -rf dist server.js",

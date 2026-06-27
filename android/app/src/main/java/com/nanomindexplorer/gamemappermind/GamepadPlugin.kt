@@ -56,7 +56,14 @@ class GamepadPlugin : Plugin() {
 
     fun handleGenericMotionEvent(event: MotionEvent?): Boolean {
         if (event == null) return false
-        if ((event.source and android.view.InputDevice.SOURCE_JOYSTICK) == android.view.InputDevice.SOURCE_JOYSTICK) {
+        // FIX: Check ALL gamepad-related source flags, not just SOURCE_JOYSTICK.
+        // Some gamepads report motion events as SOURCE_GAMEPAD (without JOYSTICK bit).
+        // Previously, these events were forwarded by MainActivity but silently dropped here.
+        val src = event.source
+        if ((src and android.view.InputDevice.SOURCE_JOYSTICK) != 0 ||
+            (src and android.view.InputDevice.SOURCE_GAMEPAD) != 0 ||
+            (src and android.view.InputDevice.SOURCE_CLASS_JOYSTICK) != 0 ||
+            (src and android.view.InputDevice.SOURCE_DPAD) != 0) {
             val axisX = event.getAxisValue(MotionEvent.AXIS_X)   // Left stick X
             val axisY = event.getAxisValue(MotionEvent.AXIS_Y)   // Left stick Y
             // BUG-FIX: Right stick — try AXIS_RX/AXIS_RY first, fallback to AXIS_Z/AXIS_RZ.

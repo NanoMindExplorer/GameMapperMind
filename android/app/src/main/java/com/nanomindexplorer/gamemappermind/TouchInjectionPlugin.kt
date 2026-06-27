@@ -19,7 +19,11 @@ class TouchInjectionPlugin : Plugin() {
 
     companion object {
         var instance: java.lang.ref.WeakReference<TouchInjectionPlugin>? = null
-        var touchService: ITouchService? = null
+        // BUG-FATAL-3 FIX: @Volatile — touchService is written from Main Thread
+        // (onServiceConnected callback) and read from Background Thread (startGetEventCapture).
+        // Without @Volatile, background thread may see null even after service is connected,
+        // causing getevent stream to never start → ZERO gamepad input.
+        @Volatile var touchService: ITouchService? = null
 
         fun emitGamepadButton(buttonName: String, value: Int, pressure: Float) {
             val data = JSObject()

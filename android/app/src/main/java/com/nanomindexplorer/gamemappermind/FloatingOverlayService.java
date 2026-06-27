@@ -239,7 +239,10 @@ public class FloatingOverlayService extends Service {
                 webViewParams.gravity = Gravity.FILL;
                 
                 windowManager.addView(webView, webViewParams);
-                webView.requestFocus();
+                // BUG-CRITICAL-4 FIX: Removed webView.requestFocus() — it contradicts
+                // FLAG_NOT_FOCUSABLE and can steal focus from eFootball on some OEMs (MIUI, EMUI).
+                // injectInputEvent dispatches to the focused window — if overlay steals focus,
+                // touch events go to our WebView instead of the game.
                 
                 Log.d("GameMapper", "Loading index.html into Overlay WebView");
                 webView.loadUrl("https://appassets.androidplatform.net/public/index.html?overlay=true");

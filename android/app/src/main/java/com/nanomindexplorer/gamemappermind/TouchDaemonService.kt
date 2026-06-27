@@ -723,13 +723,18 @@ class TouchDaemonService : ITouchService.Stub {
     override fun injectTap(x: Float, y: Float, duration: Long): Boolean {
         val id = nextTapIdAndWrap()
         val downRes = touchDown(id, x, y)
-        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+        // BUG-CRITICAL-6 FIX: Use explicit Thread instead of Handler.getMainLooper().postDelayed.
+        // TouchDaemonService runs in Shizuku process — Looper.loop() may not be running,
+        // so Handler.postDelayed would never execute → touchUp never called → pointer stuck.
+        Thread {
             try {
+                Thread.sleep(duration.coerceIn(16L, 1000L))
                 if (isInitialized) touchUp(id)
-            } catch (e: Exception) {
+            } catch (_: InterruptedException) {}
+            catch (e: Exception) {
                 Log.w("GameMapper", "injectTap touchUp failed: ${e.message}")
             }
-        }, duration)
+        }.also { it.isDaemon = true }.start()
         return downRes
     }
 

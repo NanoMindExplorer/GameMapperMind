@@ -13,7 +13,10 @@ import kotlin.random.Random
 
 class NativeGamepadMapper(private val context: Context) {
     companion object {
-        var instance: NativeGamepadMapper? = null
+        // BUG-FATAL-2 FIX: @Volatile — instance is written from Background Thread
+        // (GamepadListenerService.startGetEventCapture) and read from Main Thread (GamepadJniPlugin).
+        // Without @Volatile, Main Thread may never see the instance even after it's created.
+        @Volatile var instance: NativeGamepadMapper? = null
         val syncLock = Any()
         
         fun resetAll() {

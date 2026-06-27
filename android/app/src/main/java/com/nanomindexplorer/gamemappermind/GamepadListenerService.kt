@@ -16,11 +16,16 @@ class GamepadListenerService : Service() {
 
     private val CHANNEL_ID = "GamepadListenerChannel"
     private var evdevProcess: Process? = null
-    private var isListening = false
+    // BUG-CRITICAL-9 FIX: @Volatile — isListening is read from background thread (onOutputLine)
+    // and written from main thread (onDestroy). Without @Volatile, visibility not guaranteed.
+    @Volatile private var isListening = false
 
     companion object {
-        var isRunning = false
-        var activeProfileJson: String? = null // Set from React when profile changes
+        // BUG-FATAL-1 FIX: @Volatile required — activeProfileJson is written from Main Thread
+        // (updateActiveProfile) and read from Background Thread (buildMapCache). Without @Volatile,
+        // Java Memory Model doesn't guarantee the background thread sees the latest value.
+        @Volatile var isRunning = false
+        @Volatile var activeProfileJson: String? = null
     }
 
     override fun onBind(intent: Intent): IBinder? = null
@@ -152,8 +157,10 @@ class GamepadListenerService : Service() {
                     Log.e("GameMapper", "Failed to parse getevent -lp", e)
                 }
 
+                // BUG-CRITICAL-8 FIX: getevent only accepts ONE device path.
+                // Previously joinToString(" ") with multiple devices produced invalid command.
                 val geteventCmd = if (gamepadDevices.isNotEmpty()) {
-                    "getevent -l " + gamepadDevices.joinToString(" ")
+                    "getevent -l ${gamepadDevices[0]}"
                 } else {
                     // BUG-FIX #2: Don't return early if no gamepad found.
                     // NativeGamepadMapper is already created (instance is set).
@@ -336,6 +343,17 @@ class GamepadListenerService : Service() {
                     }
                     override fun onExit(code: Int) {
                         isListening = false
+                        // BUG-CRITICAL-10 FIX: Auto-reconnect when getevent stream ends.
+                        // Previously, if gamepad disconnected or stream died, user had to restart daemon.
+                        Log.w("GameMapper", "getevent stream ended (code=$code), scheduling reconnect...")
+                        if (isRunning) {
+                            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                                if (isRunning && !isListening) {
+                                    Log.i("GameMapper", "Attempting gamepad reconnect...")
+                                    startGetEventCapture()
+                                }
+                            }, 2000L)
+                        }
                     }
                 }
 
@@ -375,9 +393,13 @@ class GamepadListenerService : Service() {
         Log.d("GameMapper", "GamepadListenerService: onDestroy")
         isRunning = false
         isListening = false
-        TouchInjectionPlugin.touchService?.releaseAllPointers()
-        try {
-            TouchInjectionPlugin.touchService?.stopStreamCommand()
-        } catch (e: Exception) {}
+        // BUG-CRITICAL-12 FIX: Move binder calls to background thread to prevent ANR.
+        // Previously, releaseAllPointers() and stopStreamCommand() were synchronous
+        // binder calls on Main Thread — could block if Shizuku process was unresponsive.
+        val ts = TouchInjectionPlugin.touchService
+        Thread {
+            try { ts?.releaseAllPointers() } catch (_: Exception) {}
+            try { ts?.stopStreamCommand() } catch (_: Exception) {}
+        }.also { it.isDaemon = true }.start()
     }
 }

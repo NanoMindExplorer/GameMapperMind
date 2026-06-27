@@ -5,14 +5,18 @@ import android.os.Looper
 import android.util.Log
 
 object GamepadJniPlugin {
-    
+
     private val batchedEvents = mutableListOf<() -> Unit>()
     private var isPending = false
-    
-    // BUG-FIX #1: Replace Choreographer with Handler(MainLooper).
-    // Choreographer.getInstance() requires a Looper thread. Binder threads (Shizuku getevent)
-    // and background threads don't have Loopers → IllegalStateException → events SILENTLY DROPPED.
-    // Handler(MainLooper) works from ANY thread — no crash, no dropped events.
+
+    // BUG-CRITICAL-7 FIX: Use dedicated HandlerThread for injection instead of Main Thread.
+    // Binder calls (touchDown/touchMove/touchUp) are cross-process and synchronous —
+    // running them on Main Thread causes ANR risk and adds ~16ms latency per frame.
+    // HandlerThread has its own Looper on a background thread, so binder calls don't block UI.
+    private val injectionThread = android.os.HandlerThread("GamepadInjection").also { it.start() }
+    private val injectionHandler = Handler(injectionThread.looper)
+
+    // Keep mainHandler for UI-only events (rarely used now)
     private val mainHandler = Handler(Looper.getMainLooper())
     
     private val processRunnable = Runnable {
@@ -29,10 +33,9 @@ object GamepadJniPlugin {
     }
 
     fun queueEvent(eventAction: () -> Unit) {
-        // LATENCY-FIX: If already on main thread, execute immediately instead of batching.
-        // This eliminates ~16ms delay from Handler.post scheduling.
-        // Only batch when called from binder/background threads.
-        if (Looper.myLooper() == Looper.getMainLooper()) {
+        // BUG-CRITICAL-7 FIX: Use injectionHandler (background HandlerThread) instead of mainHandler.
+        // If already on injection thread, execute immediately (zero latency).
+        if (Looper.myLooper() == injectionThread.looper) {
             eventAction.invoke()
             return
         }
@@ -45,7 +48,7 @@ object GamepadJniPlugin {
             }
         }
         if (needsPost) {
-            mainHandler.post(processRunnable)
+            injectionHandler.post(processRunnable)
         }
     }
 

@@ -59,13 +59,22 @@ export default function InstalledGamesPanel({ onLogMessage, profiles, onProfileS
     loadGames();
   }, [showAllApps]);
 
-  const handleLaunch = async (packageName: string) => {
-    setLaunchingPkg(packageName);
+  const handleLaunch = async (game: InstalledGame) => {
+    // BUG-HIGH-16 FIX: Auto-switch profile based on packageName before launching.
+    const matchingProfile = profiles.find(p => p.packageName === game.packageName);
+    if (matchingProfile) {
+      onProfileSelect(matchingProfile.id);
+      onLogMessage(`[PROFILE] Auto-switched ke "${matchingProfile.name}" untuk ${game.name}.`);
+    } else {
+      onLogMessage(`[PROFILE] Tidak ada profil untuk ${game.name}. Buat profil terlebih dahulu.`);
+    }
+
+    setLaunchingPkg(game.packageName);
     try {
-      await InstalledGames.launchApp({ packageName });
-      onLogMessage(`[LAUNCH] ${packageName} started.`);
+      await InstalledGames.launchApp({ packageName: game.packageName });
+      onLogMessage(`[LAUNCH] ${game.name} started.`);
     } catch (e: any) {
-      onLogMessage(`[LAUNCH ERROR] ${packageName}: ${e.message || e}`);
+      onLogMessage(`[LAUNCH ERROR] ${game.name}: ${e.message || e}`);
     } finally {
       setTimeout(() => setLaunchingPkg(null), 1500);
     }
@@ -229,7 +238,7 @@ export default function InstalledGamesPanel({ onLogMessage, profiles, onProfileS
                   {/* Actions */}
                   <div className="w-full flex gap-1 mt-auto">
                     <button
-                      onClick={() => handleLaunch(game.packageName)}
+                      onClick={() => handleLaunch(game)}
                       disabled={isLaunching}
                       className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-500 text-white text-[10px] font-bold rounded transition-colors"
                     >

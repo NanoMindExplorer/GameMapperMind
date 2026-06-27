@@ -136,9 +136,15 @@ class GamepadListenerService : Service() {
                             val pathMatch = Regex("/dev/input/event\\d+").find(line)
                             currentDevicePath = pathMatch?.value
                             currentDeviceIsGamepad = false
-                        } else if (line.contains("BTN_A") || line.contains("BTN_GAMEPAD") || line.contains("ABS_HAT0X") ||
-                                   line.contains("BTN_SOUTH") || line.contains("BTN_EAST") || line.contains("BTN_X") || line.contains("BTN_Y") ||
-                                   line.contains("BTN_NORTH") || line.contains("BTN_WEST")) {
+                        } else if (line.contains("BTN_A") || line.contains("BTN_GAMEPAD") ||
+                                   line.contains("ABS_HAT0X") || line.contains("ABS_HAT0Y") ||
+                                   line.contains("BTN_SOUTH") || line.contains("BTN_EAST") ||
+                                   line.contains("BTN_X") || line.contains("BTN_Y") ||
+                                   line.contains("BTN_NORTH") || line.contains("BTN_WEST") ||
+                                   // BUG-CRITICAL-11 FIX: Detect non-standard gamepads
+                                   line.contains("BTN_TRIGGER") || line.contains("BTN_THUMB") ||
+                                   line.contains("BTN_TOP") || line.contains("BTN_JOYSTICK") ||
+                                   (line.contains("ABS_X") && !line.contains("ABS_MT_POSITION_X"))) {
                             currentDeviceIsGamepad = true
                         }
                         

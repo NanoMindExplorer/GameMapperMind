@@ -25,17 +25,15 @@ class GamepadPlugin : Plugin() {
             emitButtonEvent(keyCode, "PRESSED", event)
             val buttonName = mapKeyCodeToButtonName(keyCode)
             if (buttonName != "UNKNOWN") {
-                // DUAL-PATH FIX: When Shizuku getevent path is active, it is the SINGLE source
-                // of truth for both JS events AND injection. This prevents:
-                //   1. Double JS emit (UI flicker)
-                //   2. Double injection call with conflicting gamepadIndex (Android path uses
-                //      index=0 hardcoded, Shizuku path uses indexOf(devPath) — for multi-gamepad
-                //      these don't match, causing lastState dedup to fail → double injection)
-                // When Shizuku is NOT running, this Android path is the fallback for injection.
-                if (!GamepadListenerService.isRunning) {
-                    TouchInjectionPlugin.emitGamepadButton(buttonName, 1, 1.0f)
-                    GamepadJniPlugin.handleButtonBatched(0, buttonName, true)
-                }
+                // CRITICAL FIX: ALWAYS emit JS events + call injection from Android path.
+                // Previously, an isRunning guard blocked this when Shizuku service was "running"
+                // — but isRunning is true even when getevent stream FAILED to start (no gamepad
+                // detected, Shizuku not ready, etc). This caused ZERO events reaching canvas
+                // and ZERO injection when getevent wasn't actually streaming.
+                // Now: always emit + inject. The lastState dedup in NativeGamepadMapper
+                // prevents double injection when both paths are active.
+                TouchInjectionPlugin.emitGamepadButton(buttonName, 1, 1.0f)
+                GamepadJniPlugin.handleButtonBatched(0, buttonName, true)
             }
             return true
         }
@@ -47,12 +45,9 @@ class GamepadPlugin : Plugin() {
             emitButtonEvent(keyCode, "RELEASED", event)
             val buttonName = mapKeyCodeToButtonName(keyCode)
             if (buttonName != "UNKNOWN") {
-                // DUAL-PATH FIX: see handleKeyDown — skip both JS emit AND injection when
-                // Shizuku path is live.
-                if (!GamepadListenerService.isRunning) {
-                    TouchInjectionPlugin.emitGamepadButton(buttonName, 0, 0.0f)
-                    GamepadJniPlugin.handleButtonBatched(0, buttonName, false)
-                }
+                // CRITICAL FIX: Always emit + inject — see handleKeyDown for explanation.
+                TouchInjectionPlugin.emitGamepadButton(buttonName, 0, 0.0f)
+                GamepadJniPlugin.handleButtonBatched(0, buttonName, false)
             }
             return true
         }
@@ -125,16 +120,13 @@ class GamepadPlugin : Plugin() {
             ret.put("timestamp", event.eventTime)
             notifyListeners("gamepadEvent", ret)
 
-            // BUG-SYNC3 FIX: Emit [LX, LY, RX, RY, L2, R2] — consistent with Shizuku path.
-            // DUAL-PATH FIX: When Shizuku getevent path is active, it is the single source
-            // for both JS events AND injection. Skip both to prevent:
-            //   1. Double JS emit (axis indicator flicker)
-            //   2. Double injection with conflicting gamepadIndex (Android=0, Shizuku=indexOf)
+            // CRITICAL FIX: ALWAYS emit JS events + call injection from Android path.
+            // The isRunning guard was blocking ALL axis events when Shizuku service was
+            // "running" but getevent stream wasn't actually streaming. This caused analog
+            // stick to appear dead in canvas and no stick injection.
             val axes = floatArrayOf(axisX, axisY, axisRX, axisRY, l2Trigger, r2Trigger)
-            if (!GamepadListenerService.isRunning) {
-                TouchInjectionPlugin.emitGamepadAxis(axes)
-                GamepadJniPlugin.handleAxisBatched(0, axisX, axisY, axisRX, axisRY, l2Trigger, r2Trigger)
-            }
+            TouchInjectionPlugin.emitGamepadAxis(axes)
+            GamepadJniPlugin.handleAxisBatched(0, axisX, axisY, axisRX, axisRY, l2Trigger, r2Trigger)
             
             // D-pad: emit press AND release
             // HAT axis: -1.0 = up/left, 0 = centered, 1.0 = down/right

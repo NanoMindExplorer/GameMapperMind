@@ -27,7 +27,7 @@ Aplikasi pemetaan gamepad (Keymapper) untuk menghubungkan kontroler fisik dengan
 - **Orientation-aware** (landscape + portrait)
 
 ## Supported Games (built-in profiles)
-- eFootball 2026 (jp.konami.pesam)
+- eFootball 
 - Genshin Impact
 - PUBG Mobile
 - Mobile Legends

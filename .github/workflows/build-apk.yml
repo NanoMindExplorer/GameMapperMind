@@ -1,9 +1,17 @@
 name: Build Android APK
-on: [push, pull_request]
+on:
+  push:
+    tags:
+      - 'v*'
+    branches:
+      - main
+  pull_request:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -47,13 +55,12 @@ jobs:
         working-directory: ./android
         run: ./gradlew assembleDebug
 
-      # BUG-K3 FIX: Also test assembleReleaseTest (ProGuard enabled + debug signing) to verify R8 rules don't break the build.
       - name: Build Release-Test APK (ProGuard verification)
         working-directory: ./android
         run: ./gradlew assembleReleaseTest
         continue-on-error: true
 
-      - name: Upload APK Artifact
+      - name: Upload APK Artifact (Actions)
         uses: actions/upload-artifact@v4
         with:
           name: GameMapperMind-debug-apk
@@ -61,12 +68,49 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-      - name: Upload Release-Test APK Artifact
+      - name: Upload Release-Test APK Artifact (Actions)
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: GameMapperMind-releaseTest-apk
           path: android/app/build/outputs/apk/releaseTest/app-releaseTest.apk
           retention-days: 30
-          # BUG FIX: 'false' is not valid for upload-artifact@v4. Use 'ignore' to skip upload if file not found.
           if-no-files-found: ignore
+
+      # Create GitHub Release with APK attached (only on tag push)
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: GameMapperMind ${{ github.ref_name }}
+          body: |
+            ## GameMapperMind ${{ github.ref_name }}
+            
+            ### Download APK
+            Pilih `GameMapperMind-debug.apk` di bawah untuk install.
+            
+            ### Setup
+            1. Uninstall APK lama jika ada
+            2. Install APK baru
+            3. Buka app → Grant Shizuku permission
+            4. Tap "Start Daemon"
+            5. Tap "Test Injection" untuk verifikasi
+            6. Pilih profil game → Buka game
+            
+            ### Minimum Requirements
+            - Android 12+ (API 31)
+            - Shizuku v13+ (https://shizuku.rikka.app/)
+            - Gamepad Bluetooth/USB
+            
+            ### Features
+            - 3-path touch injection (AIDL → InputManager → shell)
+            - Turbo, Toggle, Charge, Gesture, Macro interactions
+            - Learn Trigger + Chord mode
+            - Auto-center calibration
+            - Installed Games browser
+            - Test Injection diagnostic
+          files: |
+            android/app/build/outputs/apk/debug/app-debug.apk
+          draft: false
+          prerelease: false

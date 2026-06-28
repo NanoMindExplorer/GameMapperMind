@@ -10,8 +10,8 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         // BUG-K2 FIX: Auto-increment versionCode from CI run number. Falls back to 1 for local builds.
         // This ensures every CI build has a unique, monotonically increasing versionCode for Play Store updates.
-        versionCode Integer.parseInt(System.getenv("GITHUB_RUN_NUMBER") ?: "1")
-        versionName "1.0"
+        versionCode Integer.parseInt(System.getenv("GITHUB_RUN_NUMBER") ?: "2")
+        versionName "2.1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

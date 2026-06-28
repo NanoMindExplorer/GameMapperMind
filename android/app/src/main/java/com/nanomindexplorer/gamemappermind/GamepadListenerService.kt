@@ -76,6 +76,13 @@ class GamepadListenerService : Service() {
     }
 
     private fun startGetEventCapture() {
+        // NEW-H4 FIX: Guard against double-spawn of getevent thread.
+        // Auto-reconnect in onExit() can fire multiple times if disconnect-reconnect happens fast.
+        // Without this guard, two getevent streams run simultaneously → double injection.
+        if (isListening) {
+            Log.w("GameMapper", "startGetEventCapture: already listening, skip")
+            return
+        }
         if (!rikka.shizuku.Shizuku.pingBinder()) {
             Log.w("GameMapper", "Shizuku binder tidak aktif")
             TouchInjectionPlugin.emitGamepadButton("ERROR_SHIZUKU_NOT_RUNNING", 0, 0f)

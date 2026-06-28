@@ -236,6 +236,12 @@ public class FloatingOverlayService extends Service {
                         WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN | 
                         WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE, // Start in play mode (not touchable)
                         PixelFormat.TRANSLUCENT);
+                // NEW-M5 FIX: Extend overlay into display cutout area for fullscreen games.
+                // Without this, overlay is cut off at notch/punchhole → coordinates off at screen edges.
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    webViewParams.layoutInDisplayCutoutMode =
+                        WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+                }
                 webViewParams.gravity = Gravity.FILL;
                 
                 windowManager.addView(webView, webViewParams);

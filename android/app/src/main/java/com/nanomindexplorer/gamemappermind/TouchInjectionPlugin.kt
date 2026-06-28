@@ -18,7 +18,10 @@ import android.content.pm.PackageManager
 class TouchInjectionPlugin : Plugin() {
 
     companion object {
-        var instance: java.lang.ref.WeakReference<TouchInjectionPlugin>? = null
+        // NEW-C2 FIX: @Volatile on WeakReference — emit functions are called from
+        // background threads (getevent, injectionHandler). Without @Volatile, they may
+        // see stale null → JS events (onGamepadButton/onGamepadAxis) never reach React.
+        @Volatile var instance: java.lang.ref.WeakReference<TouchInjectionPlugin>? = null
         // BUG-FATAL-3 FIX: @Volatile — touchService is written from Main Thread
         // (onServiceConnected callback) and read from Background Thread (startGetEventCapture).
         // Without @Volatile, background thread may see null even after service is connected,

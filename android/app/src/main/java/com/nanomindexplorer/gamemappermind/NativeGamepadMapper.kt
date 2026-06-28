@@ -112,9 +112,19 @@ class NativeGamepadMapper(private val context: Context) {
     }
     
     private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-    private val mainHandler = Handler(Looper.getMainLooper())
+    // NEW-C1 FIX: Use dedicated HandlerThread instead of Main Thread for binder calls.
+    // turbo/macro/gesture/swipe all schedule touchDown/touchMove/touchUp via this handler.
+    // Previously used Main Thread → ANR risk + 16ms latency per frame.
+    private val mapperInjectionThread = android.os.HandlerThread("MapperInjection").also { it.start() }
+    private val mainHandler = Handler(mapperInjectionThread.looper)
 
     init {
+        // NEW-L9 FIX: Cancel all turbo runnables from previous instance before overwriting.
+        // Without this, old turbo loops continue running on old instance's handler.
+        instance?.let { old ->
+            old.turboRunnables.values.forEach { old.mainHandler.removeCallbacks(it) }
+            old.turboRunnables.clear()
+        }
         instance = this
         buildMapCache()
     }
@@ -736,12 +746,14 @@ class NativeGamepadMapper(private val context: Context) {
         // In 'joystick' mode (default), the touch stays within maxRadius of center.
         val stickMode = mapping.optString("stickMode", "joystick")
         val (tX, tY) = if (stickMode == "drag") {
-            // BUG-HIGH-13 FIX: Use screen dimensions (not cX/cY) for drag offset.
-            // Previous formula cX + (sx * finalMag * cX * 0.8) was dimensionally wrong —
-            // cX was used both as position AND as screen width proxy.
-            // Now: offset proportional to screen size, clamped to screen bounds.
-            val screenW = cX * 2f  // approximate screen width (cX is ~50% of screen)
-            val screenH = cY * 2f
+            // NEW-H3 FIX: Use actual screen dimensions from windowManager, not cX*2 approximation.
+            // Previous cX*2 was wrong for sticks not at 50% screen position (e.g., L_STICK at 22%).
+            val (screenW, screenH) = try {
+                val b = windowManager.currentWindowMetrics.bounds
+                Pair(b.width().toFloat(), b.height().toFloat())
+            } catch (e: Exception) {
+                Pair(1920f, 1080f)  // fallback
+            }
             val dragX = (cX + (sx * finalMag * screenW * 0.3f)).coerceIn(0f, screenW)
             val dragY = (cY + (sy * finalMag * screenH * 0.3f)).coerceIn(0f, screenH)
             Pair(dragX, dragY)

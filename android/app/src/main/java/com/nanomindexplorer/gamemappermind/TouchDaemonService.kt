@@ -377,23 +377,37 @@ class TouchDaemonService : ITouchService.Stub {
         val downTime = baseDownTime
         val eventTime = SystemClock.uptimeMillis()
 
-        // For Path C (shell), we can only do single taps — no multi-touch, no move.
-        // If activePath is "C" and this is a DOWN with exactly 1 pointer, use shell.
+        // INJECTION-FIX: For ACTION_DOWN/UP with 1 pointer, try shell FIRST (Path C).
+        // Path C (input tap) is GUARANTEED to work via Shizuku shell uid.
+        // Path A/B (injectInputEvent) may silently return false on some devices.
+        // For ACTION_MOVE (analog stick), shell can't help — try Path A/B only.
+        if (pointerCount == 1 && (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_UP ||
+                action == (MotionEvent.ACTION_POINTER_DOWN or (actionIndex shl MotionEvent.ACTION_POINTER_INDEX_SHIFT)) ||
+                action == (MotionEvent.ACTION_POINTER_UP or (actionIndex shl MotionEvent.ACTION_POINTER_INDEX_SHIFT)))) {
+            // For DOWN: do shell tap immediately (combines down+up)
+            // For UP: already tapped on DOWN, just return true
+            if (activePath == "C" || activePath == null) {
+                return handleShellInjection(action, pointerCoords, pointerCount)
+            }
+        }
+
+        // For MOVE or if Path A/B is active, use MotionEvent injection
         if (activePath == "C") {
-            return handleShellInjection(action, pointerCoords, pointerCount)
+            // Path C can't do MOVE — silently fail
+            return false
         }
 
         // Build the MotionEvent for Path A/B
         val event = MotionEvent.obtain(
             downTime, eventTime, action, actionIndex,
             pointerProperties, pointerCoords,
-            0, 0, 1f, 1f, 0, 0, currentInputSource, 0
+            0, 0, 1f, 1f, -1, 0, currentInputSource, 0
         )
 
         try {
             // Try active path first
             val currentPath = activePath
-            if (currentPath != null) {
+            if (currentPath != null && currentPath != "C") {
                 val result = when (currentPath) {
                     "A" -> tryPathA(event)
                     "B" -> tryPathB(event)
@@ -408,10 +422,15 @@ class TouchDaemonService : ITouchService.Stub {
                     Log.w("GameMapper", "Path $currentPath failed $fails times — switching")
                     switchToNextPath(currentPath)
                 }
+                // FALLBACK: If Path A/B failed, try shell for DOWN/UP
+                if (pointerCount == 1 && (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_UP)) {
+                    Log.w("GameMapper", "Path $currentPath failed, falling back to shell for tap")
+                    return handleShellInjection(action, pointerCoords, pointerCount)
+                }
                 return false
             }
 
-            // No active path yet — try A, then B, then settle on C
+            // No active path yet — try A, then B, then shell
             if (tryPathA(event)) {
                 activePath = "A"
                 Log.i("GameMapper", "Active injection path set to A (IInputManager AIDL)")
@@ -424,8 +443,8 @@ class TouchDaemonService : ITouchService.Stub {
                 pathFailCount.set(0)
                 return true
             }
-            // Both failed — switch to shell fallback permanently
-            Log.e("GameMapper", "Paths A and B both failed — switching to shell fallback (Path C)")
+            // Both failed — use shell for taps
+            Log.e("GameMapper", "Paths A and B both failed — using shell fallback (Path C)")
             activePath = "C"
             return handleShellInjection(action, pointerCoords, pointerCount)
         } finally {

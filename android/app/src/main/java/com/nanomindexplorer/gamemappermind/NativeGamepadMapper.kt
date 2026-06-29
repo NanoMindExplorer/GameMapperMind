@@ -599,7 +599,11 @@ class NativeGamepadMapper(private val context: Context) {
                 if (p != null) {
                     p.isActive = true
                     p.virtualKey = buttonName
-                    TouchInjectionPlugin.touchService?.touchDown(p.id, x, y)
+                    // CRASH FIX: Wrap binder call in try-catch — RemoteException crashes the app
+                    try { TouchInjectionPlugin.touchService?.touchDown(p.id, x, y) } catch(e: Exception) {
+                        p.isActive = false; p.virtualKey = null
+                        Log.w("GameMapper", "touchDown failed for $buttonName: ${e.message}")
+                    }
 
                     if (type == "swipe" && mapping.has("swipeEndX") && mapping.has("swipeEndY")) {
                         val (ex, ey) = getScreenCoords(mapping.getDouble("swipeEndX"), mapping.getDouble("swipeEndY"))
@@ -608,13 +612,13 @@ class NativeGamepadMapper(private val context: Context) {
                         mainHandler.postDelayed({
                             synchronized(syncLock) {
                                 if (p.isActive) {
-                                    TouchInjectionPlugin.touchService?.touchMove(p.id, ex + ox, ey + oy)
+                                    try { TouchInjectionPlugin.touchService?.touchMove(p.id, ex + ox, ey + oy) } catch(_: Exception) {}
                                     mainHandler.postDelayed({
                                         synchronized(syncLock) {
                                             if (p.isActive) {
                                                 p.isActive = false
                                                 p.virtualKey = null
-                                                TouchInjectionPlugin.touchService?.touchUp(p.id)
+                                                try { TouchInjectionPlugin.touchService?.touchUp(p.id) } catch(_: Exception) {}
                                             }
                                         }
                                     }, swipeDuration)

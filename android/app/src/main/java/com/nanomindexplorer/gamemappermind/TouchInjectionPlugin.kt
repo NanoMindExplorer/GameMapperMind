@@ -29,19 +29,28 @@ class TouchInjectionPlugin : Plugin() {
         @Volatile var touchService: ITouchService? = null
 
         fun emitGamepadButton(buttonName: String, value: Int, pressure: Float) {
-            val data = JSObject()
-            data.put("buttonName", buttonName)
-            data.put("value", value)
-            data.put("pressure", pressure)
-            instance?.get()?.notifyListeners("onGamepadButton", data)
+            try {
+                val data = JSObject()
+                data.put("buttonName", buttonName)
+                data.put("value", value)
+                data.put("pressure", pressure)
+                instance?.get()?.notifyListeners("onGamepadButton", data)
+            } catch (e: Exception) {
+                // CRASH FIX: notifyListeners can throw if called before bridge is ready
+                android.util.Log.w("GameMapper", "emitGamepadButton failed: ${e.message}")
+            }
         }
 
         fun emitGamepadAxis(axes: FloatArray) {
-            val data = JSObject()
-            val jsArray = com.getcapacitor.JSArray()
-            axes.forEach { jsArray.put(it.toDouble()) }
-            data.put("axes", jsArray)
-            instance?.get()?.notifyListeners("onGamepadAxis", data)
+            try {
+                val data = JSObject()
+                val jsArray = com.getcapacitor.JSArray()
+                axes.forEach { jsArray.put(it.toDouble()) }
+                data.put("axes", jsArray)
+                instance?.get()?.notifyListeners("onGamepadAxis", data)
+            } catch (e: Exception) {
+                android.util.Log.w("GameMapper", "emitGamepadAxis failed: ${e.message}")
+            }
         }
 
         fun emitGamepadFeedback(type: String, intensity: Float, duration: Long) {

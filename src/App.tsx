@@ -340,25 +340,19 @@ export default function App() {
     import('@capacitor/app').then(({ App: CapacitorApp }) => {
       appListener = CapacitorApp.addListener('appStateChange', async (state) => {
         if (state.isActive) {
-           // SHIZUKU-PERSIST FIX: On app resume, fetch status AND do a one-shot rebind
-           // if permission is granted but touchService is dead. This is NOT churn —
-           // it only fires once per resume (guarded by isBindingRef in useShizuku).
-           // Previously, polling was read-only which meant if binding died while
-           // backgrounded, user had to manually tap "Start Daemon" again.
            await fetchStatus();
-           // After fetchStatus updates state, check if we need to rebind.
-           // The rebind logic is in useShizuku.checkShizukuStatus — but that's
-           // read-only now. So we call bindAndStart directly if service is dead.
-           // This is safe because isBindingRef prevents concurrent binds.
+           // SHIZUKU-PERSIST FIX: Always rebind on resume if permission granted.
+           // The old code only rebound if !touchServiceAlive, but the check itself
+           // can fail silently if the binder is in a bad state. Always calling
+           // startDaemon is safe — bindService() checks isBound && serviceAlive
+           // internally and returns early if already bound.
            try {
-             const { granted, touchServiceAlive } = await TouchInjection.checkPermission();
-             if (granted && !touchServiceAlive) {
-               // One-shot rebind on resume — prevents "app disappeared from Shizuku"
-               // after backgrounding. The isBindingRef guard in useShizuku prevents churn.
+             const { granted } = await TouchInjection.checkPermission();
+             if (granted) {
                await startDaemon();
              }
            } catch (e) {
-             console.warn("Resume rebind check failed:", e);
+             console.warn("Resume rebind failed:", e);
            }
         }
       });

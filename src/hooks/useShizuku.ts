@@ -44,23 +44,17 @@ export const useShizuku = () => {
         const { granted, touchServiceAlive, isBound } = await TouchInjection.checkPermission();
         const { daemonRunning } = await TouchInjection.checkDaemonRunning();
 
-        // BUG-SHIZUKU-PERSIST FIX: Removed the auto-rebind logic that fired every 5 seconds.
-        // Previously, if `!touchServiceAlive`, this code called `bindAndStart()` which internally
-        // calls `bindService()` — and the old `bindService()` impl called `unbindUserService` before
-        // re-binding. That unbind-then-bind churn is what made the app disappear from Shizuku's
-        // "App Management" tab every 5 seconds.
-        //
-        // New strategy:
-        //   - Polling (this function) is READ-ONLY — it checks status but does NOT mutate binding state.
-        //   - Auto-rebind only happens on explicit triggers:
-        //       (a) User grants permission via dialog (onShizukuPermissionResult listener)
-        //       (b) User clicks "Start Daemon" button (startDaemon → bindAndStart)
-        //       (c) App resumes from background AND permission was granted but never bound (one-shot)
-        //   - If service dies mid-session, user must manually tap "Start Daemon" again. This is
-        //     better than silent churn that breaks Shizuku's app tracking.
-        //
-        // We still auto-start GamepadListenerService if touchService is alive but foreground service
-        // died — that's safe (doesn't touch Shizuku binding state).
+        // SHIZUKU-PERSIST FIX: Auto-rebind if permission granted but service dead.
+        // This is NOT churn — bindService() checks isBound && serviceAlive internally
+        // and returns early if already bound. It only actually binds if needed.
+        if (granted && !touchServiceAlive && !isBindingRef.current) {
+            isBindingRef.current = true;
+            try {
+              await bindAndStart();
+            } finally {
+              setTimeout(() => { isBindingRef.current = false; }, 3000);
+            }
+        }
 
         if (granted && touchServiceAlive && !daemonRunning) {
             try {

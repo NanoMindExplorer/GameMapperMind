@@ -79,13 +79,16 @@ class GamepadPlugin : Plugin() {
             val hatX = event.getAxisValue(MotionEvent.AXIS_HAT_X)
             val hatY = event.getAxisValue(MotionEvent.AXIS_HAT_Y)
 
-            // FIX: Trigger — read ALL possible trigger axis candidates and pick the max.
-            val l2Brake = event.getAxisValue(MotionEvent.AXIS_BRAKE)
-            val r2Gas = event.getAxisValue(MotionEvent.AXIS_GAS)
-            val l2Trig = event.getAxisValue(MotionEvent.AXIS_LTRIGGER)
-            val r2Trig = event.getAxisValue(MotionEvent.AXIS_RTRIGGER)
-            val l2Trigger = Math.max(Math.abs(l2Brake), Math.abs(l2Trig))
-            val r2Trigger = Math.max(Math.abs(r2Gas), Math.abs(r2Trig))
+            // FIX: Trigger — read ALL possible trigger axis candidates.
+            // Triggers should be 0.0 at rest, positive when pressed.
+            // Some gamepads report -1.0 at rest → Math.abs would make it 1.0 (always pressed!)
+            // Fix: use Math.max (not Math.abs) and clamp negative to 0.
+            val l2Brake = event.getAxisValue(MotionEvent.AXIS_BRAKE).coerceAtLeast(0f)
+            val r2Gas = event.getAxisValue(MotionEvent.AXIS_GAS).coerceAtLeast(0f)
+            val l2Trig = event.getAxisValue(MotionEvent.AXIS_LTRIGGER).coerceAtLeast(0f)
+            val r2Trig = event.getAxisValue(MotionEvent.AXIS_RTRIGGER).coerceAtLeast(0f)
+            val l2Trigger = Math.max(l2Brake, l2Trig)
+            val r2Trigger = Math.max(r2Gas, r2Trig)
 
             // BUG-D1 FIX: Only emit if values changed significantly (avoid 60Hz flood when stick is idle).
             val EPSILON = 0.01f

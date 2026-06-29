@@ -30,6 +30,7 @@ class NativeGamepadMapper(private val context: Context) {
                     }
                 }
                 instance?.lastState?.clear()
+                instance?.smoothedAxes?.forEach { buf -> buf.fill(0f) }
                 instance?.buildMapCache()
             }
         }
@@ -720,11 +721,16 @@ class NativeGamepadMapper(private val context: Context) {
         val (cX, cY) = getScreenCoords(mapping.getDouble("x"), mapping.getDouble("y"))
 
         if (rawMag <= deadzone) {
-            // Inside deadzone — release pointer if active
             if (pointer.isActive) {
-                pointer.isActive = false
-                try { TouchInjectionPlugin.touchService?.touchUp(pointer.id) } catch(e: Exception) {}
+                try {
+                    TouchInjectionPlugin.touchService?.touchUp(pointer.id)
+                    pointer.isActive = false
+                } catch (e: Exception) {
+                    android.util.Log.w("GameMapper", "touchUp retry next frame: \${e.message}")
+                }
             }
+            smoothBuffer[smoothOffset]     = 0f
+            smoothBuffer[smoothOffset + 1] = 0f
             return
         }
 

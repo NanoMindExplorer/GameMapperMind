@@ -210,9 +210,7 @@ class GamepadListenerService : Service() {
                 // calibration, the stick appears "stuck" in one direction.
                 // We capture the first EV_ABS value for each axis as the neutral,
                 // then subtract it during normalization.
-                val axisNeutral = mutableMapOf<String, Int>()
-                var calibrationComplete = false
-                var calibrationStartTime = System.currentTimeMillis()
+                // BUG-ANALOG-1 FIX: auto-calibration vars removed, use math midpoint below
                 
                 // nativeMapper already created at top of thread (BUG-FIX #1)
                 val streamListener = object : ICommandOutputListener.Stub() {
@@ -345,7 +343,8 @@ class GamepadListenerService : Service() {
                                                 // AUTO-CENTER: Use calibrated neutral instead of mathematical midpoint.
                                                 // If we have a calibrated neutral, use it as the center.
                                                 // Otherwise fall back to mathematical midpoint.
-                                                val neutral = axisNeutral[axisType]?.toFloat() ?: (min + span / 2f)
+                                                // BUG-ANALOG-1 FIX: always use math midpoint
+                                                val neutral = min + span / 2f
                                                 val half = span / 2f
                                                 finalVal = if (half > 0f) ((rawVal - neutral) / half).coerceIn(-1f, 1f) else 0f
                                             }

@@ -112,16 +112,17 @@ class NativeGamepadMapper(private val context: Context) {
         }
     }
     
-    private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+    // CRASH FIX: Use lazy initialization for windowManager — context.getSystemService
+    // can crash if called too early during Activity onCreate (before window is attached).
+    private val windowManager: WindowManager by lazy {
+        context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+    }
     // NEW-C1 FIX: Use dedicated HandlerThread instead of Main Thread for binder calls.
-    // turbo/macro/gesture/swipe all schedule touchDown/touchMove/touchUp via this handler.
-    // Previously used Main Thread → ANR risk + 16ms latency per frame.
     private val mapperInjectionThread = android.os.HandlerThread("MapperInjection").also { it.start() }
     private val mainHandler = Handler(mapperInjectionThread.looper)
 
     init {
         // NEW-L9 FIX: Cancel all turbo runnables from previous instance before overwriting.
-        // Without this, old turbo loops continue running on old instance's handler.
         instance?.let { old ->
             old.turboRunnables.values.forEach { old.mainHandler.removeCallbacks(it) }
             old.turboRunnables.clear()

@@ -203,15 +203,12 @@ class GamepadListenerService : Service() {
                 var r2Trigger = 0f
                 var hasAxisChange = false
 
-                // AUTO-CENTER CALIBRATION: Record neutral axis values from getevent
-                // during the first ~500ms of streaming. Many gamepads have neutral
-                // positions that are NOT at (min+max)/2 — e.g., a stick with range
-                // [0, 255] might have neutral at 132 instead of 127. Without
-                // calibration, the stick appears "stuck" in one direction.
-                // We capture the first EV_ABS value for each axis as the neutral,
-                // then subtract it during normalization.
-                // BUG-ANALOG-1 FIX: auto-calibration vars removed, use math midpoint below
-                
+                // BUG-ANALOG-1 FIX: Auto-calibration removed — it captured the FIRST axis value
+                // seen (which could be non-center if stick was moved during startup) instead of
+                // the actual center. Now always use mathematical midpoint (min+max)/2 which is
+                // correct for all standard gamepads. Deadzone 15% + hardware flat zone ~6%
+                // provides enough tolerance for stick drift.
+
                 // nativeMapper already created at top of thread (BUG-FIX #1)
                 val streamListener = object : ICommandOutputListener.Stub() {
                     override fun onOutputLine(it: String?) {
@@ -315,22 +312,6 @@ class GamepadListenerService : Service() {
                                             val max = range?.second ?: 32767
                                             val span = (max - min).toFloat()
 
-                                            // AUTO-CENTER CALIBRATION: During first 500ms, capture neutral value
-                                            // for each axis. This fixes "analog stuck downward" on gamepads where
-                                            // neutral position is not at (min+max)/2.
-                                            if (!calibrationComplete) {
-                                                if (System.currentTimeMillis() - calibrationStartTime < 500) {
-                                                    // Still in calibration window — record first value seen for each axis
-                                                    if (!axisNeutral.containsKey(axisType)) {
-                                                        axisNeutral[axisType] = rawVal
-                                                        Log.d("GameMapper", "AUTO-CENTER: $axisType neutral=$rawVal (range=$min..$max)")
-                                                    }
-                                                } else {
-                                                    calibrationComplete = true
-                                                    Log.i("GameMapper", "AUTO-CENTER calibration complete: ${axisNeutral.size} axes calibrated")
-                                                }
-                                            }
-
                                             var finalVal = 0f
                                             val isTriggerAxis = axisType == "ABS_Z" || axisType == "ABS_RZ" ||
                                                                 axisType == "ABS_GAS" || axisType == "ABS_BRAKE" ||
@@ -340,10 +321,7 @@ class GamepadListenerService : Service() {
                                                 finalVal = if (span > 0f) ((rawVal - min).toFloat() / span).coerceIn(0f, 1f) else 0f
                                             } else {
                                                 // Analog sticks: map [min, max] → [-1, 1]
-                                                // AUTO-CENTER: Use calibrated neutral instead of mathematical midpoint.
-                                                // If we have a calibrated neutral, use it as the center.
-                                                // Otherwise fall back to mathematical midpoint.
-                                                // BUG-ANALOG-1 FIX: always use math midpoint
+                                                // BUG-ANALOG-1 FIX: Always use mathematical midpoint, not auto-calibration.
                                                 val neutral = min + span / 2f
                                                 val half = span / 2f
                                                 finalVal = if (half > 0f) ((rawVal - neutral) / half).coerceIn(-1f, 1f) else 0f

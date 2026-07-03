@@ -9,6 +9,7 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, connected: boo
   const mapProfileRef = useRef(mapProfile);
   const injectActiveRef = useRef(injectActive);
   const prevInjectActiveRef = useRef(injectActive);
+  const lastProfileUpdateRef = useRef(0);
 
   useEffect(() => { mapProfileRef.current = mapProfile; }, [mapProfile]);
   useEffect(() => { injectActiveRef.current = injectActive; }, [injectActive]);
@@ -78,11 +79,6 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, connected: boo
 
     const setupShizuku = async () => {
       if (!mapProfile) return;
-      // FIX: Always deliver profile to native, even if not "connected" yet.
-      // Previously, if connected=false (daemon not started), profile was NEVER
-      // sent to NativeGamepadMapper → buttonMapCache empty → NO injection.
-      // Now: send profile regardless of connected state. The native side will
-      // use it as soon as daemon is started. bindService is only called if connected.
       try {
         if (connected) {
           await TouchInjection.bindService().catch(() => {});
@@ -90,21 +86,22 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, connected: boo
           await TouchInjection.startGamepadListener().catch(() => {});
           if (isCleanedUp) return;
         }
-        // Always send profile — this updates GamepadListenerService.activeProfileJson
-        // which NativeGamepadMapper reads on buildMapCache()
-        const profileStr = JSON.stringify(mapProfile);
-        await TouchInjection.updateActiveProfile({ profileJson: profileStr });
+        
+        // PERFORMANCE FIX: Debounce profile updates (max 1 update per 500ms)
+        // When user drags button in canvas, many profile updates fire rapidly.
+        // Sending each one to native causes binder churn. Instead, batch them.
+        const now = Date.now();
+        if (now - lastProfileUpdateRef.current >= 500) {
+          const profileStr = JSON.stringify(mapProfile);
+          await TouchInjection.updateActiveProfile({ profileJson: profileStr });
+          lastProfileUpdateRef.current = now;
+        }
       } catch (err) {
         console.error("Failed to setup Shizuku gamepad listener", err);
       }
     };
 
-    // BUG-FIX #4: Always re-send profile when effect runs, even if only injectActive changed.
-    // Previously, when onlyInjectActiveChanged=true, profile was NOT re-sent.
-    // Combined with cleanup clearing profile, this left buttonMapCache empty.
-    // Now: always call setupShizuku which re-sends profile.
     setupShizuku();
-
     prevInjectActiveRef.current = injectActive;
 
     return () => {
@@ -115,7 +112,6 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, connected: boo
       // Result: buttonMapCache empty → findButtonMapping returns null → NO INJECTION.
       // Fix: Only clear profile on actual unmount (all deps undefined), not on re-runs.
       // Profile will be re-sent by the next setupShizuku() call if needed.
-      // TouchInjection.updateActiveProfile({ profileJson: "{}" }).catch(() => {});
     };
   }, [mapProfile, connected, injectActive]);
 }

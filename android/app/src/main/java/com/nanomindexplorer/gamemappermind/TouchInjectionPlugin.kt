@@ -18,14 +18,7 @@ import android.content.pm.PackageManager
 class TouchInjectionPlugin : Plugin() {
 
     companion object {
-        // NEW-C2 FIX: @Volatile on WeakReference — emit functions are called from
-        // background threads (getevent, injectionHandler). Without @Volatile, they may
-        // see stale null → JS events (onGamepadButton/onGamepadAxis) never reach React.
         @Volatile var instance: java.lang.ref.WeakReference<TouchInjectionPlugin>? = null
-        // BUG-FATAL-3 FIX: @Volatile — touchService is written from Main Thread
-        // (onServiceConnected callback) and read from Background Thread (startGetEventCapture).
-        // Without @Volatile, background thread may see null even after service is connected,
-        // causing getevent stream to never start → ZERO gamepad input.
         @Volatile var touchService: ITouchService? = null
 
         fun emitGamepadButton(buttonName: String, value: Int, pressure: Float) {
@@ -35,9 +28,9 @@ class TouchInjectionPlugin : Plugin() {
                 data.put("value", value)
                 data.put("pressure", pressure)
                 instance?.get()?.notifyListeners("onGamepadButton", data)
+                Log.d("GameMapper", "emitGamepadButton: $buttonName value=$value")
             } catch (e: Exception) {
-                // CRASH FIX: notifyListeners can throw if called before bridge is ready
-                android.util.Log.w("GameMapper", "emitGamepadButton failed: ${e.message}")
+                Log.w("GameMapper", "emitGamepadButton failed: ${e.message}")
             }
         }
 
@@ -49,7 +42,7 @@ class TouchInjectionPlugin : Plugin() {
                 data.put("axes", jsArray)
                 instance?.get()?.notifyListeners("onGamepadAxis", data)
             } catch (e: Exception) {
-                android.util.Log.w("GameMapper", "emitGamepadAxis failed: ${e.message}")
+                Log.w("GameMapper", "emitGamepadAxis failed: ${e.message}")
             }
         }
 
@@ -63,19 +56,29 @@ class TouchInjectionPlugin : Plugin() {
     }
 
     private var isBound = false
-    // BUG FIX: Add tag for ProGuard/R8 stability (per Shizuku API docs)
     private val USER_SERVICE_ARGS = Shizuku.UserServiceArgs(
         ComponentName("com.nanomindexplorer.gamemappermind", TouchDaemonService::class.java.name)
     ).tag("touch_daemon_v1").daemon(true).processNameSuffix("touch_daemon").version(1)
 
-    // BUG-B1/B2 FIX: pendingBindCalls must be cleaned up on error / disconnect.
     private val pendingBindCalls = mutableListOf<PluginCall>()
     private val pendingLock = Any()
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(componentName: ComponentName, binder: IBinder) {
             touchService = ITouchService.Stub.asInterface(binder)
-            Log.d("GameMapper", "Shizuku Touch Service connected")
+            Log.d("GameMapper", "✅ Shizuku Touch Service CONNECTED")
+            
+            // CRITICAL FIX: Immediately deliver active profile to native after service connects
+            val profile = GamepadListenerService.activeProfileJson
+            if (!profile.isNullOrEmpty() && profile != "{}") {
+                Log.i("GameMapper", "Service connected: re-sending active profile to native")
+                try {
+                    NativeGamepadMapper.instance?.buildMapCache()
+                } catch(e: Exception) {
+                    Log.w("GameMapper", "Failed to rebuild map cache on service connect", e)
+                }
+            }
+            
             synchronized(pendingLock) {
                 pendingBindCalls.forEach { it.resolve() }
                 pendingBindCalls.clear()
@@ -85,8 +88,7 @@ class TouchInjectionPlugin : Plugin() {
         override fun onServiceDisconnected(componentName: ComponentName) {
             touchService = null
             isBound = false
-            Log.d("GameMapper", "Shizuku Touch Service disconnected")
-            // BUG-B2 FIX: Reject all pending calls on disconnect.
+            Log.d("GameMapper", "❌ Shizuku Touch Service DISCONNECTED")
             synchronized(pendingLock) {
                 pendingBindCalls.forEach { it.reject("Service disconnected") }
                 pendingBindCalls.clear()
@@ -107,16 +109,11 @@ class TouchInjectionPlugin : Plugin() {
         instance = java.lang.ref.WeakReference(this)
         Shizuku.addRequestPermissionResultListener(permissionListener)
         
-        // BUG-FIX #2: Create NativeGamepadMapper IMMEDIATELY in plugin load.
-        // Previously, NativeGamepadMapper was only created in GamepadListenerService
-        // background thread. If service hasn't started yet, or thread hasn't executed,
-        // instance is null → all handleButton/handleAxes calls are silent no-ops.
-        // Now: Create in plugin load (runs on main thread during Activity onCreate).
-        // Context is available via bridge.activity or context property.
+        // CRITICAL FIX: Create NativeGamepadMapper IMMEDIATELY in plugin load
         try {
             if (NativeGamepadMapper.instance == null) {
+                Log.i("GameMapper", "Creating NativeGamepadMapper in TouchInjectionPlugin.load()")
                 NativeGamepadMapper(context)
-                Log.i("GameMapper", "NativeGamepadMapper created in TouchInjectionPlugin.load()")
             }
         } catch (e: Exception) {
             Log.e("GameMapper", "Failed to create NativeGamepadMapper in load()", e)
@@ -125,22 +122,12 @@ class TouchInjectionPlugin : Plugin() {
 
     override fun handleOnDestroy() {
         Shizuku.removeRequestPermissionResultListener(permissionListener)
-        // Do NOT destroy or unbind service on handleOnDestroy.
-        // handleOnDestroy is called when the Activity is destroyed (e.g., app backgrounded,
-        // orientation change, or swipe-away). If we destroy/unbind here, the Shizuku
-        // user service process dies and the app disappears from Shizuku management.
-        // The service should persist across Activity lifecycle changes.
-        // Service will be properly cleaned up when:
-        // 1. User explicitly clicks "Stop Daemon" (calls unbindService)
-        // 2. App is fully terminated (process death)
-        // 3. Shizuku itself is stopped
         super.handleOnDestroy()
     }
 
     @PluginMethod
     fun bindService(call: PluginCall) {
         try {
-            // BUG FIX: Check isPreV11 per Shizuku API docs
             if (Shizuku.isPreV11()) {
                 call.reject("Shizuku is not running or version is too old (pre-v11)")
                 return
@@ -152,31 +139,16 @@ class TouchInjectionPlugin : Plugin() {
             if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
                 val serviceAlive = touchService != null && try { touchService!!.asBinder().isBinderAlive } catch(e: Exception) { false }
                 if (isBound && serviceAlive) {
-                    // Already bound and alive — nothing to do.
                     call.resolve()
                     return
                 }
-                // BUG-SHIZUKU-PERSIST FIX: Do NOT call unbindUserService before rebind.
-                // Previously, this code called `Shizuku.unbindUserService(..., false)` to "clean up"
-                // before re-binding. That call is what causes the app to disappear from Shizuku's
-                // "App Management" tab — every unbind (even with `remove=false`) momentarily removes
-                // the binding entry from Shizuku's tracker. With the 5-second polling interval in
-                // App.tsx, this created a constant bind/unbind churn, and Shizuku's UI showed the app
-                // as "not bound" during each churn window.
-                //
-                // Correct approach: if `isBound` is true but `serviceAlive` is false, the binder
-                // died but our `ServiceConnection` is still registered. Shizuku will auto-deadlock
-                // the old connection when we call `bindUserService` again — no need to manually unbind.
-                // If `isBound` is false, just bind fresh.
                 synchronized(pendingLock) { pendingBindCalls.add(call) }
                 try {
+                    Log.i("GameMapper", "Binding Shizuku service...")
                     Shizuku.bindUserService(USER_SERVICE_ARGS, serviceConnection)
                     isBound = true
                 } catch (e: Exception) {
-                    // BUG-B1 FIX: Remove from pending and reject on error.
-                    synchronized(pendingLock) {
-                        pendingBindCalls.remove(call)
-                    }
+                    synchronized(pendingLock) { pendingBindCalls.remove(call) }
                     call.reject("Failed to bind Shizuku service: ${e.message}")
                 }
             } else {
@@ -192,26 +164,20 @@ class TouchInjectionPlugin : Plugin() {
     @PluginMethod
     fun unbindService(call: PluginCall) {
         try {
-            // BUG-B4 FIX: Stop GamepadListenerService FIRST so it can release pointers
-            // and stop getevent stream while touchService is still alive.
             try {
                 val intent = Intent(context, GamepadListenerService::class.java)
                 context.stopService(intent)
             } catch (e: Exception) {
-                Log.w("GameMapper", "Failed to stop GamepadListenerService before unbind", e)
+                Log.w("GameMapper", "Failed to stop GamepadListenerService", e)
             }
-            // Brief delay to allow service onDestroy to release pointers
+            
             try { Thread.sleep(100) } catch (e: InterruptedException) {}
             
             if (isBound) {
-                // daemon(true) means service stays alive even after unbind.
-                // unbindUserService(..., true) sends the destroy transaction (code 16777114)
-                // to the service, which calls destroy() → System.exit(0) → service process dies.
-                // This is the ONLY way to stop a daemon(true) service (besides stopping Shizuku itself).
-                // Use true here because user explicitly clicked "Stop Daemon" — they want full shutdown.
                 Shizuku.unbindUserService(USER_SERVICE_ARGS, serviceConnection, true)
                 touchService = null
                 isBound = false
+                Log.i("GameMapper", "Service unbound")
             }
             call.resolve()
         } catch (e: Exception) {
@@ -221,7 +187,6 @@ class TouchInjectionPlugin : Plugin() {
 
     @PluginMethod
     fun startGamepadListener(call: PluginCall) {
-        // BUG-B5 FIX: Skip if already running.
         if (GamepadListenerService.isRunning) {
             call.resolve()
             return
@@ -229,6 +194,7 @@ class TouchInjectionPlugin : Plugin() {
         val intent = Intent(context, GamepadListenerService::class.java)
         try {
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                Log.i("GameMapper", "Starting GamepadListenerService (foreground)")
                 context.startForegroundService(intent)
             } else {
                 context.startService(intent)
@@ -242,8 +208,6 @@ class TouchInjectionPlugin : Plugin() {
 
     @PluginMethod
     fun startOverlay(call: PluginCall) {
-        // BUG-HIGH-17 FIX: Check SYSTEM_ALERT_WINDOW permission before starting overlay.
-        // Without this, windowManager.addView() throws BadTokenException → crash.
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
             if (!android.provider.Settings.canDrawOverlays(context)) {
                 val settingsIntent = Intent(
@@ -289,7 +253,6 @@ class TouchInjectionPlugin : Plugin() {
     @PluginMethod
     fun requestPermission(call: PluginCall) {
         try {
-            // BUG FIX: Check isPreV11 per Shizuku API docs
             if (Shizuku.isPreV11()) {
                 call.reject("Shizuku is not running or version is too old (pre-v11)")
                 return
@@ -318,8 +281,6 @@ class TouchInjectionPlugin : Plugin() {
     fun executeShizukuCommand(call: PluginCall) {
         val command = call.getString("command") ?: ""
         
-        // BUG-B3 / SEC1 FIX: Stricter whitelist — removed `input tap/swipe/keyevent` (RCE risk via `;`/`&&`/`|`).
-        // Touch injection is handled by touchDown/Move/Up plugin methods; no need for shell `input` commands.
         val ALLOWED_PREFIXES = listOf("getevent -lp", "getevent -l", "dumpsys input", "pm list packages")
         
         val isAllowed = ALLOWED_PREFIXES.any { command.startsWith(it) }
@@ -327,7 +288,6 @@ class TouchInjectionPlugin : Plugin() {
             call.reject("Command not allowed")
             return
         }
-        // BUG-B3 FIX: Reject commands with shell metacharacters.
         if (Regex("[;|&\n<>`$]").containsMatchIn(command)) {
             call.reject("Command contains forbidden shell metacharacters")
             return
@@ -356,13 +316,34 @@ class TouchInjectionPlugin : Plugin() {
         val configJson = call.getString("profileJson")
         Log.i("GameMapper", "updateActiveProfile: json length=${configJson?.length ?: 0}")
         GamepadListenerService.activeProfileJson = configJson
-        touchService?.releaseAllPointers()
-        if (configJson != null) {
-            try { touchService?.updateConfig(configJson) } catch (e: Exception) {}
+        
+        // Send to Shizuku daemon
+        try {
+            touchService?.releaseAllPointers()
+            if (configJson != null && configJson != "{}") {
+                touchService?.updateConfig(configJson)
+                Log.i("GameMapper", "Profile sent to Shizuku daemon")
+            }
+        } catch (e: Exception) {
+            Log.w("GameMapper", "Failed to update config in daemon: ${e.message}")
         }
-        NativeGamepadMapper.resetAll()
-        // BUG-FIX: Log cache size after rebuild so user can verify profile loaded.
-        Log.i("GameMapper", "updateActiveProfile: buttonMapCache size=${NativeGamepadMapper.instance?.buttonMapCache?.size ?: -1}")
+        
+        // CRITICAL FIX: ALWAYS rebuild native mapper cache when profile updates
+        try {
+            val mapper = NativeGamepadMapper.instance
+            if (mapper != null) {
+                mapper.buildMapCache()
+                Log.i("GameMapper", "✅ Cache rebuilt: ${mapper.buttonMapCache.size} mappings loaded")
+                if (mapper.buttonMapCache.isEmpty()) {
+                    Log.w("GameMapper", "⚠️ WARNING: buttonMapCache is EMPTY - profile parsing failed!")
+                }
+            } else {
+                Log.w("GameMapper", "⚠️ NativeGamepadMapper instance is NULL!")
+            }
+        } catch(e: Exception) {
+            Log.e("GameMapper", "Failed to rebuild native mapper cache: ${e.message}", e)
+        }
+        
         call.resolve()
     }
 
@@ -371,7 +352,6 @@ class TouchInjectionPlugin : Plugin() {
         val data = JSObject()
         val sb = StringBuilder()
 
-        // Step 1: Shizuku status
         sb.append("=== DIAGNOSTICS ===\n")
         try {
             sb.append("1. Shizuku isPreV11: ${Shizuku.isPreV11()}\n")
@@ -382,9 +362,8 @@ class TouchInjectionPlugin : Plugin() {
             sb.append("1-3. ERROR: ${e.message}\n")
         }
 
-        // Step 2: Touch service
         val ts = touchService
-        sb.append("4. touchService: ${if (ts != null) "ALIVE" else "NULL"}\n")
+        sb.append("4. touchService: ${if (ts != null) "✅ CONNECTED" else "❌ NULL"}\n")
         if (ts != null) {
             try {
                 sb.append("5. touchService.isAlive: ${ts.isAlive()}\n")
@@ -394,34 +373,33 @@ class TouchInjectionPlugin : Plugin() {
             }
         }
 
-        // Step 3: GamepadListenerService
         sb.append("7. GamepadListenerService.isRunning: ${GamepadListenerService.isRunning}\n")
 
-        // Step 4: NativeGamepadMapper
         val mapper = NativeGamepadMapper.instance
-        sb.append("8. NativeGamepadMapper.instance: ${if (mapper != null) "EXISTS" else "NULL"}\n")
+        sb.append("8. NativeGamepadMapper.instance: ${if (mapper != null) "✅ EXISTS" else "❌ NULL"}\n")
         if (mapper != null) {
             sb.append("9. buttonMapCache size: ${mapper.buttonMapCache.size}\n")
-            sb.append("10. buttonMapCache keys: ${mapper.buttonMapCache.keys}\n")
-            sb.append("11. activeProfileJson length: ${GamepadListenerService.activeProfileJson?.length ?: -1}\n")
+            if (mapper.buttonMapCache.isEmpty()) {
+                sb.append("⚠️ CRITICAL: buttonMapCache is EMPTY - profile not loaded!\n")
+            } else {
+                sb.append("✅ Profile loaded with mappings: ${mapper.buttonMapCache.keys.joinToString(", ")}\n")
+            }
+            sb.append("10. activeProfileJson length: ${GamepadListenerService.activeProfileJson?.length ?: -1}\n")
         }
 
-        // Step 5: isBound
-        sb.append("12. isBound: $isBound\n")
+        sb.append("11. isBound: $isBound\n")
 
-        // Step 6: Try getevent -lp to see if gamepad is detected
         if (ts != null) {
             try {
                 val result = ts.executeShellCommand("getevent -lp")
                 val obj = org.json.JSONObject(result)
                 val output = obj.optString("output", "")
                 val hasGamepad = output.contains("BTN_A") || output.contains("BTN_GAMEPAD") || output.contains("BTN_SOUTH")
-                sb.append("13. getevent -lp has gamepad: $hasGamepad\n")
-                // Extract device paths
+                sb.append("12. getevent -lp has gamepad: ${if (hasGamepad) "✅ YES" else "❌ NO"}\n")
                 val devicePaths = Regex("/dev/input/event\\d+").findAll(output).map { it.value }.toSet()
-                sb.append("14. Input devices: $devicePaths\n")
+                sb.append("13. Input devices: $devicePaths\n")
             } catch (e: Exception) {
-                sb.append("13-14. getevent ERROR: ${e.message}\n")
+                sb.append("12-13. getevent ERROR: ${e.message}\n")
             }
         }
 
@@ -464,7 +442,6 @@ class TouchInjectionPlugin : Plugin() {
     @PluginMethod
     fun checkPermission(call: PluginCall) {
         try {
-            // BUG FIX: Comprehensive check per Shizuku API
             if (Shizuku.isPreV11()) {
                 val data = JSObject()
                 data.put("granted", false)
@@ -475,9 +452,6 @@ class TouchInjectionPlugin : Plugin() {
             }
             val binderAlive = Shizuku.pingBinder()
             val granted = binderAlive && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
-            // BUG-P9 FIX: Capture touchService reference to local val to avoid race between
-            // null check and isBinderAlive access. If another thread sets touchService = null
-            // between the check and the access, NPE would occur.
             val ts = touchService
             val touchServiceAlive = ts != null && ts.asBinder().isBinderAlive
             val data = JSObject()
@@ -506,11 +480,12 @@ class TouchInjectionPlugin : Plugin() {
             return
         }
         try {
+            Log.d("GameMapper", "touchDown: id=$id ($x, $y)")
             val success = touchService?.touchDown(id, x, y) ?: false
             if (success) {
                 call.resolve()
             } else {
-                call.reject("Injection call returned false (perhaps injectInputEvent is null or failed)")
+                call.reject("Injection call returned false")
             }
         } catch (e: Exception) {
             call.reject("Injection failed: ${e.message}")
@@ -546,6 +521,7 @@ class TouchInjectionPlugin : Plugin() {
             return
         }
         try {
+            Log.d("GameMapper", "touchUp: id=$id")
             val success = touchService?.touchUp(id) ?: false
             if (success) {
                 call.resolve()
@@ -567,6 +543,7 @@ class TouchInjectionPlugin : Plugin() {
             return
         }
         try {
+            Log.i("GameMapper", "injectTap: ($x, $y) duration=$duration")
             val success = touchService?.injectTap(x, y, duration) ?: false
             if (success) {
                 call.resolve()
@@ -580,9 +557,10 @@ class TouchInjectionPlugin : Plugin() {
 
     @PluginMethod
     fun testInjection(call: PluginCall) {
-        val x = call.getFloat("x") ?: 500f
-        val y = call.getFloat("y") ?: 500f
+        val x = call.getFloat("x") ?: 240f
+        val y = call.getFloat("y") ?: 240f
         try {
+            Log.i("GameMapper", "testInjection: ($x, $y)")
             if (touchService == null) {
                 call.reject("Shizuku user service not bound. Please start daemon first.")
                 return

@@ -200,6 +200,7 @@ export const useShizuku = () => {
     }
     return true;
   };
+  
   const requestBatteryIgnore = async () => {
     if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
         await TouchInjection.requestBatteryIgnore();
@@ -210,4 +211,3 @@ export const useShizuku = () => {
 
   return { checkShizukuStatus, requestShizukuPermission, executeShizukuCommand, startDaemon, stopDaemon, injectInput, checkBattery, requestBatteryIgnore };
 };
-

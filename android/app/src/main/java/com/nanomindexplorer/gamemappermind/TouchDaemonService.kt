@@ -377,23 +377,40 @@ class TouchDaemonService : ITouchService.Stub {
         val downTime = baseDownTime
         val eventTime = SystemClock.uptimeMillis()
 
-        // INJECTION-FIX: For ACTION_DOWN/UP with 1 pointer, try shell FIRST (Path C).
-        // Path C (input tap) is GUARANTEED to work via Shizuku shell uid.
-        // Path A/B (injectInputEvent) may silently return false on some devices.
-        // For ACTION_MOVE (analog stick), shell can't help — try Path A/B only.
-        if (pointerCount == 1 && (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_UP ||
-                action == (MotionEvent.ACTION_POINTER_DOWN or (actionIndex shl MotionEvent.ACTION_POINTER_INDEX_SHIFT)) ||
-                action == (MotionEvent.ACTION_POINTER_UP or (actionIndex shl MotionEvent.ACTION_POINTER_INDEX_SHIFT)))) {
-            // For DOWN: do shell tap immediately (combines down+up)
-            // For UP: already tapped on DOWN, just return true
-            if (activePath == "C" || activePath == null) {
+        // BUG-CRITICAL-INJECT-1 FIX (root cause of "no touch reaches the game at all"):
+        //
+        // The previous code here ALWAYS shortcut every single-pointer ACTION_DOWN/UP straight
+        // to Path C (`input tap`, a self-contained down+up) BEFORE ever attempting Path A/B —
+        // whenever activePath was null (i.e. on literally the very first touch of the session,
+        // which is the common case for every fresh daemon connection).
+        //
+        // `input tap` is atomic: it presses AND releases in one shell call. That is fine for a
+        // discrete tap, but touchDown()/touchMove()/touchUp() are also the SAME primitives used
+        // for HELD interactions — most importantly the analog sticks (player movement), but also
+        // hold-type buttons, swipes, gestures and toggles. For all of those, the real ACTION_DOWN
+        // must stay "down" at the OS input-dispatcher level until a later, separate ACTION_UP is
+        // injected. Because the old shortcut fired a complete shell tap on the very first
+        // touchDown(), the touch was released again within microseconds — before any
+        // touchMove() could ever be sent. Android's InputDispatcher requires a currently "touched"
+        // window/gesture-stream to accept ACTION_MOVE; once the shell tap's own release fires,
+        // there is no such window anymore, so every subsequent touchMove() (i.e. every analog
+        // stick movement, every held button, every swipe/gesture) was silently dropped by the
+        // system. This is why moving the stick (or holding a button) had zero visible effect in
+        // eFootball, even though a plain single tap sometimes appeared to register.
+        //
+        // FIX: Always attempt Path A, then Path B, for EVERY action (DOWN, MOVE, POINTER_DOWN/UP,
+        // UP) exactly as documented in the class-level comment at the top of this file. Path C
+        // (shell) is now only ever used as the genuine last resort, after Path A and B have both
+        // actually been tried and failed for this specific call — never pre-emptively. This
+        // matches the file's own documented "PATH A primary / PATH B fallback / PATH C last
+        // resort" architecture, which the removed shortcut was silently violating.
+        if (activePath == "C") {
+            // Path C (shell) was already confirmed to be the only working path on this device.
+            // It can still service single-pointer DOWN/UP as a best-effort discrete tap, but it
+            // fundamentally cannot represent a sustained MOVE (there is no "held" state via shell).
+            if (pointerCount == 1 && (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_UP)) {
                 return handleShellInjection(action, pointerCoords, pointerCount)
             }
-        }
-
-        // For MOVE or if Path A/B is active, use MotionEvent injection
-        if (activePath == "C") {
-            // Path C can't do MOVE — silently fail
             return false
         }
 

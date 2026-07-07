@@ -54,6 +54,11 @@ export default function App() {
   const [socketIpcName, setSocketIpcName] = React.useState('@gamepad_mapper_ipc');
   const [inputPolling, setInputPolling] = React.useState(250);
   const [isEditingSettings, setIsEditingSettings] = React.useState(false);
+  // HYBRID-OVERLAY: 'canvas' = full WYSIWYG WebView overlay (screenshot bg + buttons,
+  // editable in-place). 'floating' = minimal floating button indicators, k2er-style —
+  // lighter weight, less visually intrusive. Only one is ever active; switching modes
+  // always stops the running overlay first (see handleToggleOverlay/handleOverlayModeChange).
+  const [overlayMode, setOverlayMode] = React.useState<'canvas' | 'floating'>('canvas');
 
   const [macros, setMacros] = React.useState<GamepadMacro[]>(INITIAL_MACROS);
 
@@ -94,6 +99,9 @@ export default function App() {
              const parsed = JSON.parse(res.value);
              if (parsed.socketIpcName) setSocketIpcName(parsed.socketIpcName);
              if (parsed.inputPolling) setInputPolling(parsed.inputPolling);
+             if (parsed.overlayMode === 'floating' || parsed.overlayMode === 'canvas') {
+               setOverlayMode(parsed.overlayMode);
+             }
            } catch(e) { /* ignore */ }
         }
       }).catch(e => console.warn('capacitor get settings error', e));
@@ -156,10 +164,10 @@ export default function App() {
     };
   }, []);
 
-  const saveSettingsToStorage = async (socket: string, polling: number) => {
+  const saveSettingsToStorage = async (socket: string, polling: number, mode: 'canvas' | 'floating' = overlayMode) => {
     try {
       const { Preferences } = await import('@capacitor/preferences');
-      await Preferences.set({ key: 'nexion_settings', value: JSON.stringify({ socketIpcName: socket, inputPolling: polling }) });
+      await Preferences.set({ key: 'nexion_settings', value: JSON.stringify({ socketIpcName: socket, inputPolling: polling, overlayMode: mode }) });
     } catch(e) { console.warn('Failed to save settings', e); }
   };
 
@@ -252,14 +260,33 @@ export default function App() {
         handleLogMessage('SYSTEM: Native floating overlay deactivated.');
         showToast('Overlay Deactivated', 'success');
       } else {
-        await startOverlay(activeProfile);
+        await startOverlay(activeProfile, overlayMode);
         setOverlayActive(true);
-        handleLogMessage('SYSTEM: Native floating overlay activated. You can now minimize the app.');
+        handleLogMessage(`SYSTEM: Native overlay activated (mode: ${overlayMode}). You can now minimize the app.`);
         showToast('Overlay Service Started Successfully!', 'success');
       }
     } catch (e: any) {
       handleLogMessage(`ERROR: Cannot start Native Overlay. ${e.message || e}`);
       showToast(`Failed to start overlay: ${e.message || e}`, 'error');
+    }
+  };
+
+  // HYBRID-OVERLAY: Switching mode while the overlay is already running must stop the
+  // active one before starting the other — TYPE_APPLICATION_OVERLAY windows don't get
+  // replaced automatically, so leaving the old one up would leave two overlays fighting
+  // for the same screen space ("konflik" the user explicitly asked to avoid).
+  const handleOverlayModeChange = async (mode: 'canvas' | 'floating') => {
+    setOverlayMode(mode);
+    saveSettingsToStorage(socketIpcName, inputPolling, mode);
+    if (overlayActive) {
+      try {
+        await stopOverlay();
+        await startOverlay(activeProfile, mode);
+        handleLogMessage(`SYSTEM: Overlay mode switched to "${mode}".`);
+      } catch (e: any) {
+        setOverlayActive(false);
+        handleLogMessage(`ERROR: Failed to switch overlay mode. ${e.message || e}`);
+      }
     }
   };
 
@@ -650,13 +677,47 @@ export default function App() {
           )}
 
           {selectedMainView === 'overlay' && (
-            <OverlayWysiwyg
-              activeProfile={activeProfile}
-              onUpdateProfile={handleUpdateProfile}
-              onLogMessage={handleLogMessage}
-              activeKeys={activeKeys}
-              activeAxes={activeAxes}
-            />
+            <>
+              {/* BUG-FIX: This control bar was missing entirely — handleToggleOverlay
+                  and the whole startOverlay/stopOverlay flow existed in code but had
+                  no button anywhere calling it, so the in-game overlay could never
+                  actually be started from the UI. Also adds the requested hybrid
+                  overlay mode switch (canvas WYSIWYG vs minimal floating/k2er-style). */}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 mb-3 p-3 bg-slate-900/60 border border-slate-800 rounded-lg">
+                <div className="flex items-center gap-2 text-xs font-mono text-slate-400">
+                  <span className="uppercase tracking-wider text-slate-500">Overlay Style:</span>
+                  <div className="flex rounded-md overflow-hidden border border-slate-700">
+                    <button
+                      onClick={() => handleOverlayModeChange('canvas')}
+                      className={`px-3 py-1.5 uppercase font-bold text-[10px] tracking-wide transition-colors ${overlayMode === 'canvas' ? 'bg-indigo-500 text-white' : 'bg-slate-900 text-slate-400 hover:text-slate-200'}`}
+                    >
+                      Canvas (WYSIWYG)
+                    </button>
+                    <button
+                      onClick={() => handleOverlayModeChange('floating')}
+                      className={`px-3 py-1.5 uppercase font-bold text-[10px] tracking-wide transition-colors ${overlayMode === 'floating' ? 'bg-indigo-500 text-white' : 'bg-slate-900 text-slate-400 hover:text-slate-200'}`}
+                      title="Floating minimal buttons, similar to k2er-style mappers"
+                    >
+                      Floating (K2-style)
+                    </button>
+                  </div>
+                </div>
+                <div className="flex-1" />
+                <button
+                  onClick={handleToggleOverlay}
+                  className={`px-4 py-2 rounded-lg text-xs font-bold font-mono uppercase tracking-wide transition-all ${overlayActive ? 'bg-red-950/40 border border-red-500/50 text-red-400 hover:bg-red-900/40' : 'bg-emerald-950/40 border border-emerald-500/50 text-emerald-400 hover:bg-emerald-900/40'}`}
+                >
+                  {overlayActive ? 'Stop Overlay' : 'Start Overlay'}
+                </button>
+              </div>
+              <OverlayWysiwyg
+                activeProfile={activeProfile}
+                onUpdateProfile={handleUpdateProfile}
+                onLogMessage={handleLogMessage}
+                activeKeys={activeKeys}
+                activeAxes={activeAxes}
+              />
+            </>
           )}
 
           {selectedMainView === 'macro' && (

@@ -3,11 +3,15 @@ package com.nanomindexplorer.gamemappermind
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.util.Log
+import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -31,10 +35,47 @@ class GamepadListenerService : Service() {
     override fun onBind(intent: Intent): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == "ACTION_TEST_TAP") {
+            runNotificationTestTap()
+            return START_STICKY
+        }
         if (!isListening) {
             startGetEventCapture()
         }
         return START_STICKY
+    }
+
+    /**
+     * DIAGNOSTIC: Handles the "Test Tap" action button on this service's persistent
+     * notification. Runs OFF the main thread (the underlying test does a real
+     * touchDown + 50ms sleep + touchUp over the Shizuku binder), then reports the
+     * result via a system Toast — Toasts render above whatever app is currently in
+     * the foreground, so the result is visible without leaving eFootball. Full JSON
+     * report is also logged for `adb logcat -s GameMapper:*`.
+     */
+    private fun runNotificationTestTap() {
+        Thread {
+            val reportJson = try {
+                NativeGamepadMapper.instance?.runDiagnosticTestTap()
+                    ?: "{\"error\":\"NativeGamepadMapper not initialized\"}"
+            } catch (e: Exception) {
+                "{\"error\":\"${e.message}\"}"
+            }
+            Log.i("GameMapper", "Notification Test Tap report: $reportJson")
+            val summary = try {
+                val obj = org.json.JSONObject(reportJson)
+                when {
+                    obj.has("error") -> "Test Tap GAGAL: ${obj.getString("error")}"
+                    obj.has("recommendation") -> "Test Tap @ ${obj.optString("coords", "?")}: ${obj.getString("recommendation")}"
+                    else -> "Test Tap selesai, cek logcat untuk detail."
+                }
+            } catch (e: Exception) {
+                "Test Tap selesai (gagal parse report), cek logcat."
+            }
+            Handler(Looper.getMainLooper()).post {
+                Toast.makeText(applicationContext, summary, Toast.LENGTH_LONG).show()
+            }
+        }.start()
     }
 
     override fun onCreate() {
@@ -49,6 +90,13 @@ class GamepadListenerService : Service() {
         // PERSIST-FIX: Higher priority notification to prevent OS from killing process
         // when heavy game (eFootball) is in foreground. IMPORTANCE_HIGH + ongoing flag
         // makes Android treat this process as critical foreground.
+        val testTapIntent = Intent(this, GamepadListenerService::class.java).apply {
+            action = "ACTION_TEST_TAP"
+        }
+        val testTapPendingIntent = PendingIntent.getService(
+            this, 3, testTapIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("GameMapperMind Active")
             .setContentText("Gamepad mapping service running — touch injection active")
@@ -56,6 +104,10 @@ class GamepadListenerService : Service() {
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            // DIAGNOSTIC: lets the user fire a real test tap while the game (e.g. an
+            // eFootball online match) stays in the foreground the whole time — see
+            // runNotificationTestTap() for why this can't be done from inside the app.
+            .addAction(android.R.drawable.ic_menu_send, "Test Tap", testTapPendingIntent)
             .build()
         if (Build.VERSION.SDK_INT >= 34) {
             startForeground(2, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)

@@ -221,8 +221,12 @@ class TouchInjectionPlugin : Plugin() {
         }
         val profileObj = call.getObject("profile")
         val profileJson = profileObj?.toString() ?: "{}"
+        // HYBRID-OVERLAY: "canvas" (default, full WYSIWYG WebView) or "floating"
+        // (minimal native floating buttons, k2er-style). See FloatingOverlayService.
+        val overlayMode = call.getString("overlayMode", "canvas")
         val intent = Intent(context, FloatingOverlayService::class.java)
         intent.putExtra("config", profileJson)
+        intent.putExtra("overlayMode", overlayMode)
         try {
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)

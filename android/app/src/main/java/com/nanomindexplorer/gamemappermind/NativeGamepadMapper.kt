@@ -850,4 +850,39 @@ class NativeGamepadMapper(private val context: Context) {
             }
         }
     }
+
+    /**
+     * DIAGNOSTIC: Run a real touchDown+touchUp test at the coordinates of the first
+     * mapped button in the currently active profile (falls back to screen center if
+     * no profile/buttons are loaded yet), and return the daemon's diagnostic report.
+     *
+     * This exists so the test can be triggered from the "Test Tap" action on the
+     * persistent GamepadListenerService notification (see GamepadListenerService),
+     * WITHOUT bringing the app's own Activity to the foreground first. Doing the test
+     * from inside the app's own UI is not a valid test of "does injection reach the
+     * game" — the moment the user switches to the app to press a test button, the
+     * game is no longer the foreground/topmost window, so the tap can only ever land
+     * on our own app, not on eFootball. Triggering it from the notification instead
+     * lets eFootball stay frontmost the whole time, so a real ripple/reaction appearing
+     * at the tested button's location genuinely confirms end-to-end injection into the
+     * live game — including during an actual online match.
+     */
+    fun runDiagnosticTestTap(): String {
+        val svc = TouchInjectionPlugin.touchService
+        if (svc == null) {
+            return JSONObject().put("error", "Touch daemon not connected (touchService is null). Start the daemon first.").toString()
+        }
+        val firstButton = buttonMapCache.values.firstOrNull()
+        val (pctX, pctY) = if (firstButton != null) {
+            Pair(firstButton.optDouble("x", 50.0), firstButton.optDouble("y", 50.0))
+        } else {
+            Pair(50.0, 50.0)
+        }
+        val (x, y) = getScreenCoords(pctX, pctY)
+        return try {
+            svc.testInjection(x, y)
+        } catch (e: Exception) {
+            JSONObject().put("error", "testInjection RPC failed: ${e.message}").toString()
+        }
+    }
 }

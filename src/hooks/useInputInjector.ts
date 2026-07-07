@@ -3,11 +3,12 @@ import TouchInjection from '../plugins/TouchInjection';
 import { GamepadProfile } from '../types';
 
 export function useInputInjector() {
-  const startOverlay = async (config: GamepadProfile) => {
+  const startOverlay = async (config: GamepadProfile, overlayMode: 'canvas' | 'floating' = 'canvas') => {
     if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
       try {
         await TouchInjection.startOverlay({
-          profile: config
+          profile: config,
+          overlayMode
         });
         return true;
       } catch (e) {

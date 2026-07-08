@@ -20,6 +20,7 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
 
     private val CHANNEL_ID = "GamepadListenerChannel"
     @Volatile private var isListening = false
+    private var currentGamepadDevice: String? = null
     private lateinit var inputManager: InputManager
 
     companion object {
@@ -39,15 +40,17 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
         createNotificationChannel()
         startForegroundService()
         isRunning = true
+
+        // Coba mulai listener saat service pertama kali dibuat
+        if (!isListening) {
+            startGetEventCapture()
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == "ACTION_TEST_TAP") {
             runNotificationTestTap()
             return START_STICKY
-        }
-        if (!isListening) {
-            startGetEventCapture()
         }
         return START_STICKY
     }
@@ -67,7 +70,7 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
                 val obj = org.json.JSONObject(reportJson)
                 when {
                     obj.has("error") -> "Test Tap GAGAL: ${obj.getString("error")}"
-                    obj.has("recommendation") -> "Test Tap @ ${obj.optString("coords", "?")}: ${obj.getString("recommendation")}"
+                    obj.has("recommendation") -> "Test Tap berhasil"
                     else -> "Test Tap selesai"
                 }
             } catch (e: Exception) {
@@ -92,7 +95,7 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
 
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("GameMapperMind Active")
-            .setContentText("Gamepad mapping service running")
+            .setContentText("Gamepad mapping service is running")
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -115,12 +118,12 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
         }
     }
 
-    // ==================== HOTPLUG (InputManager) ====================
+    // ==================== HOTPLUG (Lebih Robust) ====================
 
     override fun onInputDeviceAdded(deviceId: Int) {
         val device = inputManager.getInputDevice(deviceId) ?: return
         if (isGamepadDevice(device)) {
-            Log.i("GameMapper", "Gamepad connected: ${device.name} (id=$deviceId)")
+            Log.i("GameMapper", "Gamepad connected: ${device.name}")
             if (!isListening) {
                 startGetEventCapture()
             }
@@ -128,12 +131,18 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
     }
 
     override fun onInputDeviceRemoved(deviceId: Int) {
-        Log.i("GameMapper", "Input device removed: id=$deviceId")
-        // Bisa ditambahkan logika reset jika diperlukan
+        val device = inputManager.getInputDevice(deviceId)
+        Log.i("GameMapper", "Input device removed: ${device?.name ?: deviceId}")
+
+        // Jika device yang sedang dipakai disconnect, reset dan coba cari lagi
+        if (currentGamepadDevice != null) {
+            // Untuk sekarang kita stop dulu, nanti akan dicoba reconnect otomatis
+            stopCurrentListener()
+        }
     }
 
     override fun onInputDeviceChanged(deviceId: Int) {
-        // Tidak perlu aksi khusus untuk saat ini
+        // Bisa digunakan untuk update jika diperlukan nanti
     }
 
     private fun isGamepadDevice(device: InputDevice): Boolean {
@@ -141,13 +150,21 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
                (device.sources and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK
     }
 
+    private fun stopCurrentListener() {
+        if (isListening) {
+            isListening = false
+            currentGamepadDevice = null
+            try {
+                TouchInjectionPlugin.touchService?.stopStreamCommand()
+            } catch (_: Exception) {}
+            Log.i("GameMapper", "Stopped current getevent listener due to device change")
+        }
+    }
+
     // ==================== GETEVENT LISTENER ====================
 
     private fun startGetEventCapture() {
-        if (isListening) {
-            Log.w("GameMapper", "startGetEventCapture: already listening")
-            return
-        }
+        if (isListening) return
 
         if (!rikka.shizuku.Shizuku.pingBinder() ||
             rikka.shizuku.Shizuku.checkSelfPermission() != android.content.pm.PackageManager.PERMISSION_GRANTED ||
@@ -161,7 +178,7 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
 
         Thread {
             try {
-                // Wait for profile
+                // Tunggu profile tersedia
                 val deadline = System.currentTimeMillis() + 3000L
                 while (System.currentTimeMillis() < deadline && activeProfileJson == null) {
                     Thread.sleep(50)
@@ -170,7 +187,6 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
                 val nativeMapper = NativeGamepadMapper.instance ?: NativeGamepadMapper(this)
                 nativeMapper.buildMapCache()
 
-                // Deteksi device gamepad
                 val gamepadDevice = detectGamepadDevice()
                 if (gamepadDevice == null) {
                     Log.w("GameMapper", "No gamepad detected")
@@ -179,7 +195,8 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
                     return@Thread
                 }
 
-                Log.i("GameMapper", "Using gamepad: $gamepadDevice")
+                currentGamepadDevice = gamepadDevice
+                Log.i("GameMapper", "Starting getevent on: $gamepadDevice")
 
                 val streamListener = createStreamListener()
                 TouchInjectionPlugin.touchService?.executeStreamCommand(
@@ -188,7 +205,7 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
                 )
 
             } catch (e: Exception) {
-                Log.e("GameMapper", "getevent failed", e)
+                Log.e("GameMapper", "Failed to start getevent", e)
                 isListening = false
             }
         }.apply { isDaemon = true }.start()
@@ -255,11 +272,14 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
 
         override fun onExit(code: Int) {
             isListening = false
-            Log.w("GameMapper", "getevent ended (code=$code). Reconnecting...")
+            currentGamepadDevice = null
+            Log.w("GameMapper", "getevent stream ended (code=$code). Trying to reconnect...")
 
             if (isRunning) {
                 Handler(Looper.getMainLooper()).postDelayed({
-                    if (isRunning && !isListening) startGetEventCapture()
+                    if (isRunning && !isListening) {
+                        startGetEventCapture()
+                    }
                 }, 2000)
             }
         }
@@ -328,6 +348,7 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
         Log.d("GameMapper", "GamepadListenerService: onDestroy")
         isRunning = false
         isListening = false
+        currentGamepadDevice = null
 
         inputManager.unregisterInputDeviceListener(this)
 

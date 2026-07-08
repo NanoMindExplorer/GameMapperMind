@@ -100,3 +100,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 - Resolved missing cors protections.
+
+## [2.3.0] - 2026-07-09
+### Added
+- OnboardingWizard (4 langkah interaktif pertama kali)
+- Quick Action di notification (Toggle Overlay, Test Injection)
+- `onboardingCompleted` flag via Preferences
+
+### Improved
+- First launch experience
+- Daemon resilience

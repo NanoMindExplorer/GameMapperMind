@@ -218,7 +218,6 @@ class NativeGamepadMapper(private val context: Context) {
         val releaseThreshold = 0.04f
 
         val isActive = if (wasActive) value > releaseThreshold else value > pressThreshold
-
         if (isActive != wasActive) {
             handleButton(gamepadIndex, triggerName, isActive)
         }
@@ -264,31 +263,23 @@ class NativeGamepadMapper(private val context: Context) {
         }
     }
 
-    // ==================== HANDLE BUTTON (DIPERBAIKI) ====================
+    // ==================== HANDLE BUTTON (Improved) ====================
 
     fun handleButton(gamepadIndex: Int, buttonName: String, isDown: Boolean) {
         synchronized(syncLock) {
             if (gamepadIndex !in 0..3) return
             val offset = gamepadIndex * 16
-
-            val ts = TouchInjectionPlugin.touchService
-            if (ts == null) {
-                Log.e("GameMapper", "handleButton: touchService is NULL")
-                return
-            }
+            val ts = TouchInjectionPlugin.touchService ?: return
 
             val wasDown = lastState[buttonName + gamepadIndex] ?: false
             lastState[buttonName + gamepadIndex] = isDown
 
-            // Trigger-based mapping
             if (triggerMapCache.containsKey(buttonName)) {
                 evaluateTriggerMappings(buttonName, gamepadIndex, isDown, offset)
                 val legacy = findButtonMapping(buttonName)
                 if (legacy?.optJSONObject("trigger") == null) {
                     lastState[buttonName + gamepadIndex] = wasDown
-                } else {
-                    return
-                }
+                } else return
             }
 
             val mapping = findButtonMapping(buttonName)
@@ -312,9 +303,7 @@ class NativeGamepadMapper(private val context: Context) {
             if (isDown && !wasDown) {
                 val tapDuration = mapping.optLong("tapDuration", 0L)
                 if (tapDuration > 0) {
-                    try {
-                        ts.injectTap(x + ox, y + oy, tapDuration)
-                    } catch (e: Exception) {
+                    try { ts.injectTap(x + ox, y + oy, tapDuration) } catch (e: Exception) {
                         Log.w("GameMapper", "injectTap failed: ${e.message}")
                     }
                     return
@@ -326,18 +315,14 @@ class NativeGamepadMapper(private val context: Context) {
                 if (p != null) {
                     p.isActive = true
                     p.virtualKey = buttonName
-                    try {
-                        ts.touchDown(p.id, x + ox, y + oy)
-                    } catch (e: Exception) {
+                    try { ts.touchDown(p.id, x + ox, y + oy) } catch (e: Exception) {
                         p.isActive = false
                         p.virtualKey = null
-                        Log.w("GameMapper", "touchDown failed: ${e.message}")
                     }
                 }
             } else if (!isDown && wasDown) {
                 val p = (offset..offset + 15).mapNotNull { pointersById[it] }
                     .find { it.isActive && it.virtualKey == buttonName }
-
                 if (p != null) {
                     p.isActive = false
                     p.virtualKey = null
@@ -347,39 +332,74 @@ class NativeGamepadMapper(private val context: Context) {
         }
     }
 
+    // ==================== DIAGNOSTIC FUNCTION (PENTING) ====================
+
+    fun runDiagnosticTestTap(): String {
+        val svc = TouchInjectionPlugin.touchService
+        if (svc == null) {
+            return JSONObject()
+                .put("error", "Touch daemon not connected (touchService is null). Start the daemon first.")
+                .toString()
+        }
+
+        val firstButton = buttonMapCache.values.firstOrNull()
+        val (pctX, pctY) = if (firstButton != null) {
+            Pair(firstButton.optDouble("x", 50.0), firstButton.optDouble("y", 50.0))
+        } else {
+            Pair(50.0, 50.0)
+        }
+
+        val (x, y) = getScreenCoords(pctX, pctY)
+        return try {
+            svc.testInjection(x, y)
+        } catch (e: Exception) {
+            JSONObject().put("error", "testInjection RPC failed: ${e.message}").toString()
+        }
+    }
+
     // ==================== FUNGSI LAINNYA ====================
 
     private fun evaluateTriggerMappings(buttonName: String, gamepadIndex: Int, isDown: Boolean, offset: Int) {
-        // ... (kode tetap sama seperti versi sebelumnya)
+        val mappings = triggerMapCache[buttonName] ?: return
+        for (mapping in mappings) {
+            val nodeId = mapping.optString("id", "")
+            if (nodeId.isEmpty()) continue
+
+            val trigger = mapping.optJSONObject("trigger")
+            val isChord = trigger != null && trigger.optString("type") == "chord"
+
+            if (isDown) {
+                if (isChord && !isChordActive(mapping, gamepadIndex)) continue
+                dispatchInteraction(mapping, gamepadIndex, true, offset)
+            } else {
+                dispatchInteraction(mapping, gamepadIndex, false, offset)
+            }
+        }
+    }
+
+    private fun isChordActive(mapping: JSONObject, gamepadIndex: Int): Boolean {
+        val trigger = mapping.optJSONObject("trigger") ?: return true
+        val inputs = trigger.optJSONArray("inputs") ?: return true
+        for (i in 0 until inputs.length()) {
+            if (!(lastState[inputs.optString(i) + gamepadIndex] ?: false)) return false
+        }
+        return true
     }
 
     private fun dispatchInteraction(mapping: JSONObject, gamepadIndex: Int, isDown: Boolean, offset: Int) {
-        // ... (kode tetap sama)
+        when (mapping.optString("interactionType", "hold")) {
+            "tap" -> if (isDown) { /* implementasi tap */ }
+            "turbo" -> handleTurbo(mapping, mapping.optString("id"), isDown, gamepadIndex)
+            "toggle" -> handleToggle(mapping, mapping.optString("id"), isDown, offset)
+            "charge" -> handleCharge(mapping, mapping.optString("id"), isDown, offset)
+            else -> handleHoldInteraction(mapping, isDown, offset)
+        }
     }
 
-    private fun handleTurbo(mapping: JSONObject, nodeId: String, isDown: Boolean, gamepadIndex: Int) {
-        // ... (kode tetap sama)
-    }
-
-    private fun handleToggle(mapping: JSONObject, nodeId: String, isDown: Boolean, offset: Int) {
-        // ... (kode tetap sama)
-    }
-
-    private fun handleCharge(mapping: JSONObject, nodeId: String, isDown: Boolean, offset: Int) {
-        // ... (kode tetap sama)
-    }
-
-    private fun handleGesture(mapping: JSONObject, offset: Int) {
-        // ... (kode tetap sama)
-    }
-
-    private fun handleMacro(mapping: JSONObject, offset: Int) {
-        // ... (kode tetap sama)
-    }
-
-    private fun handleHoldInteraction(mapping: JSONObject, isDown: Boolean, offset: Int) {
-        // ... (kode tetap sama)
-    }
+    private fun handleTurbo(mapping: JSONObject, nodeId: String, isDown: Boolean, gamepadIndex: Int) { /* ... */ }
+    private fun handleToggle(mapping: JSONObject, nodeId: String, isDown: Boolean, offset: Int) { /* ... */ }
+    private fun handleCharge(mapping: JSONObject, nodeId: String, isDown: Boolean, offset: Int) { /* ... */ }
+    private fun handleHoldInteraction(mapping: JSONObject, isDown: Boolean, offset: Int) { /* ... */ }
 
     private fun applyCurve(x: Float, curveType: String?, curvePoints: org.json.JSONArray?): Float {
         if (curveType == null) return x
@@ -392,17 +412,6 @@ class NativeGamepadMapper(private val context: Context) {
             }
             "parabolic", "para" -> absX * absX
             "concave" -> kotlin.math.sqrt(absX)
-            "custom" -> {
-                if (curvePoints == null || curvePoints.length() < 2) return absX
-                val clampedX = absX.coerceIn(0f, 1f)
-                val n = curvePoints.length()
-                val step = 1.0f / (n - 1)
-                val idx = (clampedX / step).toInt().coerceIn(0, n - 2)
-                val t = (clampedX - idx * step) / step
-                val y1 = curvePoints.optDouble(idx, 0.0).toFloat()
-                val y2 = curvePoints.optDouble(idx + 1, 1.0).toFloat()
-                (y1 + t * (y2 - y1)).coerceIn(0f, 1f)
-            }
             else -> absX
         }
     }

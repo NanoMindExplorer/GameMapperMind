@@ -10,6 +10,14 @@ import android.view.MotionEvent
 import java.lang.reflect.Method
 import java.util.concurrent.atomic.AtomicInteger
 
+/**
+ * TouchDaemonService — Multi-path touch injection service via Shizuku.
+ *
+ * Injection paths (tried in order):
+ *   Path A (Primary): IInputManager via ServiceManager AIDL
+ *   Path B (Fallback): InputManager via Context + Reflection
+ *   Path C (Last Resort): Shell command "input tap"
+ */
 class TouchDaemonService : ITouchService.Stub {
 
     private var ctx: Context? = null
@@ -30,11 +38,12 @@ class TouchDaemonService : ITouchService.Stub {
 
     override fun executeShellCommand(command: String): String {
         val ALLOWED_PREFIXES = listOf("getevent -lp", "getevent -l", "dumpsys input", "pm list packages")
+
         if (ALLOWED_PREFIXES.none { command.startsWith(it) }) {
-            return createErrorJson("Command not allowed: $command")
+            return createErrorJson("Command not allowed by whitelist: $command")
         }
         if (Regex("[;|&\n<>`$]").containsMatchIn(command)) {
-            return createErrorJson("Command contains forbidden characters")
+            return createErrorJson("Command contains forbidden shell metacharacters")
         }
 
         return try {
@@ -42,26 +51,45 @@ class TouchDaemonService : ITouchService.Stub {
             val output = StringBuilder()
             val errorOutput = StringBuilder()
 
-            Thread { process.inputStream.bufferedReader().use { it.forEachLine { line -> output.appendLine(line) } } }.start()
-            Thread { process.errorStream.bufferedReader().use { it.forEachLine { line -> errorOutput.appendLine(line) } } }.start()
+            Thread {
+                process.inputStream.bufferedReader().use { reader ->
+                    reader.forEachLine { output.appendLine(it) }
+                }
+            }.start()
+
+            Thread {
+                process.errorStream.bufferedReader().use { reader ->
+                    reader.forEachLine { errorOutput.appendLine(it) }
+                }
+            }.start()
 
             val finished = process.waitFor(15, java.util.concurrent.TimeUnit.SECONDS)
             if (!finished) {
                 process.destroyForcibly()
-                return createErrorJson("Command timeout")
+                return createErrorJson("Command timed out after 15 seconds")
             }
 
             createResultJson(output.toString(), errorOutput.toString(), process.exitValue())
         } catch (e: Exception) {
-            createErrorJson(e.localizedMessage ?: "Unknown error")
+            createErrorJson(e.localizedMessage ?: "Unknown error occurred")
         }
     }
 
-    private fun createErrorJson(msg: String) = org.json.JSONObject()
-        .put("output", "").put("error", msg).put("exitCode", -1).toString()
+    private fun createErrorJson(message: String): String {
+        return org.json.JSONObject()
+            .put("output", "")
+            .put("error", message)
+            .put("exitCode", -1)
+            .toString()
+    }
 
-    private fun createResultJson(output: String, error: String, code: Int) = org.json.JSONObject()
-        .put("output", output).put("error", error).put("exitCode", code).toString()
+    private fun createResultJson(output: String, error: String, exitCode: Int): String {
+        return org.json.JSONObject()
+            .put("output", output)
+            .put("error", error)
+            .put("exitCode", exitCode)
+            .toString()
+    }
 
     // ==================== STREAM COMMAND ====================
 
@@ -72,29 +100,47 @@ class TouchDaemonService : ITouchService.Stub {
     override fun executeStreamCommand(command: String, listener: ICommandOutputListener) {
         synchronized(streamLock) {
             stopStreamCommandInternal()
+
             if (!command.startsWith("getevent -l /dev/input/event")) {
-                try { listener.onOutputLine("ERROR: Only getevent -l allowed"); listener.onExit(-1) } catch (_: Exception) {}
+                try {
+                    listener.onOutputLine("ERROR: Only 'getevent -l /dev/input/eventN' is allowed")
+                    listener.onExit(-1)
+                } catch (_: Exception) {}
                 return
             }
+
             streamThread = Thread {
                 try {
-                    streamProcess = Runtime.getRuntime().exec(command.split(" ").toTypedArray())
+                    val cmdArray = command.split(" ").toTypedArray()
+                    streamProcess = Runtime.getRuntime().exec(cmdArray)
                     val reader = streamProcess!!.inputStream.bufferedReader()
+
                     while (!Thread.currentThread().isInterrupted) {
-                        val line = reader.readLine() ?: break
-                        try { listener.onOutputLine(line) } catch (_: Exception) { break }
+                        val line = try { reader.readLine() } catch (_: Exception) { break }
+                        if (line == null) break
+                        try {
+                            listener.onOutputLine(line)
+                        } catch (_: Exception) { break }
                     }
-                    listener.onExit(try { streamProcess?.waitFor() ?: -1 } catch (_: Exception) { -1 })
+
+                    val exitCode = try { streamProcess?.waitFor() ?: -1 } catch (_: Exception) { -1 }
+                    try { listener.onExit(exitCode) } catch (_: Exception) {}
                 } catch (e: Exception) {
-                    try { listener.onOutputLine("ERROR: ${e.message}"); listener.onExit(-1) } catch (_: Exception) {}
+                    try {
+                        listener.onOutputLine("ERROR: ${e.localizedMessage}")
+                        listener.onExit(-1)
+                    } catch (_: Exception) {}
                 }
             }.apply { isDaemon = true }
+
             streamThread?.start()
         }
     }
 
     override fun stopStreamCommand() {
-        synchronized(streamLock) { stopStreamCommandInternal() }
+        synchronized(streamLock) {
+            stopStreamCommandInternal()
+        }
     }
 
     private fun stopStreamCommandInternal() {
@@ -104,7 +150,7 @@ class TouchDaemonService : ITouchService.Stub {
         streamThread = null
     }
 
-    // ==================== INJECTION ====================
+    // ==================== TOUCH INJECTION ====================
 
     override fun touchDown(pointerId: Int, x: Float, y: Float): Boolean {
         if (baseDownTime == 0L) baseDownTime = SystemClock.uptimeMillis()
@@ -128,22 +174,34 @@ class TouchDaemonService : ITouchService.Stub {
     }
 
     private fun injectSinglePointer(pointerId: Int, action: Int, x: Float, y: Float): Boolean {
-        val props = arrayOf(MotionEvent.PointerProperties().apply { id = pointerId; toolType = MotionEvent.TOOL_TYPE_FINGER })
-        val coords = arrayOf(MotionEvent.PointerCoords().apply {
-            this.x = x; this.y = y; pressure = if (action == MotionEvent.ACTION_UP) 0f else 1f; size = 1f
+        val properties = arrayOf(MotionEvent.PointerProperties().apply {
+            this.id = pointerId
+            toolType = MotionEvent.TOOL_TYPE_FINGER
         })
-        return injectMotionEvent(action, 0, 1, props, coords)
+
+        val coords = arrayOf(MotionEvent.PointerCoords().apply {
+            this.x = x
+            this.y = y
+            pressure = if (action == MotionEvent.ACTION_UP) 0f else 1f
+            size = 1f
+        })
+
+        return injectMotionEvent(action, 0, 1, properties, coords)
     }
 
     private fun injectMotionEvent(
-        action: Int, actionIndex: Int, pointerCount: Int,
+        action: Int,
+        actionIndex: Int,
+        pointerCount: Int,
         pointerProperties: Array<MotionEvent.PointerProperties>,
         pointerCoords: Array<MotionEvent.PointerCoords>
     ): Boolean {
 
         if (activePath == "C") {
-            return if (pointerCount == 1 && (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_UP))
-                shellInputTap(pointerCoords[0].x, pointerCoords[0].y) else false
+            if (pointerCount == 1 && (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_UP)) {
+                return shellInputTap(pointerCoords[0].x, pointerCoords[0].y)
+            }
+            return false
         }
 
         val eventTime = SystemClock.uptimeMillis()
@@ -151,93 +209,186 @@ class TouchDaemonService : ITouchService.Stub {
 
         val event = MotionEvent.obtain(
             downTime, eventTime, action, actionIndex,
-            pointerProperties, pointerCoords, 0, 0, 1f, 1f, -1, 0, currentInputSource, 0
+            pointerProperties, pointerCoords,
+            0, 0, 1f, 1f, -1, 0, currentInputSource, 0
         )
 
-        // Path A
+        // Try Path A
         if ((activePath == null || activePath == "A") && tryPathA(event)) {
-            activePath = "A"; pathFailCount.set(0); event.recycle(); return true
+            activePath = "A"
+            pathFailCount.set(0)
+            event.recycle()
+            return true
         }
-        // Path B
+
+        // Try Path B
         if ((activePath == null || activePath == "B") && tryPathB(event)) {
-            activePath = "B"; pathFailCount.set(0); event.recycle(); return true
+            activePath = "B"
+            pathFailCount.set(0)
+            event.recycle()
+            return true
         }
 
         event.recycle()
+
+        // Fallback to Path C
         val success = shellInputTap(pointerCoords[0].x, pointerCoords[0].y)
-        if (success) activePath = "C"
+        if (success) {
+            activePath = "C"
+        }
         return success
     }
 
     private fun tryPathA(event: MotionEvent): Boolean {
         val proxy = iInputManagerProxy ?: return false
         val method = pathA_injectMethod ?: return false
+
         return try {
             val result = method.invoke(proxy, event, 0) as Boolean
             if (!result) pathFailCount.incrementAndGet()
             result
         } catch (e: Exception) {
-            pathFailCount.incrementAndGet(); false
+            Log.w("GameMapper", "Path A injection failed: ${e.message}")
+            pathFailCount.incrementAndGet()
+            false
         }
     }
 
     private fun tryPathB(event: MotionEvent): Boolean {
         val im = inputManagerInstance ?: return false
         val method = pathB_injectMethod ?: return false
+
         return try {
             val result = method.invoke(im, event, 0) as Boolean
             if (!result) pathFailCount.incrementAndGet()
             result
         } catch (e: Exception) {
-            pathFailCount.incrementAndGet(); false
+            Log.w("GameMapper", "Path B injection failed: ${e.message}")
+            pathFailCount.incrementAndGet()
+            false
         }
     }
 
     private fun shellInputTap(x: Float, y: Float): Boolean {
         return try {
-            val p = Runtime.getRuntime().exec(arrayOf("input", "tap", x.toInt().toString(), y.toInt().toString()))
-            val ok = p.waitFor(800, java.util.concurrent.TimeUnit.MILLISECONDS)
-            if (!ok) p.destroyForcibly()
-            p.exitValue() == 0
-        } catch (e: Exception) { false }
+            val process = Runtime.getRuntime().exec(arrayOf(
+                "input", "tap",
+                x.toInt().toString(),
+                y.toInt().toString()
+            ))
+            val finished = process.waitFor(800, java.util.concurrent.TimeUnit.MILLISECONDS)
+            if (!finished) process.destroyForcibly()
+            process.exitValue() == 0
+        } catch (e: Exception) {
+            Log.e("GameMapper", "shellInputTap failed", e)
+            false
+        }
     }
 
-    // ==================== PATH A & B (LENGKAP - TIDAK DIRINGKAS) ====================
+    // ==================== PATH A: IInputManager via ServiceManager ====================
 
     private val iInputManagerProxy: Any? by lazy {
         try {
-            val sm = Class.forName("android.os.ServiceManager")
-            val binder = sm.getMethod("getService", String::class.java).invoke(null, "input") as? IBinder
-            if (binder == null) return@lazy null
-            val stub = Class.forName("android.hardware.input.IInputManager\$Stub")
-            stub.getMethod("asInterface", IBinder::class.java).invoke(null, binder)
+            val serviceManagerClass = Class.forName("android.os.ServiceManager")
+            val getServiceMethod = serviceManagerClass.getMethod("getService", String::class.java)
+            val inputBinder = getServiceMethod.invoke(null, "input") as? IBinder
+
+            if (inputBinder == null) {
+                Log.e("GameMapper", "Path A: ServiceManager.getService(\"input\") returned null")
+                return@lazy null
+            }
+
+            val stubClass = Class.forName("android.hardware.input.IInputManager\$Stub")
+            val asInterfaceMethod = stubClass.getMethod("asInterface", IBinder::class.java)
+            val proxy = asInterfaceMethod.invoke(null, inputBinder)
+
+            Log.i("GameMapper", "Path A: Successfully obtained IInputManager proxy")
+            proxy
         } catch (e: Exception) {
-            Log.e("GameMapper", "Failed to get IInputManager proxy", e); null
+            Log.e("GameMapper", "Path A: Failed to obtain IInputManager proxy", e)
+            null
         }
     }
 
     private val pathA_injectMethod: Method? by lazy {
+        val proxy = iInputManagerProxy ?: return@lazy null
         try {
-            iInputManagerProxy?.javaClass?.getMethod("injectInputEvent", MotionEvent::class.java, Int::class.javaPrimitiveType)
-                ?.apply { isAccessible = true }
-        } catch (e: Exception) { null }
+            val method = proxy.javaClass.getMethod(
+                "injectInputEvent",
+                android.view.InputEvent::class.java,
+                Int::class.javaPrimitiveType
+            )
+            method.isAccessible = true
+            Log.i("GameMapper", "Path A: injectInputEvent method found")
+            method
+        } catch (e: Exception) {
+            Log.e("GameMapper", "Path A: injectInputEvent method not found", e)
+            null
+        }
     }
 
+    // ==================== PATH B: InputManager via Context + Reflection ====================
+
     private val inputManagerInstance: InputManager? by lazy {
+        var context = ctx
+        if (context == null) {
+            try {
+                val activityThreadClass = Class.forName("android.app.ActivityThread")
+                val currentApp = activityThreadClass.getMethod("currentApplication").invoke(null)
+                if (currentApp is Context) {
+                    context = currentApp
+                    this.ctx = context
+                }
+            } catch (e: Exception) {
+                Log.w("GameMapper", "Path B: Failed to get application context via ActivityThread", e)
+            }
+        }
+
         try {
-            ctx?.getSystemService(Context.INPUT_SERVICE) as? InputManager
-                ?: InputManager::class.java.getMethod("getInstance").invoke(null) as? InputManager
-        } catch (e: Exception) { null }
+            val im = context?.getSystemService(Context.INPUT_SERVICE) as? InputManager
+            if (im != null) {
+                Log.i("GameMapper", "Path B: InputManager obtained via Context.getSystemService")
+                return@lazy im
+            }
+        } catch (e: Exception) {
+            Log.w("GameMapper", "Path B: Context.getSystemService(INPUT_SERVICE) failed", e)
+        }
+
+        try {
+            val im = InputManager::class.java.getMethod("getInstance").invoke(null) as? InputManager
+            if (im != null) {
+                Log.i("GameMapper", "Path B: InputManager obtained via getInstance() reflection")
+                return@lazy im
+            }
+        } catch (e: Exception) {
+            Log.e("GameMapper", "Path B: All methods to obtain InputManager failed", e)
+        }
+        null
     }
 
     private val pathB_injectMethod: Method? by lazy {
+        val im = inputManagerInstance ?: return@lazy null
         try {
-            InputManager::class.java.getMethod("injectInputEvent", MotionEvent::class.java, Int::class.javaPrimitiveType)
-                ?.apply { isAccessible = true }
-        } catch (e: Exception) { null }
+            val method = InputManager::class.java.getMethod(
+                "injectInputEvent",
+                android.view.InputEvent::class.java,
+                Int::class.javaPrimitiveType
+            )
+            method.isAccessible = true
+            Log.i("GameMapper", "Path B: injectInputEvent method found via reflection")
+            method
+        } catch (e: Exception) {
+            Log.e("GameMapper", "Path B: injectInputEvent method not found", e)
+            null
+        }
     }
 
-    override fun releaseAllPointers() {}
+    // ==================== UTILITY ====================
+
+    override fun releaseAllPointers() {
+        // Can be expanded later if needed
+    }
+
     override fun destroy() {
         isInitialized = false
         releaseAllPointers()

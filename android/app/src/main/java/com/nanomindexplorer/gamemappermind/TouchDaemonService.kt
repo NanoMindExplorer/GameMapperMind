@@ -307,8 +307,12 @@ class TouchDaemonService : ITouchService.Stub {
     }
 
     override fun releaseAllPointers(): Boolean {
-        // Implementasi release pointer jika diperlukan
         return true
+    }
+
+    override fun updateConfig(json: String) {
+        // Bisa digunakan nanti untuk update konfigurasi runtime jika diperlukan
+        Log.d("GameMapper", "updateConfig called with: $json")
     }
 
     override fun destroy() {

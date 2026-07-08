@@ -15,7 +15,7 @@ import GamepadTester from './components/GamepadTester';
 import GameSelector from './components/GameSelector';
 import CreditsPanel from './components/CreditsPanel';
 import InstalledGamesPanel from './components/InstalledGamesPanel';
-import { Shield, Activity, Compass, Cpu, Layers, ShieldAlert, Heart, AlertTriangle, Gamepad2 } from 'lucide-react';
+import { Shield, Activity, Compass, Cpu, Layers, ShieldAlert, Heart, AlertTriangle, Gamepad2, Sparkles } from 'lucide-react';
 import { KeepAwake } from '@capacitor-community/keep-awake';
 import { ScreenOrientation } from '@capacitor/screen-orientation';
 import { useShizuku } from './hooks/useShizuku';

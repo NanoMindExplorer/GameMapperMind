@@ -114,7 +114,7 @@ class GamepadListenerService : Service() {
         }
     }
 
-    // ==================== CORE: getevent Listener ====================
+    // ==================== CORE LOGIC ====================
 
     private fun startGetEventCapture() {
         if (isListening) {
@@ -145,7 +145,6 @@ class GamepadListenerService : Service() {
                     ?: NativeGamepadMapper(this@GamepadListenerService)
                 nativeMapper.buildMapCache()
 
-                // Detect gamepad device
                 val gamepadDevice = detectGamepadDevice() ?: run {
                     Log.w("GameMapper", "No gamepad detected")
                     TouchInjectionPlugin.emitGamepadButton("ERROR_NO_GAMEPAD", 0, 0f)
@@ -169,28 +168,36 @@ class GamepadListenerService : Service() {
         }.apply { isDaemon = true }.start()
     }
 
+    /**
+     * Detect first gamepad device from `getevent -lp`
+     * Fixed: Avoid smart cast issue by using regular for loop instead of forEach lambda
+     */
     private fun detectGamepadDevice(): String? {
         return try {
             val result = TouchInjectionPlugin.touchService?.executeShellCommand("getevent -lp") ?: return null
             val output = org.json.JSONObject(result).optString("output", "")
+            val lines = output.lines()
 
             val devices = mutableListOf<String>()
             var currentPath: String? = null
             var isGamepad = false
 
-            output.lines().forEach { line ->
+            for (line in lines) {
                 if (line.contains("add device")) {
                     if (isGamepad && currentPath != null && !devices.contains(currentPath)) {
                         devices.add(currentPath)
                     }
                     currentPath = Regex("/dev/input/event\\d+").find(line)?.value
                     isGamepad = false
-                } else if (line.contains("BTN_A") || line.contains("BTN_GAMEPAD") ||
-                           line.contains("BTN_SOUTH") || line.contains("ABS_HAT0X")) {
+                } 
+                else if (line.contains("BTN_A") || line.contains("BTN_GAMEPAD") ||
+                         line.contains("BTN_SOUTH") || line.contains("ABS_HAT0X") ||
+                         line.contains("BTN_L1") || line.contains("BTN_R1")) {
                     isGamepad = true
                 }
             }
 
+            // Check last device
             if (isGamepad && currentPath != null && !devices.contains(currentPath)) {
                 devices.add(currentPath)
             }
@@ -241,8 +248,6 @@ class GamepadListenerService : Service() {
             }
         }
 
-        // ==================== Event Handlers ====================
-
         private fun handleKeyEvent(line: String) {
             val parts = line.trim().split(Regex("\\s+"))
             val btnIdx = parts.indexOfFirst { it.startsWith("BTN_") }
@@ -270,7 +275,6 @@ class GamepadListenerService : Service() {
 
             try {
                 val rawVal = valueHex.toLong(16).toInt()
-                // Simplified mapping (can be expanded later)
                 when (axisType) {
                     "ABS_X" -> { lStickX = normalizeAxis(rawVal); hasAxisChange = true }
                     "ABS_Y" -> { lStickY = normalizeAxis(rawVal); hasAxisChange = true }
@@ -282,14 +286,8 @@ class GamepadListenerService : Service() {
             } catch (_: Exception) {}
         }
 
-        private fun normalizeAxis(raw: Int): Float {
-            // Simple normalization, can be improved with calibration later
-            return (raw / 32767f).coerceIn(-1f, 1f)
-        }
-
-        private fun normalizeTrigger(raw: Int): Float {
-            return ((raw + 32768) / 65535f).coerceIn(0f, 1f)
-        }
+        private fun normalizeAxis(raw: Int): Float = (raw / 32767f).coerceIn(-1f, 1f)
+        private fun normalizeTrigger(raw: Int): Float = ((raw + 32768) / 65535f).coerceIn(0f, 1f)
     }
 
     private fun mapEvdevToButton(evdevName: String): String {

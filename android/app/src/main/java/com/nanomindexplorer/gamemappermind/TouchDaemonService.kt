@@ -10,14 +10,6 @@ import android.view.MotionEvent
 import java.lang.reflect.Method
 import java.util.concurrent.atomic.AtomicInteger
 
-/**
- * TouchDaemonService — Multi-path touch injection service via Shizuku.
- *
- * Injection paths (tried in order):
- *   Path A (Primary): IInputManager via ServiceManager AIDL
- *   Path B (Fallback): InputManager via Context + Reflection
- *   Path C (Last Resort): Shell command "input tap"
- */
 class TouchDaemonService : ITouchService.Stub {
 
     private var ctx: Context? = null
@@ -40,10 +32,10 @@ class TouchDaemonService : ITouchService.Stub {
         val ALLOWED_PREFIXES = listOf("getevent -lp", "getevent -l", "dumpsys input", "pm list packages")
 
         if (ALLOWED_PREFIXES.none { command.startsWith(it) }) {
-            return createErrorJson("Command not allowed by whitelist: $command")
+            return createErrorJson("Command not allowed: $command")
         }
         if (Regex("[;|&\n<>`$]").containsMatchIn(command)) {
-            return createErrorJson("Command contains forbidden shell metacharacters")
+            return createErrorJson("Command contains forbidden characters")
         }
 
         return try {
@@ -51,27 +43,18 @@ class TouchDaemonService : ITouchService.Stub {
             val output = StringBuilder()
             val errorOutput = StringBuilder()
 
-            Thread {
-                process.inputStream.bufferedReader().use { reader ->
-                    reader.forEachLine { output.appendLine(it) }
-                }
-            }.start()
-
-            Thread {
-                process.errorStream.bufferedReader().use { reader ->
-                    reader.forEachLine { errorOutput.appendLine(it) }
-                }
-            }.start()
+            Thread { process.inputStream.bufferedReader().use { it.forEachLine { line -> output.appendLine(line) } } }.start()
+            Thread { process.errorStream.bufferedReader().use { it.forEachLine { line -> errorOutput.appendLine(line) } } }.start()
 
             val finished = process.waitFor(15, java.util.concurrent.TimeUnit.SECONDS)
             if (!finished) {
                 process.destroyForcibly()
-                return createErrorJson("Command timed out after 15 seconds")
+                return createErrorJson("Command timeout after 15s")
             }
 
             createResultJson(output.toString(), errorOutput.toString(), process.exitValue())
         } catch (e: Exception) {
-            createErrorJson(e.localizedMessage ?: "Unknown error occurred")
+            createErrorJson(e.localizedMessage ?: "Unknown error")
         }
     }
 
@@ -103,7 +86,7 @@ class TouchDaemonService : ITouchService.Stub {
 
             if (!command.startsWith("getevent -l /dev/input/event")) {
                 try {
-                    listener.onOutputLine("ERROR: Only 'getevent -l /dev/input/eventN' is allowed")
+                    listener.onOutputLine("ERROR: Only getevent -l /dev/input/eventN is allowed")
                     listener.onExit(-1)
                 } catch (_: Exception) {}
                 return
@@ -118,9 +101,7 @@ class TouchDaemonService : ITouchService.Stub {
                     while (!Thread.currentThread().isInterrupted) {
                         val line = try { reader.readLine() } catch (_: Exception) { break }
                         if (line == null) break
-                        try {
-                            listener.onOutputLine(line)
-                        } catch (_: Exception) { break }
+                        try { listener.onOutputLine(line) } catch (_: Exception) { break }
                     }
 
                     val exitCode = try { streamProcess?.waitFor() ?: -1 } catch (_: Exception) { -1 }
@@ -213,7 +194,6 @@ class TouchDaemonService : ITouchService.Stub {
             0, 0, 1f, 1f, -1, 0, currentInputSource, 0
         )
 
-        // Try Path A
         if ((activePath == null || activePath == "A") && tryPathA(event)) {
             activePath = "A"
             pathFailCount.set(0)
@@ -221,7 +201,6 @@ class TouchDaemonService : ITouchService.Stub {
             return true
         }
 
-        // Try Path B
         if ((activePath == null || activePath == "B") && tryPathB(event)) {
             activePath = "B"
             pathFailCount.set(0)
@@ -230,25 +209,19 @@ class TouchDaemonService : ITouchService.Stub {
         }
 
         event.recycle()
-
-        // Fallback to Path C
         val success = shellInputTap(pointerCoords[0].x, pointerCoords[0].y)
-        if (success) {
-            activePath = "C"
-        }
+        if (success) activePath = "C"
         return success
     }
 
     private fun tryPathA(event: MotionEvent): Boolean {
         val proxy = iInputManagerProxy ?: return false
         val method = pathA_injectMethod ?: return false
-
         return try {
             val result = method.invoke(proxy, event, 0) as Boolean
             if (!result) pathFailCount.incrementAndGet()
             result
         } catch (e: Exception) {
-            Log.w("GameMapper", "Path A injection failed: ${e.message}")
             pathFailCount.incrementAndGet()
             false
         }
@@ -257,13 +230,11 @@ class TouchDaemonService : ITouchService.Stub {
     private fun tryPathB(event: MotionEvent): Boolean {
         val im = inputManagerInstance ?: return false
         val method = pathB_injectMethod ?: return false
-
         return try {
             val result = method.invoke(im, event, 0) as Boolean
             if (!result) pathFailCount.incrementAndGet()
             result
         } catch (e: Exception) {
-            Log.w("GameMapper", "Path B injection failed: ${e.message}")
             pathFailCount.incrementAndGet()
             false
         }
@@ -271,122 +242,73 @@ class TouchDaemonService : ITouchService.Stub {
 
     private fun shellInputTap(x: Float, y: Float): Boolean {
         return try {
-            val process = Runtime.getRuntime().exec(arrayOf(
-                "input", "tap",
-                x.toInt().toString(),
-                y.toInt().toString()
-            ))
+            val process = Runtime.getRuntime().exec(arrayOf("input", "tap", x.toInt().toString(), y.toInt().toString()))
             val finished = process.waitFor(800, java.util.concurrent.TimeUnit.MILLISECONDS)
             if (!finished) process.destroyForcibly()
             process.exitValue() == 0
         } catch (e: Exception) {
-            Log.e("GameMapper", "shellInputTap failed", e)
             false
         }
     }
 
-    // ==================== PATH A: IInputManager via ServiceManager ====================
+    // ==================== PATH A & B ====================
 
     private val iInputManagerProxy: Any? by lazy {
         try {
             val serviceManagerClass = Class.forName("android.os.ServiceManager")
             val getServiceMethod = serviceManagerClass.getMethod("getService", String::class.java)
-            val inputBinder = getServiceMethod.invoke(null, "input") as? IBinder
-
-            if (inputBinder == null) {
-                Log.e("GameMapper", "Path A: ServiceManager.getService(\"input\") returned null")
-                return@lazy null
-            }
+            val inputBinder = getServiceMethod.invoke(null, "input") as? IBinder ?: return@lazy null
 
             val stubClass = Class.forName("android.hardware.input.IInputManager\$Stub")
-            val asInterfaceMethod = stubClass.getMethod("asInterface", IBinder::class.java)
-            val proxy = asInterfaceMethod.invoke(null, inputBinder)
-
-            Log.i("GameMapper", "Path A: Successfully obtained IInputManager proxy")
-            proxy
+            stubClass.getMethod("asInterface", IBinder::class.java).invoke(null, inputBinder)
         } catch (e: Exception) {
-            Log.e("GameMapper", "Path A: Failed to obtain IInputManager proxy", e)
+            Log.e("GameMapper", "Failed to get IInputManager proxy", e)
             null
         }
     }
 
     private val pathA_injectMethod: Method? by lazy {
-        val proxy = iInputManagerProxy ?: return@lazy null
         try {
-            val method = proxy.javaClass.getMethod(
+            iInputManagerProxy?.javaClass?.getMethod(
                 "injectInputEvent",
                 android.view.InputEvent::class.java,
                 Int::class.javaPrimitiveType
-            )
-            method.isAccessible = true
-            Log.i("GameMapper", "Path A: injectInputEvent method found")
-            method
+            )?.apply { isAccessible = true }
         } catch (e: Exception) {
-            Log.e("GameMapper", "Path A: injectInputEvent method not found", e)
             null
         }
     }
 
-    // ==================== PATH B: InputManager via Context + Reflection ====================
-
     private val inputManagerInstance: InputManager? by lazy {
-        var context = ctx
-        if (context == null) {
-            try {
-                val activityThreadClass = Class.forName("android.app.ActivityThread")
-                val currentApp = activityThreadClass.getMethod("currentApplication").invoke(null)
-                if (currentApp is Context) {
-                    context = currentApp
-                    this.ctx = context
-                }
-            } catch (e: Exception) {
-                Log.w("GameMapper", "Path B: Failed to get application context via ActivityThread", e)
-            }
-        }
-
         try {
-            val im = context?.getSystemService(Context.INPUT_SERVICE) as? InputManager
-            if (im != null) {
-                Log.i("GameMapper", "Path B: InputManager obtained via Context.getSystemService")
-                return@lazy im
-            }
+            ctx?.getSystemService(Context.INPUT_SERVICE) as? InputManager
+                ?: InputManager::class.java.getMethod("getInstance").invoke(null) as? InputManager
         } catch (e: Exception) {
-            Log.w("GameMapper", "Path B: Context.getSystemService(INPUT_SERVICE) failed", e)
+            null
         }
-
-        try {
-            val im = InputManager::class.java.getMethod("getInstance").invoke(null) as? InputManager
-            if (im != null) {
-                Log.i("GameMapper", "Path B: InputManager obtained via getInstance() reflection")
-                return@lazy im
-            }
-        } catch (e: Exception) {
-            Log.e("GameMapper", "Path B: All methods to obtain InputManager failed", e)
-        }
-        null
     }
 
     private val pathB_injectMethod: Method? by lazy {
-        val im = inputManagerInstance ?: return@lazy null
         try {
-            val method = InputManager::class.java.getMethod(
+            InputManager::class.java.getMethod(
                 "injectInputEvent",
                 android.view.InputEvent::class.java,
                 Int::class.javaPrimitiveType
-            )
-            method.isAccessible = true
-            Log.i("GameMapper", "Path B: injectInputEvent method found via reflection")
-            method
+            )?.apply { isAccessible = true }
         } catch (e: Exception) {
-            Log.e("GameMapper", "Path B: injectInputEvent method not found", e)
             null
         }
     }
 
-    // ==================== UTILITY ====================
+    // ==================== REQUIRED METHODS FROM STUB ====================
 
-    override fun releaseAllPointers() {
-        // Can be expanded later if needed
+    override fun isAlive(): Boolean {
+        return isInitialized
+    }
+
+    override fun releaseAllPointers(): Boolean {
+        // Implementasi release pointer jika diperlukan
+        return true
     }
 
     override fun destroy() {

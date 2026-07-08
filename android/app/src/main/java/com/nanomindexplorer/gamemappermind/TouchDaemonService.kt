@@ -311,8 +311,16 @@ class TouchDaemonService : ITouchService.Stub {
     }
 
     override fun updateConfig(json: String) {
-        // Bisa digunakan nanti untuk update konfigurasi runtime jika diperlukan
-        Log.d("GameMapper", "updateConfig called with: $json")
+        Log.d("GameMapper", "updateConfig called")
+    }
+
+    override fun testInjection(x: Float, y: Float): String {
+        return try {
+            NativeGamepadMapper.instance?.runDiagnosticTestTap()
+                ?: "{\"error\":\"NativeGamepadMapper not initialized\"}"
+        } catch (e: Exception) {
+            "{\"error\":\"${e.message}\"}"
+        }
     }
 
     override fun destroy() {

@@ -22,14 +22,10 @@ export default function OverlayApp({ activeProfile, onUpdateProfile, onLogMessag
   const [isMacroRecording, setIsMacroRecording] = useState(false);
   const [toastMessage, setToastMessage] = useState<ToastMessage | null>(null);
 
-  // ==================== TOAST ====================
   const showToast = (type: ToastMessage['type'], text: string) => {
     setToastMessage({ type, text });
     setTimeout(() => setToastMessage(null), 3200);
-
-    if (onLogMessage) {
-      onLogMessage(text);
-    }
+    if (onLogMessage) onLogMessage(text);
   };
 
   // ==================== OVERLAY ====================
@@ -62,7 +58,7 @@ export default function OverlayApp({ activeProfile, onUpdateProfile, onLogMessag
   // ==================== MACRO RECORDING ====================
   const handleToggleMacroRecording = async () => {
     if (!activeProfile) {
-      showToast('error', 'No active profile');
+      showToast('error', 'No active profile selected');
       return;
     }
 
@@ -86,52 +82,37 @@ export default function OverlayApp({ activeProfile, onUpdateProfile, onLogMessag
     }
   };
 
-  // ==================== RENDER ====================
   return (
     <div className="flex flex-col h-full bg-slate-950 text-slate-200">
-      {/* Top Bar */}
+      {/* Top Control Bar */}
       <div className="flex items-center justify-between px-4 py-3 bg-slate-900 border-b border-slate-800">
         <div className="flex items-center gap-3">
           <span className="font-semibold">Overlay Mode</span>
-          {overlayActive && (
-            <span className="px-2.5 py-0.5 text-xs bg-emerald-600 rounded-full">Active</span>
-          )}
-          {isMacroRecording && (
-            <span className="px-2.5 py-0.5 text-xs bg-red-600 rounded-full animate-pulse">Recording Macro</span>
-          )}
+          {overlayActive && <span className="px-2.5 py-0.5 text-xs bg-emerald-600 rounded-full">Active</span>}
+          {isMacroRecording && <span className="px-2.5 py-0.5 text-xs bg-red-600 rounded-full animate-pulse">Recording Macro</span>}
         </div>
 
         <div className="flex items-center gap-2">
           <button
             onClick={handleToggleMacroRecording}
-            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
-              isMacroRecording 
-                ? 'bg-red-600 hover:bg-red-500' 
-                : 'bg-pink-600 hover:bg-pink-500'
-            }`}
+            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${isMacroRecording ? 'bg-red-600 hover:bg-red-500' : 'bg-pink-600 hover:bg-pink-500'}`}
           >
             {isMacroRecording ? 'Stop Recording' : 'Record Macro'}
           </button>
 
           {!overlayActive ? (
-            <button
-              onClick={handleStartOverlay}
-              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-sm font-semibold"
-            >
+            <button onClick={handleStartOverlay} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-sm font-semibold">
               Start Overlay
             </button>
           ) : (
-            <button
-              onClick={handleStopOverlay}
-              className="px-4 py-2 bg-rose-600 hover:bg-rose-500 rounded-lg text-sm font-semibold"
-            >
+            <button onClick={handleStopOverlay} className="px-4 py-2 bg-rose-600 hover:bg-rose-500 rounded-lg text-sm font-semibold">
               Stop Overlay
             </button>
           )}
         </div>
       </div>
 
-      {/* Main Content */}
+      {/* Main WYSIWYG */}
       <div className="flex-1 overflow-hidden">
         <OverlayWysiwyg
           activeProfile={activeProfile}
@@ -143,7 +124,7 @@ export default function OverlayApp({ activeProfile, onUpdateProfile, onLogMessag
         />
       </div>
 
-      {/* Toast */}
+      {/* Toast Notification */}
       {toastMessage && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50">
           <div className={`px-5 py-2.5 rounded-full text-sm font-medium shadow-xl ${

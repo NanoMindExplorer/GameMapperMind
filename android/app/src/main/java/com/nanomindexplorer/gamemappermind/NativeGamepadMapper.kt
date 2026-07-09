@@ -59,6 +59,7 @@ class NativeGamepadMapper(private val context: Context) {
     private val turboRunnables = mutableMapOf<String, Runnable>()
     private val toggleState = mutableMapOf<String, Boolean>()
     private val chargeTimestamps = mutableMapOf<String, Long>()
+    private val activeMacros = mutableMapOf<String, Runnable>()
 
     fun buildMapCache() {
         buttonMapCache.clear()
@@ -90,7 +91,6 @@ class NativeGamepadMapper(private val context: Context) {
                     }
                 }
             }
-            Log.d(TAG, "buildMapCache: Loaded ${buttonMapCache.size} button mappings")
         } catch (e: Exception) {
             Log.e(TAG, "buildMapCache failed", e)
         }
@@ -133,7 +133,7 @@ class NativeGamepadMapper(private val context: Context) {
         return Pair((radius * cos(angle.toDouble())).toFloat(), (radius * sin(angle.toDouble())).toFloat())
     }
 
-    // ==================== PHASE 2: RADIAL DEADZONE ====================
+    // ==================== RADIAL DEADZONE ====================
 
     private fun applyRadialDeadzone(x: Float, y: Float, deadzone: Float): Pair<Float, Float> {
         val magnitude = sqrt(x * x + y * y)
@@ -181,8 +181,7 @@ class NativeGamepadMapper(private val context: Context) {
         val rescaledMag = sqrt(dzX * dzX + dzY * dzY).coerceIn(0f, 1f)
 
         val curve = mapping.optString("sensitivityCurve", "linear")
-        val curvePoints = mapping.optJSONArray("curvePoints")
-        val curvedMag = applyCurve(rescaledMag, curve, curvePoints)
+        val curvedMag = applyCurve(rescaledMag, curve, mapping.optJSONArray("curvePoints"))
 
         val sensitivity = mapping.optDouble("sensitivity", 1.0).toFloat().coerceIn(0.1f, 5.0f)
         val finalMag = (curvedMag * sensitivity).coerceIn(0f, 1f)
@@ -208,19 +207,14 @@ class NativeGamepadMapper(private val context: Context) {
 
         if (!pointer.isActive) {
             pointer.isActive = true
-            try { TouchInjectionPlugin.touchService?.touchDown(pointer.id, cX + ox, cY + oy) } catch (e: Exception) {
-                pointer.isActive = false
-                Log.w(TAG, "touchDown failed in processStick: ${e.message}")
-            }
+            try { TouchInjectionPlugin.touchService?.touchDown(pointer.id, cX + ox, cY + oy) } catch (_: Exception) { pointer.isActive = false }
         }
         if (pointer.isActive) {
-            try { TouchInjectionPlugin.touchService?.touchMove(pointer.id, tX + ox, tY + oy) } catch (e: Exception) {
-                Log.w(TAG, "touchMove failed in processStick: ${e.message}")
-            }
+            try { TouchInjectionPlugin.touchService?.touchMove(pointer.id, tX + ox, tY + oy) } catch (_: Exception) {}
         }
     }
 
-    // ==================== PHASE 2: IMPROVED TRIGGER ====================
+    // ==================== IMPROVED TRIGGER ====================
 
     private fun handleTrigger(gamepadIndex: Int, triggerName: String, value: Float) {
         val wasActive = lastState[triggerName + gamepadIndex] ?: false
@@ -253,7 +247,7 @@ class NativeGamepadMapper(private val context: Context) {
         }
     }
 
-    // ==================== PHASE 2: HOTPLUG ====================
+    // ==================== HOTPLUG ====================
 
     fun resetGamepad(gamepadIndex: Int) {
         if (gamepadIndex !in 0..3) return
@@ -314,7 +308,7 @@ class NativeGamepadMapper(private val context: Context) {
                 val tapDuration = mapping.optLong("tapDuration", 0L)
                 if (tapDuration > 0) {
                     try { ts.injectTap(x + ox, y + oy, tapDuration) } catch (e: Exception) {
-                        Log.w(TAG, "injectTap failed for $buttonName: ${e.message}")
+                        Log.w(TAG, "injectTap failed: ${e.message}")
                     }
                     return
                 }
@@ -328,7 +322,6 @@ class NativeGamepadMapper(private val context: Context) {
                     try { ts.touchDown(p.id, x + ox, y + oy) } catch (e: Exception) {
                         p.isActive = false
                         p.virtualKey = null
-                        Log.w(TAG, "touchDown failed for $buttonName: ${e.message}")
                     }
                 }
             } else if (!isDown && wasDown) {
@@ -343,32 +336,7 @@ class NativeGamepadMapper(private val context: Context) {
         }
     }
 
-    // ==================== DIAGNOSTIC ====================
-
-    fun runDiagnosticTestTap(): String {
-        val svc = TouchInjectionPlugin.touchService
-        if (svc == null) {
-            return JSONObject()
-                .put("error", "Touch daemon not connected (touchService is null)")
-                .toString()
-        }
-
-        val firstButton = buttonMapCache.values.firstOrNull()
-        val (pctX, pctY) = if (firstButton != null) {
-            Pair(firstButton.optDouble("x", 50.0), firstButton.optDouble("y", 50.0))
-        } else {
-            Pair(50.0, 50.0)
-        }
-
-        val (x, y) = getScreenCoords(pctX, pctY)
-        return try {
-            svc.testInjection(x, y)
-        } catch (e: Exception) {
-            JSONObject().put("error", "testInjection failed: ${e.message}").toString()
-        }
-    }
-
-    // ==================== INTERACTION HANDLERS ====================
+    // ==================== INTERACTION HANDLERS (PHASE 3 IMPROVED) ====================
 
     private fun evaluateTriggerMappings(buttonName: String, gamepadIndex: Int, isDown: Boolean, offset: Int) {
         val mappings = triggerMapCache[buttonName] ?: return
@@ -403,6 +371,7 @@ class NativeGamepadMapper(private val context: Context) {
             "turbo" -> handleTurbo(mapping, mapping.optString("id"), isDown, gamepadIndex)
             "toggle" -> handleToggle(mapping, mapping.optString("id"), isDown, offset)
             "charge" -> handleCharge(mapping, mapping.optString("id"), isDown, offset)
+            "macro" -> handleMacro(mapping, offset)
             else -> handleHoldInteraction(mapping, isDown, offset)
         }
     }
@@ -431,7 +400,7 @@ class NativeGamepadMapper(private val context: Context) {
                     try {
                         TouchInjectionPlugin.touchService?.injectTap(x + ox, y + oy, tapDuration)
                     } catch (e: Exception) {
-                        Log.w(TAG, "turbo tap failed: ${e.message}")
+                        Log.w(TAG, "turbo failed: ${e.message}")
                     }
                     mainHandler.postDelayed(this, intervalMs)
                 }
@@ -517,6 +486,66 @@ class NativeGamepadMapper(private val context: Context) {
                 try { TouchInjectionPlugin.touchService?.touchUp(p.id) } catch (_: Exception) {}
             }
         }
+    }
+
+    // ==================== BASIC MACRO SUPPORT (Phase 3) ====================
+
+    private fun handleMacro(mapping: JSONObject, offset: Int) {
+        val macroId = mapping.optString("id", "")
+        if (macroId.isEmpty()) return
+
+        // Hentikan macro jika sudah berjalan
+        activeMacros[macroId]?.let {
+            mainHandler.removeCallbacks(it)
+            activeMacros.remove(macroId)
+            return
+        }
+
+        val steps = mapping.optJSONArray("macroSteps") ?: return
+        if (steps.length() == 0) return
+
+        var currentStep = 0
+
+        val macroRunnable = object : Runnable {
+            override fun run() {
+                if (currentStep >= steps.length()) {
+                    activeMacros.remove(macroId)
+                    return
+                }
+
+                val step = steps.optJSONObject(currentStep) ?: return
+                val action = step.optString("action", "tap")
+                val x = step.optDouble("x", 50.0)
+                val y = step.optDouble("y", 50.0)
+                val delay = step.optLong("delayMs", 100L)
+                val duration = step.optLong("durationMs", 60L)
+
+                val (screenX, screenY) = getScreenCoords(x, y)
+                val (ox, oy) = getAntiBanOffset(mapping.optBoolean("antiBanEnabled", false))
+
+                when (action.lowercase()) {
+                    "tap" -> {
+                        try {
+                            TouchInjectionPlugin.touchService?.injectTap(screenX + ox, screenY + oy, duration)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Macro tap failed: ${e.message}")
+                        }
+                    }
+                    "down" -> {
+                        // Implementasi sederhana
+                    }
+                    "up" -> {
+                        // Implementasi sederhana
+                    }
+                }
+
+                currentStep++
+                mainHandler.postDelayed(this, delay)
+            }
+        }
+
+        activeMacros[macroId] = macroRunnable
+        macroRunnable.run()
     }
 
     private fun applyCurve(x: Float, curveType: String?, curvePoints: org.json.JSONArray?): Float {

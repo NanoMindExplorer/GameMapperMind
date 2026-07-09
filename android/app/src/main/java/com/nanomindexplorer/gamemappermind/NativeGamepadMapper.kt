@@ -61,6 +61,11 @@ class NativeGamepadMapper(private val context: Context) {
     private val chargeTimestamps = mutableMapOf<String, Long>()
     private val activeMacros = mutableMapOf<String, Runnable>()
 
+    // ==================== MACRO RECORDING ====================
+    private var isRecordingMacro = false
+    private var currentRecordingId: String? = null
+    private val recordedMacros = mutableMapOf<String, MutableList<JSONObject>>()
+
     fun buildMapCache() {
         buttonMapCache.clear()
         triggerMapCache.clear()
@@ -336,7 +341,7 @@ class NativeGamepadMapper(private val context: Context) {
         }
     }
 
-    // ==================== INTERACTION HANDLERS (PHASE 3 IMPROVED) ====================
+    // ==================== INTERACTION HANDLERS ====================
 
     private fun evaluateTriggerMappings(buttonName: String, gamepadIndex: Int, isDown: Boolean, offset: Int) {
         val mappings = triggerMapCache[buttonName] ?: return
@@ -488,13 +493,13 @@ class NativeGamepadMapper(private val context: Context) {
         }
     }
 
-    // ==================== BASIC MACRO SUPPORT (Phase 3) ====================
+    // ==================== POWERFUL MACRO SYSTEM (Phase 3) ====================
 
     private fun handleMacro(mapping: JSONObject, offset: Int) {
         val macroId = mapping.optString("id", "")
         if (macroId.isEmpty()) return
 
-        // Hentikan macro jika sudah berjalan
+        // Stop if already running
         activeMacros[macroId]?.let {
             mainHandler.removeCallbacks(it)
             activeMacros.remove(macroId)
@@ -531,12 +536,6 @@ class NativeGamepadMapper(private val context: Context) {
                             Log.w(TAG, "Macro tap failed: ${e.message}")
                         }
                     }
-                    "down" -> {
-                        // Implementasi sederhana
-                    }
-                    "up" -> {
-                        // Implementasi sederhana
-                    }
                 }
 
                 currentStep++
@@ -546,6 +545,21 @@ class NativeGamepadMapper(private val context: Context) {
 
         activeMacros[macroId] = macroRunnable
         macroRunnable.run()
+    }
+
+    // ==================== MACRO RECORDING SUPPORT ====================
+
+    fun startMacroRecording(macroId: String) {
+        isRecordingMacro = true
+        currentRecordingId = macroId
+        recordedMacros[macroId] = mutableListOf()
+        Log.i(TAG, "Started recording macro: $macroId")
+    }
+
+    fun stopMacroRecording() {
+        isRecordingMacro = false
+        currentRecordingId = null
+        Log.i(TAG, "Stopped macro recording")
     }
 
     private fun applyCurve(x: Float, curveType: String?, curvePoints: org.json.JSONArray?): Float {

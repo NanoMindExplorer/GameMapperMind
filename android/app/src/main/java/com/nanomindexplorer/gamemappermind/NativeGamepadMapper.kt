@@ -61,10 +61,14 @@ class NativeGamepadMapper(private val context: Context) {
     private val chargeTimestamps = mutableMapOf<String, Long>()
     private val activeMacros = mutableMapOf<String, Runnable>()
 
-    // ==================== MACRO RECORDING ====================
+    // Macro Recording
     private var isRecordingMacro = false
     private var currentRecordingId: String? = null
     private val recordedMacros = mutableMapOf<String, MutableList<JSONObject>>()
+
+    // Profile & Scene
+    var currentProfileId: String = "default"
+    var currentScene: String = "default"
 
     fun buildMapCache() {
         buttonMapCache.clear()
@@ -493,13 +497,12 @@ class NativeGamepadMapper(private val context: Context) {
         }
     }
 
-    // ==================== POWERFUL MACRO SYSTEM (Phase 3) ====================
+    // ==================== MACRO SYSTEM (Phase 4) ====================
 
     private fun handleMacro(mapping: JSONObject, offset: Int) {
         val macroId = mapping.optString("id", "")
         if (macroId.isEmpty()) return
 
-        // Stop if already running
         activeMacros[macroId]?.let {
             mainHandler.removeCallbacks(it)
             activeMacros.remove(macroId)
@@ -547,7 +550,7 @@ class NativeGamepadMapper(private val context: Context) {
         macroRunnable.run()
     }
 
-    // ==================== MACRO RECORDING SUPPORT ====================
+    // ==================== MACRO RECORDING (for UI) ====================
 
     fun startMacroRecording(macroId: String) {
         isRecordingMacro = true

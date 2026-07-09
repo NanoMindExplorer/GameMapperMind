@@ -1,91 +1,87 @@
-import React, { useState, useEffect } from 'react';
-import { GamepadProfile, GamepadMacro } from './types';
-import { INITIAL_PROFILES, INITIAL_MACROS } from './defaults';
-import ShizukuPanel from './components/ShizukuPanel';
-import OverlayWysiwyg from './components/OverlayWysiwyg';
-import MacroEngine from './components/MacroEngine';
-import GamepadTester from './components/GamepadTester';
-import GameSelector from './components/GameSelector';
-import CreditsPanel from './components/CreditsPanel';
-import InstalledGamesPanel from './components/InstalledGamesPanel';
-import { 
-  Terminal, Shield, Settings, Activity, Compass, Cpu, HelpCircle, 
-  ChevronRight, Sparkles, BookOpen, Layers, Bot, ShieldAlert, Heart, 
-  AlertTriangle, Gamepad2 
-} from 'lucide-react';
-import { KeepAwake } from '@capacitor-community/keep-awake';
-import { ScreenOrientation } from '@capacitor/screen-orientation';
-import { useShizuku } from './hooks/useShizuku';
-import { useGamepadLoop } from './hooks/useGamepadLoop';
-import { useInputInjector } from './hooks/useInputInjector';
-import TouchInjection from './plugins/TouchInjection';
+import React, { useState } from 'react';
+import OverlayWysiwyg from './OverlayWysiwyg';
+import { GamepadProfile } from '../types';
+import { useInputInjector } from '../hooks/useInputInjector';
+import TouchInjection from '../plugins/TouchInjection';
 
 interface ToastMessage {
   type: 'success' | 'error' | 'info';
   text: string;
 }
 
-export default function App() {
-  const { 
-    checkShizukuStatus, 
-    executeShizukuCommand, 
-    injectInput, 
-    stopDaemon, 
-    startDaemon 
-  } = useShizuku();
+interface OverlayAppProps {
+  activeProfile: GamepadProfile;
+  onUpdateProfile: (profile: GamepadProfile) => void;
+  onLogMessage?: (msg: string) => void;
+}
 
-  const { 
-    startOverlay, 
-    stopOverlay, 
-    overlayActive, 
-    setOverlayActive 
-  } = useInputInjector();
-
-  // ==================== STATE ====================
-  const [profiles, setProfiles] = useState<GamepadProfile[]>(INITIAL_PROFILES);
-  const [macros, setMacros] = useState<GamepadMacro[]>(INITIAL_MACROS);
-  const [activeProfileId, setActiveProfileId] = useState<string>('default');
-  const [currentScene, setCurrentScene] = useState<string>('default');
-  const [selectedMainView, setSelectedMainView] = useState<'shizuku' | 'profile' | 'overlay' | 'macro' | 'tester' | 'games' | 'credits'>('shizuku');
-
-  const [shizukuState, setShizukuState] = useState<any>(null);
-  const [activeKeys, setActiveKeys] = useState<string[]>([]);
-  const [activeAxes, setActiveAxes] = useState({ lx: 0, ly: 0, rx: 0, ry: 0 });
-
+export default function OverlayApp({ activeProfile, onUpdateProfile, onLogMessage }: OverlayAppProps) {
+  const { startOverlay, stopOverlay } = useInputInjector();
+  
+  const [overlayActive, setOverlayActive] = useState(false);
   const [isMacroRecording, setIsMacroRecording] = useState(false);
   const [toastMessage, setToastMessage] = useState<ToastMessage | null>(null);
-  const [recoveryDialogOpen, setRecoveryDialogOpen] = useState(false);
-  const [recoveryFailedCount, setRecoveryFailedCount] = useState(0);
 
-  const activeProfile = profiles.find(p => p.id === activeProfileId) || profiles[0];
-
-  // ==================== TOAST & FEEDBACK ====================
+  // ==================== TOAST ====================
   const showToast = (type: ToastMessage['type'], text: string) => {
     setToastMessage({ type, text });
-    setTimeout(() => setToastMessage(null), 3500);
+    setTimeout(() => setToastMessage(null), 3000);
+    
+    // Kirim juga ke parent jika ada
+    if (onLogMessage) {
+      onLogMessage(text);
+    }
   };
 
-  // ==================== MACRO RECORDING (Phase 5) ====================
+  // ==================== OVERLAY CONTROL ====================
+  const handleStartOverlay = async () => {
+    try {
+      const success = await startOverlay(activeProfile, 'canvas');
+      if (success) {
+        setOverlayActive(true);
+        showToast('success', 'Overlay started successfully');
+      } else {
+        showToast('error', 'Failed to start overlay');
+      }
+    } catch (error: any) {
+      showToast('error', `Overlay error: ${error.message || error}`);
+    }
+  };
+
+  const handleStopOverlay = async () => {
+    try {
+      const success = await stopOverlay();
+      if (success) {
+        setOverlayActive(false);
+        showToast('success', 'Overlay stopped');
+      }
+    } catch (error: any) {
+      showToast('error', `Stop overlay error: ${error.message || error}`);
+    }
+  };
+
+  // ==================== MACRO RECORDING ====================
   const handleToggleMacroRecording = async () => {
     if (!activeProfile) {
-      showToast('error', 'Pilih profile terlebih dahulu');
+      showToast('error', 'No active profile selected');
       return;
     }
 
     try {
       if (!isMacroRecording) {
-        // Mulai recording
+        // Start recording
+        if (TouchInjection.startMacroRecording) {
+          await TouchInjection.startMacroRecording(activeProfile.id);
+        }
         setIsMacroRecording(true);
-        showToast('info', 'Mulai merekam macro...');
-
-        // Panggil ke native layer
-        await TouchInjection.startMacroRecording?.(activeProfile.id);
+        showToast('info', 'Macro recording started');
       } else {
         // Stop recording
+        if (TouchInjection.stopMacroRecording) {
+          await TouchInjection.stopMacroRecording();
+        }
         setIsMacroRecording(false);
-        showToast('success', 'Macro recording selesai');
-
-        await TouchInjection.stopMacroRecording?.();
+        showToast('success', 'Macro recording stopped and saved');
       }
     } catch (error: any) {
       setIsMacroRecording(false);
@@ -93,166 +89,69 @@ export default function App() {
     }
   };
 
-  // ==================== PROFILE & SCENE ====================
-  const handleProfileSelect = (profileId: string) => {
-    setActiveProfileId(profileId);
-    showToast('success', `Profile changed to ${profileId}`);
-  };
-
-  const handleSceneChange = (scene: string) => {
-    setCurrentScene(scene);
-    showToast('info', `Scene changed to: ${scene}`);
-    // TODO: Kirim ke native jika diperlukan
-  };
-
-  // ==================== SHIZUKU & OVERLAY ====================
-  const handleStartOverlay = async () => {
-    try {
-      await startOverlay();
-      setOverlayActive(true);
-      showToast('success', 'Overlay started');
-    } catch (error: any) {
-      showToast('error', `Failed to start overlay: ${error.message}`);
-    }
-  };
-
-  const handleStopOverlay = async () => {
-    try {
-      await stopOverlay();
-      setOverlayActive(false);
-      showToast('success', 'Overlay stopped');
-    } catch (error: any) {
-      showToast('error', `Failed to stop overlay: ${error.message}`);
-    }
-  };
-
-  // ==================== ERROR RECOVERY ====================
-  const handleRecovery = async () => {
-    try {
-      await TouchInjection.bindService?.();
-      showToast('success', 'Service re-bound successfully');
-      setRecoveryDialogOpen(false);
-      setRecoveryFailedCount(0);
-    } catch (error) {
-      setRecoveryFailedCount(prev => prev + 1);
-      showToast('error', 'Failed to re-bind service');
-    }
-  };
-
   // ==================== RENDER ====================
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-200 flex flex-col">
-      {/* Header */}
-      <header className="border-b border-slate-800 bg-slate-900 px-4 py-3 flex items-center justify-between">
+    <div className="flex flex-col h-full bg-slate-950 text-slate-200">
+      {/* Top Control Bar */}
+      <div className="flex items-center justify-between px-4 py-3 bg-slate-900 border-b border-slate-800">
         <div className="flex items-center gap-3">
-          <Gamepad2 className="w-6 h-6 text-emerald-400" />
-          <div>
-            <h1 className="font-bold text-xl tracking-tight">GameMapperMind</h1>
-            <p className="text-[10px] text-slate-500 -mt-1">v2.4.0 • Phase 5</p>
-          </div>
+          <span className="font-semibold">Overlay Mode</span>
+          {overlayActive && (
+            <span className="px-2 py-0.5 text-xs bg-emerald-600 rounded">Active</span>
+          )}
+          {isMacroRecording && (
+            <span className="px-2 py-0.5 text-xs bg-red-600 rounded animate-pulse">Recording Macro</span>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
-          {isMacroRecording && (
-            <div className="flex items-center gap-2 bg-red-600/90 px-3 py-1 rounded-full text-sm">
-              <div className="w-2 h-2 bg-white rounded-full animate-pulse" />
-              Recording Macro
-            </div>
-          )}
           <button
             onClick={handleToggleMacroRecording}
-            className={`px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 transition-all ${
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
               isMacroRecording 
                 ? 'bg-red-600 hover:bg-red-500' 
                 : 'bg-pink-600 hover:bg-pink-500'
             }`}
           >
-            {isMacroRecording ? 'Stop Recording' : 'Record Macro'}
+            {isMacroRecording ? 'Stop Macro Recording' : 'Record Macro'}
           </button>
-        </div>
-      </header>
 
-      <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar */}
-        <div className="w-56 border-r border-slate-800 bg-slate-900 p-3 flex flex-col gap-1">
-          <button onClick={() => setSelectedMainView('shizuku')} className={`...`}>Shizuku</button>
-          <button onClick={() => setSelectedMainView('profile')} className={`...`}>Profiles</button>
-          <button onClick={() => setSelectedMainView('overlay')} className={`...`}>Mapping Editor</button>
-          <button onClick={() => setSelectedMainView('macro')} className={`...`}>Macro Engine</button>
-          <button onClick={() => setSelectedMainView('tester')} className={`...`}>Gamepad Tester</button>
-          <button onClick={() => setSelectedMainView('games')} className={`...`}>Installed Games</button>
-          <button onClick={() => setSelectedMainView('credits')} className={`...`}>Credits</button>
-        </div>
-
-        {/* Main Content */}
-        <div className="flex-1 flex flex-col overflow-hidden">
-          {selectedMainView === 'shizuku' && (
-            <ShizukuPanel 
-              shizukuState={shizukuState} 
-              setShizukuState={setShizukuState} 
-              onLogMessage={showToast} 
-            />
-          )}
-
-          {selectedMainView === 'profile' && (
-            <GameSelector 
-              profiles={profiles} 
-              activeProfileId={activeProfileId} 
-              onProfileSelect={handleProfileSelect}
-              onUpdateProfile={(p) => {
-                setProfiles(prev => prev.map(x => x.id === p.id ? p : x));
-              }}
-              onCreateProfile={(p) => setProfiles(prev => [...prev, p])}
-              onDeleteProfile={(id) => setProfiles(prev => prev.filter(x => x.id !== id))}
-              onLogMessage={showToast}
-            />
-          )}
-
-          {selectedMainView === 'overlay' && activeProfile && (
-            <OverlayWysiwyg 
-              activeProfile={activeProfile} 
-              onUpdateProfile={(updated) => {
-                setProfiles(prev => prev.map(p => p.id === updated.id ? updated : p));
-              }}
-              onLogMessage={showToast}
-              activeKeys={activeKeys}
-              activeAxes={activeAxes}
-            />
-          )}
-
-          {selectedMainView === 'macro' && (
-            <MacroEngine 
-              macros={macros} 
-              onUpdateMacros={setMacros} 
-              onLogMessage={showToast} 
-            />
-          )}
-
-          {selectedMainView === 'tester' && (
-            <GamepadTester onLogMessage={showToast} />
-          )}
-
-          {selectedMainView === 'games' && (
-            <InstalledGamesPanel 
-              onLogMessage={showToast} 
-              profiles={profiles} 
-              onProfileSelect={handleProfileSelect}
-            />
-          )}
-
-          {selectedMainView === 'credits' && (
-            <CreditsPanel onLogMessage={showToast} />
+          {!overlayActive ? (
+            <button
+              onClick={handleStartOverlay}
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-sm font-medium"
+            >
+              Start Overlay
+            </button>
+          ) : (
+            <button
+              onClick={handleStopOverlay}
+              className="px-4 py-2 bg-rose-600 hover:bg-rose-500 rounded-lg text-sm font-medium"
+            >
+              Stop Overlay
+            </button>
           )}
         </div>
       </div>
 
-      {/* Toast Notification */}
+      {/* Main WYSIWYG Area */}
+      <div className="flex-1 overflow-hidden">
+        <OverlayWysiwyg
+          activeProfile={activeProfile}
+          onUpdateProfile={onUpdateProfile}
+          onLogMessage={(msg: string) => showToast('info', msg)}
+          activeKeys={[]}
+          activeAxes={{ lx: 0, ly: 0, rx: 0, ry: 0 }}
+          isNativeOverlay={true}
+        />
+      </div>
+
+      {/* Toast */}
       {toastMessage && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50">
-          <div className={`px-6 py-3 rounded-full text-sm font-medium shadow-xl flex items-center gap-2 ${
-            toastMessage.type === 'success' ? 'bg-emerald-600 text-white' :
-            toastMessage.type === 'error' ? 'bg-red-600 text-white' :
-            'bg-slate-700 text-slate-200'
+          <div className={`px-5 py-2.5 rounded-full text-sm font-medium shadow-xl ${
+            toastMessage.type === 'success' ? 'bg-emerald-600' :
+            toastMessage.type === 'error' ? 'bg-red-600' : 'bg-slate-700'
           }`}>
             {toastMessage.text}
           </div>

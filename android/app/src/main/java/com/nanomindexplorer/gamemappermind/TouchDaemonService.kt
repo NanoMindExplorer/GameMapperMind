@@ -10,6 +10,8 @@ import android.view.MotionEvent
 import java.lang.reflect.Method
 import java.util.concurrent.atomic.AtomicInteger
 
+private const val TAG = "GameMapper"
+
 class TouchDaemonService : ITouchService.Stub {
 
     private var ctx: Context? = null
@@ -32,6 +34,7 @@ class TouchDaemonService : ITouchService.Stub {
         val ALLOWED_PREFIXES = listOf("getevent -lp", "getevent -l", "dumpsys input", "pm list packages")
 
         if (ALLOWED_PREFIXES.none { command.startsWith(it) }) {
+            Log.w(TAG, "Shell command rejected (not allowed): $command")
             return createErrorJson("Command not allowed: $command")
         }
         if (Regex("[;|&\n<>`$]").containsMatchIn(command)) {
@@ -194,29 +197,43 @@ class TouchDaemonService : ITouchService.Stub {
             0, 0, 1f, 1f, -1, 0, currentInputSource, 0
         )
 
+        // Try Path A
         if ((activePath == null || activePath == "A") && tryPathA(event)) {
-            activePath = "A"
+            if (activePath == null) {
+                activePath = "A"
+                Log.i(TAG, "Switched to injection Path A (IInputManager AIDL)")
+            }
             pathFailCount.set(0)
             event.recycle()
             return true
         }
 
+        // Try Path B
         if ((activePath == null || activePath == "B") && tryPathB(event)) {
-            activePath = "B"
+            if (activePath == null) {
+                activePath = "B"
+                Log.i(TAG, "Switched to injection Path B (InputManager Reflection)")
+            }
             pathFailCount.set(0)
             event.recycle()
             return true
         }
 
         event.recycle()
+
+        // Fallback to Path C
+        Log.w(TAG, "Falling back to Path C (shell input)")
         val success = shellInputTap(pointerCoords[0].x, pointerCoords[0].y)
-        if (success) activePath = "C"
+        if (success) {
+            activePath = "C"
+        }
         return success
     }
 
     private fun tryPathA(event: MotionEvent): Boolean {
         val proxy = iInputManagerProxy ?: return false
         val method = pathA_injectMethod ?: return false
+
         return try {
             val result = method.invoke(proxy, event, 0) as Boolean
             if (!result) pathFailCount.incrementAndGet()
@@ -230,6 +247,7 @@ class TouchDaemonService : ITouchService.Stub {
     private fun tryPathB(event: MotionEvent): Boolean {
         val im = inputManagerInstance ?: return false
         val method = pathB_injectMethod ?: return false
+
         return try {
             val result = method.invoke(im, event, 0) as Boolean
             if (!result) pathFailCount.incrementAndGet()
@@ -260,9 +278,11 @@ class TouchDaemonService : ITouchService.Stub {
             val inputBinder = getServiceMethod.invoke(null, "input") as? IBinder ?: return@lazy null
 
             val stubClass = Class.forName("android.hardware.input.IInputManager\$Stub")
-            stubClass.getMethod("asInterface", IBinder::class.java).invoke(null, inputBinder)
+            val proxy = stubClass.getMethod("asInterface", IBinder::class.java).invoke(null, inputBinder)
+            Log.i(TAG, "Path A: IInputManager proxy obtained successfully")
+            proxy
         } catch (e: Exception) {
-            Log.e("GameMapper", "Failed to get IInputManager proxy", e)
+            Log.e(TAG, "Path A: Failed to obtain IInputManager proxy", e)
             null
         }
     }
@@ -300,7 +320,7 @@ class TouchDaemonService : ITouchService.Stub {
         }
     }
 
-    // ==================== REQUIRED METHODS FROM STUB ====================
+    // ==================== REQUIRED METHODS ====================
 
     override fun isAlive(): Boolean {
         return isInitialized
@@ -311,7 +331,7 @@ class TouchDaemonService : ITouchService.Stub {
     }
 
     override fun updateConfig(json: String) {
-        Log.d("GameMapper", "updateConfig called")
+        Log.d(TAG, "updateConfig called")
     }
 
     override fun testInjection(x: Float, y: Float): String {

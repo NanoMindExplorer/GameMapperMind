@@ -10,6 +10,8 @@ import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.random.Random
 
+private const val TAG = "GameMapper"
+
 class NativeGamepadMapper(private val context: Context) {
 
     companion object {
@@ -88,8 +90,9 @@ class NativeGamepadMapper(private val context: Context) {
                     }
                 }
             }
+            Log.d(TAG, "buildMapCache: Loaded ${buttonMapCache.size} mappings")
         } catch (e: Exception) {
-            Log.e("GameMapper", "buildMapCache failed", e)
+            Log.e(TAG, "buildMapCache failed", e)
         }
     }
 
@@ -261,7 +264,7 @@ class NativeGamepadMapper(private val context: Context) {
             }
             lastState.keys.removeAll { it.endsWith(gamepadIndex.toString()) }
             smoothedAxes[gamepadIndex].fill(0f)
-            Log.i("GameMapper", "Gamepad $gamepadIndex reset (hotplug)")
+            Log.i(TAG, "Gamepad $gamepadIndex reset (hotplug)")
         }
     }
 
@@ -306,7 +309,7 @@ class NativeGamepadMapper(private val context: Context) {
                 val tapDuration = mapping.optLong("tapDuration", 0L)
                 if (tapDuration > 0) {
                     try { ts.injectTap(x + ox, y + oy, tapDuration) } catch (e: Exception) {
-                        Log.w("GameMapper", "injectTap failed: ${e.message}")
+                        Log.w(TAG, "injectTap failed for $buttonName: ${e.message}")
                     }
                     return
                 }
@@ -320,6 +323,7 @@ class NativeGamepadMapper(private val context: Context) {
                     try { ts.touchDown(p.id, x + ox, y + oy) } catch (e: Exception) {
                         p.isActive = false
                         p.virtualKey = null
+                        Log.w(TAG, "touchDown failed for $buttonName")
                     }
                 }
             } else if (!isDown && wasDown) {
@@ -340,7 +344,7 @@ class NativeGamepadMapper(private val context: Context) {
         val svc = TouchInjectionPlugin.touchService
         if (svc == null) {
             return JSONObject()
-                .put("error", "Touch daemon not connected (touchService is null). Start the daemon first.")
+                .put("error", "Touch daemon not connected (touchService is null)")
                 .toString()
         }
 
@@ -355,7 +359,7 @@ class NativeGamepadMapper(private val context: Context) {
         return try {
             svc.testInjection(x, y)
         } catch (e: Exception) {
-            JSONObject().put("error", "testInjection RPC failed: ${e.message}").toString()
+            JSONObject().put("error", "testInjection failed: ${e.message}").toString()
         }
     }
 
@@ -405,7 +409,7 @@ class NativeGamepadMapper(private val context: Context) {
         try {
             TouchInjectionPlugin.touchService?.injectTap(x + ox, y + oy, tapDuration)
         } catch (e: Exception) {
-            Log.w("GameMapper", "handleTap failed: ${e.message}")
+            Log.w(TAG, "handleTap failed: ${e.message}")
         }
     }
 
@@ -422,7 +426,7 @@ class NativeGamepadMapper(private val context: Context) {
                     try {
                         TouchInjectionPlugin.touchService?.injectTap(x + ox, y + oy, tapDuration)
                     } catch (e: Exception) {
-                        Log.w("GameMapper", "turbo tap failed: ${e.message}")
+                        Log.w(TAG, "turbo failed: ${e.message}")
                     }
                     mainHandler.postDelayed(this, intervalMs)
                 }
@@ -478,7 +482,7 @@ class NativeGamepadMapper(private val context: Context) {
                 try {
                     TouchInjectionPlugin.touchService?.injectTap(x + ox, y + oy, tapDuration)
                 } catch (e: Exception) {
-                    Log.w("GameMapper", "charge tap failed: ${e.message}")
+                    Log.w(TAG, "charge tap failed: ${e.message}")
                 }
             }
         }

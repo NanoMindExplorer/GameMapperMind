@@ -90,7 +90,7 @@ class NativeGamepadMapper(private val context: Context) {
                     }
                 }
             }
-            Log.d(TAG, "buildMapCache: Loaded ${buttonMapCache.size} mappings")
+            Log.d(TAG, "buildMapCache: Loaded ${buttonMapCache.size} button mappings")
         } catch (e: Exception) {
             Log.e(TAG, "buildMapCache failed", e)
         }
@@ -208,10 +208,15 @@ class NativeGamepadMapper(private val context: Context) {
 
         if (!pointer.isActive) {
             pointer.isActive = true
-            try { TouchInjectionPlugin.touchService?.touchDown(pointer.id, cX + ox, cY + oy) } catch (_: Exception) { pointer.isActive = false }
+            try { TouchInjectionPlugin.touchService?.touchDown(pointer.id, cX + ox, cY + oy) } catch (e: Exception) {
+                pointer.isActive = false
+                Log.w(TAG, "touchDown failed in processStick: ${e.message}")
+            }
         }
         if (pointer.isActive) {
-            try { TouchInjectionPlugin.touchService?.touchMove(pointer.id, tX + ox, tY + oy) } catch (_: Exception) {}
+            try { TouchInjectionPlugin.touchService?.touchMove(pointer.id, tX + ox, tY + oy) } catch (e: Exception) {
+                Log.w(TAG, "touchMove failed in processStick: ${e.message}")
+            }
         }
     }
 
@@ -323,7 +328,7 @@ class NativeGamepadMapper(private val context: Context) {
                     try { ts.touchDown(p.id, x + ox, y + oy) } catch (e: Exception) {
                         p.isActive = false
                         p.virtualKey = null
-                        Log.w(TAG, "touchDown failed for $buttonName")
+                        Log.w(TAG, "touchDown failed for $buttonName: ${e.message}")
                     }
                 }
             } else if (!isDown && wasDown) {
@@ -426,7 +431,7 @@ class NativeGamepadMapper(private val context: Context) {
                     try {
                         TouchInjectionPlugin.touchService?.injectTap(x + ox, y + oy, tapDuration)
                     } catch (e: Exception) {
-                        Log.w(TAG, "turbo failed: ${e.message}")
+                        Log.w(TAG, "turbo tap failed: ${e.message}")
                     }
                     mainHandler.postDelayed(this, intervalMs)
                 }

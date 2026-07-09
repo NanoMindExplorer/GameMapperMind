@@ -71,7 +71,9 @@ class NativeGamepadMapper(private val context: Context) {
             for (i in 0 until buttons.length()) {
                 val b = buttons.optJSONObject(i) ?: continue
                 val key = b.optString("mappedKey")
-                if (key.isNotEmpty() && key != "null") buttonMapCache[key] = b
+                if (key.isNotEmpty() && key != "null") {
+                    buttonMapCache[key] = b
+                }
 
                 val trigger = b.optJSONObject("trigger")
                 if (trigger != null) {
@@ -263,7 +265,7 @@ class NativeGamepadMapper(private val context: Context) {
         }
     }
 
-    // ==================== HANDLE BUTTON (Improved) ====================
+    // ==================== HANDLE BUTTON ====================
 
     fun handleButton(gamepadIndex: Int, buttonName: String, isDown: Boolean) {
         synchronized(syncLock) {
@@ -332,7 +334,7 @@ class NativeGamepadMapper(private val context: Context) {
         }
     }
 
-    // ==================== DIAGNOSTIC FUNCTION (PENTING) ====================
+    // ==================== DIAGNOSTIC ====================
 
     fun runDiagnosticTestTap(): String {
         val svc = TouchInjectionPlugin.touchService
@@ -357,7 +359,7 @@ class NativeGamepadMapper(private val context: Context) {
         }
     }
 
-    // ==================== FUNGSI LAINNYA ====================
+    // ==================== INTERACTION HANDLERS ====================
 
     private fun evaluateTriggerMappings(buttonName: String, gamepadIndex: Int, isDown: Boolean, offset: Int) {
         val mappings = triggerMapCache[buttonName] ?: return
@@ -388,7 +390,7 @@ class NativeGamepadMapper(private val context: Context) {
 
     private fun dispatchInteraction(mapping: JSONObject, gamepadIndex: Int, isDown: Boolean, offset: Int) {
         when (mapping.optString("interactionType", "hold")) {
-            "tap" -> if (isDown) { /* implementasi tap */ }
+            "tap" -> if (isDown) handleTap(mapping, offset)
             "turbo" -> handleTurbo(mapping, mapping.optString("id"), isDown, gamepadIndex)
             "toggle" -> handleToggle(mapping, mapping.optString("id"), isDown, offset)
             "charge" -> handleCharge(mapping, mapping.optString("id"), isDown, offset)
@@ -396,10 +398,117 @@ class NativeGamepadMapper(private val context: Context) {
         }
     }
 
-    private fun handleTurbo(mapping: JSONObject, nodeId: String, isDown: Boolean, gamepadIndex: Int) { /* ... */ }
-    private fun handleToggle(mapping: JSONObject, nodeId: String, isDown: Boolean, offset: Int) { /* ... */ }
-    private fun handleCharge(mapping: JSONObject, nodeId: String, isDown: Boolean, offset: Int) { /* ... */ }
-    private fun handleHoldInteraction(mapping: JSONObject, isDown: Boolean, offset: Int) { /* ... */ }
+    private fun handleTap(mapping: JSONObject, offset: Int) {
+        val (x, y) = getScreenCoords(mapping.getDouble("x"), mapping.getDouble("y"))
+        val (ox, oy) = getAntiBanOffset(mapping.optBoolean("antiBanEnabled", false))
+        val tapDuration = mapping.optLong("tapDuration", 60L)
+        try {
+            TouchInjectionPlugin.touchService?.injectTap(x + ox, y + oy, tapDuration)
+        } catch (e: Exception) {
+            Log.w("GameMapper", "handleTap failed: ${e.message}")
+        }
+    }
+
+    private fun handleTurbo(mapping: JSONObject, nodeId: String, isDown: Boolean, gamepadIndex: Int) {
+        if (isDown) {
+            turboRunnables[nodeId]?.let { mainHandler.removeCallbacks(it) }
+            val intervalMs = mapping.optLong("repeatIntervalMs", 50L)
+            val (x, y) = getScreenCoords(mapping.getDouble("x"), mapping.getDouble("y"))
+            val (ox, oy) = getAntiBanOffset(mapping.optBoolean("antiBanEnabled", false))
+            val tapDuration = mapping.optLong("tapDuration", 30L)
+
+            val runnable = object : Runnable {
+                override fun run() {
+                    try {
+                        TouchInjectionPlugin.touchService?.injectTap(x + ox, y + oy, tapDuration)
+                    } catch (e: Exception) {
+                        Log.w("GameMapper", "turbo tap failed: ${e.message}")
+                    }
+                    mainHandler.postDelayed(this, intervalMs)
+                }
+            }
+            turboRunnables[nodeId] = runnable
+            runnable.run()
+        } else {
+            turboRunnables[nodeId]?.let { mainHandler.removeCallbacks(it) }
+            turboRunnables.remove(nodeId)
+        }
+    }
+
+    private fun handleToggle(mapping: JSONObject, nodeId: String, isDown: Boolean, offset: Int) {
+        if (!isDown) return
+        val isToggled = toggleState[nodeId] ?: false
+        val (x, y) = getScreenCoords(mapping.getDouble("x"), mapping.getDouble("y"))
+        val (ox, oy) = getAntiBanOffset(mapping.optBoolean("antiBanEnabled", false))
+
+        if (!isToggled) {
+            val p = (offset..offset + 15).mapNotNull { pointersById[it] }
+                .find { !it.isActive && it.type == "button" }
+            if (p != null) {
+                p.isActive = true
+                p.virtualKey = "toggle_$nodeId"
+                try { TouchInjectionPlugin.touchService?.touchDown(p.id, x + ox, y + oy) } catch (_: Exception) {}
+            }
+            toggleState[nodeId] = true
+        } else {
+            val p = (offset..offset + 15).mapNotNull { pointersById[it] }
+                .find { it.isActive && it.virtualKey == "toggle_$nodeId" }
+            if (p != null) {
+                p.isActive = false
+                p.virtualKey = null
+                try { TouchInjectionPlugin.touchService?.touchUp(p.id) } catch (_: Exception) {}
+            }
+            toggleState[nodeId] = false
+        }
+    }
+
+    private fun handleCharge(mapping: JSONObject, nodeId: String, isDown: Boolean, offset: Int) {
+        if (isDown) {
+            chargeTimestamps[nodeId] = System.currentTimeMillis()
+        } else {
+            val pressTime = chargeTimestamps[nodeId] ?: return
+            val heldMs = System.currentTimeMillis() - pressTime
+            val threshold = mapping.optLong("chargeThresholdMs", 500L)
+            chargeTimestamps.remove(nodeId)
+
+            if (heldMs >= threshold) {
+                val (x, y) = getScreenCoords(mapping.getDouble("x"), mapping.getDouble("y"))
+                val (ox, oy) = getAntiBanOffset(mapping.optBoolean("antiBanEnabled", false))
+                val tapDuration = mapping.optLong("tapDuration", 60L)
+                try {
+                    TouchInjectionPlugin.touchService?.injectTap(x + ox, y + oy, tapDuration)
+                } catch (e: Exception) {
+                    Log.w("GameMapper", "charge tap failed: ${e.message}")
+                }
+            }
+        }
+    }
+
+    private fun handleHoldInteraction(mapping: JSONObject, isDown: Boolean, offset: Int) {
+        val (x, y) = getScreenCoords(mapping.getDouble("x"), mapping.getDouble("y"))
+        val (ox, oy) = getAntiBanOffset(mapping.optBoolean("antiBanEnabled", false))
+        val nodeId = "hold_${mapping.optString("id", "")}"
+
+        if (isDown) {
+            val p = (offset..offset + 15).mapNotNull { pointersById[it] }
+                .find { !it.isActive && it.type == "button" }
+            if (p != null) {
+                p.isActive = true
+                p.virtualKey = nodeId
+                try { TouchInjectionPlugin.touchService?.touchDown(p.id, x + ox, y + oy) } catch (e: Exception) {
+                    p.isActive = false
+                }
+            }
+        } else {
+            val p = (offset..offset + 15).mapNotNull { pointersById[it] }
+                .find { it.isActive && it.virtualKey == nodeId }
+            if (p != null) {
+                p.isActive = false
+                p.virtualKey = null
+                try { TouchInjectionPlugin.touchService?.touchUp(p.id) } catch (_: Exception) {}
+            }
+        }
+    }
 
     private fun applyCurve(x: Float, curveType: String?, curvePoints: org.json.JSONArray?): Float {
         if (curveType == null) return x

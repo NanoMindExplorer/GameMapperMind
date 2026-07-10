@@ -211,6 +211,29 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
         }.apply { isDaemon = true }.start()
     }
 
+    // FIX (bug report: "LT/RT tidak bereaksi", "analog kiri nyangkut/gak smooth"):
+    // normalizeAxis()/normalizeTrigger() previously assumed a hardcoded signed
+    // -32768..32767 range for EVERY axis, including triggers. Real controllers report
+    // wildly different raw ranges per axis (sticks are often -32768..32767, but triggers
+    // are very commonly unsigned 0..255 or 0..1023 — some sticks aren't ±32767 either).
+    // With the old hardcoded formula, a 0..255 trigger would normalize to a near-constant
+    // ~0.50 regardless of press state, permanently tripping the press threshold once and
+    // then never changing again — exactly "LT/RT tidak bereaksi". detectGamepadDevice()
+    // already runs `getevent -lp`, which prints each axis's real min/max — previously
+    // that text was fetched and then thrown away, keeping only the device path. Now it's
+    // parsed and kept so normalization matches the actual hardware.
+    private var detectedAxisRanges: Map<String, Pair<Int, Int>> = emptyMap()
+
+    // FIX (bug report: "analog kanan mati" + "LT/RT tidak bereaksi" together): the code
+    // assumed the Xbox/xpad convention (ABS_RX/RY = right stick, ABS_Z/RZ = triggers). Many
+    // generic/cheap Bluetooth gamepads instead report the right stick on ABS_Z/ABS_RZ and
+    // send triggers as plain digital buttons (BTN_TL2/BTN_TR2), not as any analog axis at
+    // all. Under the old fixed assumption, that combination reads as "right stick frozen at
+    // whatever the trigger happens to report" AND "triggers never analog-cross the press
+    // threshold" simultaneously — matching both symptoms at once. Decided once per connected
+    // device from its actual capability dump, not guessed globally.
+    private var rightStickUsesZRZ = false
+
     private fun detectGamepadDevice(): String? {
         return try {
             val result = TouchInjectionPlugin.touchService?.executeShellCommand("getevent -lp") ?: return null
@@ -218,8 +241,10 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
             val lines = output.lines()
 
             val devices = mutableListOf<String>()
+            val deviceAxisRanges = mutableMapOf<String, MutableMap<String, Pair<Int, Int>>>()
             var currentPath: String? = null
             var isGamepad = false
+            val axisLineRegex = Regex("(ABS_\\w+)\\s*:.*?min\\s+(-?\\d+),\\s*max\\s+(-?\\d+)")
 
             for (line in lines) {
                 if (line.contains("add device")) {
@@ -232,15 +257,33 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
                            line.contains("BTN_SOUTH") || line.contains("ABS_HAT0X")) {
                     isGamepad = true
                 }
+
+                val axisMatch = axisLineRegex.find(line)
+                if (axisMatch != null && currentPath != null) {
+                    val (axisName, minStr, maxStr) = axisMatch.destructured
+                    val min = minStr.toIntOrNull()
+                    val max = maxStr.toIntOrNull()
+                    if (min != null && max != null && max > min) {
+                        deviceAxisRanges.getOrPut(currentPath!!) { mutableMapOf() }[axisName] = Pair(min, max)
+                    }
+                }
             }
 
             if (isGamepad && currentPath != null && !devices.contains(currentPath)) {
                 devices.add(currentPath)
             }
 
-            devices.firstOrNull()
+            val chosen = devices.firstOrNull()
+            detectedAxisRanges = if (chosen != null) deviceAxisRanges[chosen] ?: emptyMap() else emptyMap()
+            rightStickUsesZRZ = !detectedAxisRanges.containsKey("ABS_RX") &&
+                !detectedAxisRanges.containsKey("ABS_RY") &&
+                detectedAxisRanges.containsKey("ABS_Z") &&
+                detectedAxisRanges.containsKey("ABS_RZ")
+            Log.i("GameMapper", "Detected axis ranges for $chosen: $detectedAxisRanges (rightStickUsesZRZ=$rightStickUsesZRZ)")
+            chosen
         } catch (e: Exception) {
             Log.e("GameMapper", "detectGamepadDevice failed", e)
+            detectedAxisRanges = emptyMap()
             null
         }
     }
@@ -312,12 +355,22 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
             try {
                 val rawVal = valueHex.toLong(16).toInt()
                 when (axisType) {
-                    "ABS_X" -> { lStickX = normalizeAxis(rawVal); hasAxisChange = true }
-                    "ABS_Y" -> { lStickY = normalizeAxis(rawVal); hasAxisChange = true }
-                    "ABS_RX" -> { rStickX = normalizeAxis(rawVal); hasAxisChange = true }
-                    "ABS_RY" -> { rStickY = normalizeAxis(rawVal); hasAxisChange = true }
-                    "ABS_Z", "ABS_GAS" -> { l2Trigger = normalizeTrigger(rawVal); hasAxisChange = true }
-                    "ABS_RZ", "ABS_BRAKE" -> { r2Trigger = normalizeTrigger(rawVal); hasAxisChange = true }
+                    "ABS_X" -> { lStickX = normalizeAxis(axisType, rawVal); hasAxisChange = true }
+                    "ABS_Y" -> { lStickY = normalizeAxis(axisType, rawVal); hasAxisChange = true }
+                    "ABS_RX" -> { rStickX = normalizeAxis(axisType, rawVal); hasAxisChange = true }
+                    "ABS_RY" -> { rStickY = normalizeAxis(axisType, rawVal); hasAxisChange = true }
+                    "ABS_Z" -> {
+                        if (rightStickUsesZRZ) { rStickX = normalizeAxis(axisType, rawVal) }
+                        else { l2Trigger = normalizeTrigger(axisType, rawVal) }
+                        hasAxisChange = true
+                    }
+                    "ABS_RZ" -> {
+                        if (rightStickUsesZRZ) { rStickY = normalizeAxis(axisType, rawVal) }
+                        else { r2Trigger = normalizeTrigger(axisType, rawVal) }
+                        hasAxisChange = true
+                    }
+                    "ABS_GAS" -> { l2Trigger = normalizeTrigger(axisType, rawVal); hasAxisChange = true }
+                    "ABS_BRAKE" -> { r2Trigger = normalizeTrigger(axisType, rawVal); hasAxisChange = true }
                     // FIX: D-pad on most controllers reports as ABS_HAT0X/ABS_HAT0Y (-1/0/1), not
                     // as BTN_DPAD_* keys. This was previously unhandled here entirely — harmless
                     // while testing on the main app screen (GamepadPlugin's onGenericMotionEvent
@@ -341,8 +394,44 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
             } catch (_: Exception) {}
         }
 
-        private fun normalizeAxis(raw: Int): Float = (raw / 32767f).coerceIn(-1f, 1f)
-        private fun normalizeTrigger(raw: Int): Float = ((raw + 32768) / 65535f).coerceIn(0f, 1f)
+        // FIX: previously hardcoded to a signed -32768..32767 range for every axis
+        // (`raw / 32767f`), which silently breaks any controller whose stick doesn't use
+        // exactly that range. Now uses the real min/max detectGamepadDevice() parsed from
+        // `getevent -lp` for this specific device/axis (centers on the range's actual
+        // midpoint, not an assumed 0), falling back to the old constant only if that
+        // specific axis wasn't found in the capability dump.
+        private fun normalizeAxis(axisName: String, raw: Int): Float {
+            val range = detectedAxisRanges[axisName]
+            if (range != null) {
+                val (min, max) = range
+                val half = (max - min) / 2f
+                if (half > 0f) {
+                    val mid = (min + max) / 2f
+                    return ((raw - mid) / half).coerceIn(-1f, 1f)
+                }
+            }
+            return (raw / 32767f).coerceIn(-1f, 1f)
+        }
+
+        // FIX (root cause of "LT/RT tidak bereaksi"): previously assumed the same signed
+        // -32768..32767 range as sticks (`(raw + 32768) / 65535f`). Triggers are very
+        // commonly unsigned 0..255 or 0..1023 instead — under the old formula a 0..255
+        // trigger would always normalize to roughly 0.50 (both released AND fully pressed),
+        // permanently tripping the 0.08 press threshold once on the first tiny jitter and
+        // then never crossing it again. Now scales from the real detected min (released) to
+        // max (fully pressed) for this exact axis, whatever range the hardware actually uses.
+        private fun normalizeTrigger(axisName: String, raw: Int): Float {
+            val range = detectedAxisRanges[axisName]
+            if (range != null) {
+                val (min, max) = range
+                val span = (max - min).toFloat()
+                if (span > 0f) {
+                    return ((raw - min) / span).coerceIn(0f, 1f)
+                }
+            }
+            // Fallback: most common convention for triggers on generic HID gamepads.
+            return (raw / 255f).coerceIn(0f, 1f)
+        }
     }
 
     private fun mapEvdevToButton(evdevName: String): String {
@@ -351,6 +440,14 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
             evdevName.contains("BTN_B") || evdevName.contains("BTN_EAST") -> "B"
             evdevName.contains("BTN_X") || evdevName.contains("BTN_NORTH") -> "X"
             evdevName.contains("BTN_Y") || evdevName.contains("BTN_WEST") -> "Y"
+            // FIX (root cause candidate for "LT/RT tidak bereaksi"): BTN_TL2/BTN_TR2 is the
+            // standard evdev name for digital trigger buttons on many generic/cheap gamepads
+            // (as opposed to an analog trigger axis). MUST be checked before the plain
+            // BTN_TL/BTN_TR checks below — "BTN_TL2".contains("BTN_TL") is true in Kotlin, so
+            // the old check order silently swallowed every trigger press as a bumper (LB/RB)
+            // press instead, and the real LT/RT mapping never received anything.
+            evdevName.contains("BTN_TL2") -> "LT"
+            evdevName.contains("BTN_TR2") -> "RT"
             evdevName.contains("BTN_TL") || evdevName.contains("BTN_L1") -> "LB"
             evdevName.contains("BTN_TR") || evdevName.contains("BTN_R1") -> "RB"
             evdevName.contains("BTN_THUMBL") || evdevName == "BTN_THUMB" -> "L3"

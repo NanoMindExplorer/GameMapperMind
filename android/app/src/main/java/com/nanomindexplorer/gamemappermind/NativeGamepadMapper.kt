@@ -22,7 +22,7 @@ class NativeGamepadMapper(private val context: Context) {
             synchronized(syncLock) {
                 instance?.pointers?.forEach {
                     if (it.isActive) {
-                        try { TouchInjectionPlugin.touchService?.touchUp(it.id) } catch (_: Exception) {}
+                        try { TouchInjectionPlugin.touchService?.touchUp(it.id) } catch (e: Exception) { instance?.logInjectFailure("touchUp", it.id, e) }
                         it.isActive = false
                     }
                 }
@@ -52,6 +52,14 @@ class NativeGamepadMapper(private val context: Context) {
 
     val lastState = mutableMapOf<String, Boolean>()
     private val smoothedAxes = Array(4) { FloatArray(4) }
+
+    // Tracks whether the last touchMove for a pointer failed, so the hot path
+    // (processStick) logs a failure once per streak instead of every frame.
+    private val moveFailWarned = mutableMapOf<Int, Boolean>()
+
+    private fun logInjectFailure(action: String, pointerId: Int, e: Exception) {
+        Log.w(TAG, "Touch injection failed: $action pointer=$pointerId (${e.javaClass.simpleName}: ${e.message})")
+    }
 
     var buttonMapCache = mutableMapOf<String, JSONObject>()
     private var triggerMapCache = mutableMapOf<String, MutableList<JSONObject>>()
@@ -163,7 +171,7 @@ class NativeGamepadMapper(private val context: Context) {
         if (mapping == null || !mapping.has("x") || !mapping.has("y")) {
             if (pointer.isActive) {
                 pointer.isActive = false
-                try { TouchInjectionPlugin.touchService?.touchUp(pointer.id) } catch (_: Exception) {}
+                try { TouchInjectionPlugin.touchService?.touchUp(pointer.id) } catch (e: Exception) { logInjectFailure("touchUp", pointer.id, e) }
             }
             return
         }
@@ -178,7 +186,7 @@ class NativeGamepadMapper(private val context: Context) {
 
         if (rawMag <= deadzone) {
             if (pointer.isActive) {
-                try { TouchInjectionPlugin.touchService?.touchUp(pointer.id) } catch (_: Exception) {}
+                try { TouchInjectionPlugin.touchService?.touchUp(pointer.id) } catch (e: Exception) { logInjectFailure("touchUp", pointer.id, e) }
                 pointer.isActive = false
             }
             smoothBuffer[smoothOffset] = 0f
@@ -216,10 +224,34 @@ class NativeGamepadMapper(private val context: Context) {
 
         if (!pointer.isActive) {
             pointer.isActive = true
-            try { TouchInjectionPlugin.touchService?.touchDown(pointer.id, cX + ox, cY + oy) } catch (_: Exception) { pointer.isActive = false }
+            try {
+                TouchInjectionPlugin.touchService?.touchDown(pointer.id, cX + ox, cY + oy)
+            } catch (e: Exception) {
+                pointer.isActive = false
+                logInjectFailure("touchDown", pointer.id, e)
+            }
         }
         if (pointer.isActive) {
-            try { TouchInjectionPlugin.touchService?.touchMove(pointer.id, tX + ox, tY + oy) } catch (_: Exception) {}
+            try {
+                // touchMove returns false (no exception) when TouchDaemonService is degraded
+                // to shell-fallback Path C, which only supports single-pointer tap and silently
+                // rejects MOVE. A false return is just as much a dropped frame as a thrown
+                // exception, so it must hit the same failure-tracking path below.
+                val moved = TouchInjectionPlugin.touchService?.touchMove(pointer.id, tX + ox, tY + oy) ?: false
+                if (moved) {
+                    if (moveFailWarned[pointer.id] == true) moveFailWarned[pointer.id] = false
+                } else if (moveFailWarned[pointer.id] != true) {
+                    moveFailWarned[pointer.id] = true
+                    Log.w(TAG, "Touch injection returned false: touchMove pointer=${pointer.id} (stick drag likely stuck on shell-fallback Path C)")
+                }
+            } catch (e: Exception) {
+                // Hot path (fires every axis update while stick deflected) - log once per
+                // failure streak instead of every frame, or logcat gets flooded.
+                if (moveFailWarned[pointer.id] != true) {
+                    moveFailWarned[pointer.id] = true
+                    logInjectFailure("touchMove", pointer.id, e)
+                }
+            }
         }
     }
 
@@ -265,7 +297,7 @@ class NativeGamepadMapper(private val context: Context) {
             for (i in 0 until 16) {
                 val p = pointersById[offset + i]
                 if (p != null && p.isActive) {
-                    try { TouchInjectionPlugin.touchService?.touchUp(p.id) } catch (_: Exception) {}
+                    try { TouchInjectionPlugin.touchService?.touchUp(p.id) } catch (e: Exception) { logInjectFailure("touchUp", p.id, e) }
                     p.isActive = false
                     p.virtualKey = null
                 }
@@ -303,7 +335,7 @@ class NativeGamepadMapper(private val context: Context) {
                     if (p != null) {
                         p.isActive = false
                         p.virtualKey = null
-                        try { ts.touchUp(p.id) } catch (_: Exception) {}
+                        try { ts.touchUp(p.id) } catch (e: Exception) { logInjectFailure("touchUp", p.id, e) }
                     }
                 }
                 return
@@ -331,6 +363,7 @@ class NativeGamepadMapper(private val context: Context) {
                     try { ts.touchDown(p.id, x + ox, y + oy) } catch (e: Exception) {
                         p.isActive = false
                         p.virtualKey = null
+                        logInjectFailure("touchDown", p.id, e)
                     }
                 }
             } else if (!isDown && wasDown) {
@@ -339,7 +372,7 @@ class NativeGamepadMapper(private val context: Context) {
                 if (p != null) {
                     p.isActive = false
                     p.virtualKey = null
-                    try { ts.touchUp(p.id) } catch (_: Exception) {}
+                    try { ts.touchUp(p.id) } catch (e: Exception) { logInjectFailure("touchUp", p.id, e) }
                 }
             }
         }
@@ -434,7 +467,7 @@ class NativeGamepadMapper(private val context: Context) {
             if (p != null) {
                 p.isActive = true
                 p.virtualKey = "toggle_$nodeId"
-                try { TouchInjectionPlugin.touchService?.touchDown(p.id, x + ox, y + oy) } catch (_: Exception) {}
+                try { TouchInjectionPlugin.touchService?.touchDown(p.id, x + ox, y + oy) } catch (e: Exception) { logInjectFailure("touchDown", p.id, e) }
             }
             toggleState[nodeId] = true
         } else {
@@ -443,7 +476,7 @@ class NativeGamepadMapper(private val context: Context) {
             if (p != null) {
                 p.isActive = false
                 p.virtualKey = null
-                try { TouchInjectionPlugin.touchService?.touchUp(p.id) } catch (_: Exception) {}
+                try { TouchInjectionPlugin.touchService?.touchUp(p.id) } catch (e: Exception) { logInjectFailure("touchUp", p.id, e) }
             }
             toggleState[nodeId] = false
         }
@@ -484,6 +517,7 @@ class NativeGamepadMapper(private val context: Context) {
                 p.virtualKey = nodeId
                 try { TouchInjectionPlugin.touchService?.touchDown(p.id, x + ox, y + oy) } catch (e: Exception) {
                     p.isActive = false
+                    logInjectFailure("touchDown", p.id, e)
                 }
             }
         } else {
@@ -492,7 +526,7 @@ class NativeGamepadMapper(private val context: Context) {
             if (p != null) {
                 p.isActive = false
                 p.virtualKey = null
-                try { TouchInjectionPlugin.touchService?.touchUp(p.id) } catch (_: Exception) {}
+                try { TouchInjectionPlugin.touchService?.touchUp(p.id) } catch (e: Exception) { logInjectFailure("touchUp", p.id, e) }
             }
         }
     }

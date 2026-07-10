@@ -222,6 +222,30 @@ export default function OverlayWysiwyg(props: OverlayWysiwygProps) {
               );
             }
 
+            // Gesture path visualization (restored — was silently dropped in a prior edit)
+            let gesturePath = null;
+            if (interactionType === 'gesture' && btn.gesturePoints && btn.gesturePoints.length > 0) {
+              gesturePath = (
+                <svg className="absolute inset-0 pointer-events-none z-0" style={{ width: '100%', height: '100%', overflow: 'visible' }}>
+                  <line x1="50%" y1="50%" x2={`${btn.gesturePoints[0].x - btn.x + 50}%`} y2={`${btn.gesturePoints[0].y - btn.y + 50}%`} stroke="rgba(34,211,238,0.4)" strokeWidth="1.5" strokeDasharray="3,2" />
+                  {btn.gesturePoints.map((pt: any, i: number) => {
+                    if (i === 0) return null;
+                    const prev = btn.gesturePoints[i - 1];
+                    return (
+                      <line key={i}
+                        x1={`${prev.x - btn.x + 50}%`} y1={`${prev.y - btn.y + 50}%`}
+                        x2={`${pt.x - btn.x + 50}%`} y2={`${pt.y - btn.y + 50}%`}
+                        stroke="rgba(34,211,238,0.4)" strokeWidth="1.5" strokeDasharray="3,2"
+                      />
+                    );
+                  })}
+                  {btn.gesturePoints.map((pt: any, i: number) => (
+                    <circle key={`p${i}`} cx={`${pt.x - btn.x + 50}%`} cy={`${pt.y - btn.y + 50}%`} r="2" fill="rgba(34,211,238,0.7)" />
+                  ))}
+                </svg>
+              );
+            }
+
             return (
               <div
                 key={btn.id}
@@ -248,6 +272,7 @@ export default function OverlayWysiwyg(props: OverlayWysiwygProps) {
                 onClick={(e) => e.stopPropagation()}
               >
                 {interactionIcon}
+                {gesturePath}
                 <span className={`text-[10px] font-bold ${isSel ? 'text-white' : isPressed ? 'text-emerald-200' : 'text-slate-300'}`}>{btn.label}</span>
                 <span className="text-[8px] font-mono opacity-50 whitespace-nowrap">{btn.trigger?.inputs?.join('+') || btn.mappedKey}</span>
                 {analogCap}
@@ -271,29 +296,217 @@ export default function OverlayWysiwyg(props: OverlayWysiwygProps) {
           )}
         </div>
 
-        {/* Settings Panel, Palette, Bottom Bar, dll tetap sama seperti kode asli */}
-        {/* ... (saya pertahankan semua kode asli yang kamu berikan di bawah ini) */}
-
-        {/* ====== FLOATING SETTINGS PANEL ====== */}
+        {/* ====== FLOATING SETTINGS PANEL (left, toggleable) ====== */}
         {!h.isNativeOverlay && h.showConfig && (
           <div className="absolute left-2 top-2 bottom-2 w-56 bg-slate-950/95 border border-slate-700 rounded-lg p-3 flex flex-col gap-3 overflow-y-auto z-30 shadow-2xl">
-            {/* ... (kode settings panel tetap sama) */}
+            <div className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+              <Settings className="w-3.5 h-3.5 text-indigo-400" /> Settings
+            </div>
+
+            {/* Screenshot selector */}
+            <div>
+              <label className="text-[10px] text-slate-500 block mb-1">Background</label>
+              <select
+                className="w-full bg-slate-900 text-slate-100 text-xs px-2 py-1.5 rounded border border-slate-700"
+                value={h.screenshotMode}
+                onChange={(e) => h.setScreenshotMode(e.target.value)}
+              >
+                <option value="genshin">Genshin Impact</option>
+                <option value="pubg">PUBG Mobile</option>
+                <option value="codm">COD Mobile</option>
+                <option value="efootball">eFootball</option>
+                <option value="custom">Custom Upload...</option>
+              </select>
+            </div>
+
+            {/* Upload */}
+            {h.screenshotMode === 'custom' && (
+              <div>
+                <input type="file" ref={h.fileInputRef} accept="image/*" className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      const reader = new FileReader();
+                      reader.onload = () => h.setCustomScreenshotUrl(reader.result as string);
+                      reader.readAsDataURL(file);
+                    }
+                    e.target.value = '';
+                  }}
+                />
+                <button onClick={() => h.fileInputRef.current?.click()}
+                  className="w-full py-1.5 bg-slate-800 hover:bg-slate-700 text-indigo-300 text-[11px] rounded border border-slate-700 flex items-center justify-center gap-1">
+                  <Upload className="w-3 h-3" /> Upload
+                </button>
+                {h.customScreenshotUrl && <div className="text-[9px] text-emerald-400 mt-1 flex items-center gap-0.5"><Check className="w-2.5 h-2.5" /> Loaded</div>}
+              </div>
+            )}
+
+            {/* Brightness */}
+            <div>
+              <div className="flex justify-between text-[10px] text-slate-400 mb-0.5">
+                <span>Brightness</span><span className="font-mono">{h.bgDimLevel}%</span>
+              </div>
+              <input type="range" min="0" max="100" value={h.bgDimLevel}
+                onChange={(e) => h.setBgDimLevel(Number(e.target.value))}
+                className="w-full accent-indigo-500 h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer" />
+            </div>
+
+            {/* Opacity */}
+            <div>
+              <div className="flex justify-between text-[10px] text-slate-400 mb-0.5">
+                <span>Node Opacity</span><span className="font-mono">{h.globalNodeOpacity}%</span>
+              </div>
+              <input type="range" min="10" max="100" value={h.globalNodeOpacity}
+                onChange={(e) => h.setGlobalNodeOpacity(Number(e.target.value))}
+                className="w-full accent-rose-500 h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer" />
+            </div>
+
+            {/* Player selector */}
+            <div>
+              <label className="text-[10px] text-slate-500 block mb-1">Active Player</label>
+              <div className="flex gap-1">
+                {([1,2,3,4] as const).map(p => (
+                  <button key={p} onClick={() => h.setActivePlayer(p)}
+                    className={`flex-1 py-1 text-[10px] rounded ${h.activePlayer === p ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400'}`}>
+                    P{p}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <button onClick={() => h.setShowConfig(false)}
+              className="w-full py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-400 text-[10px] rounded mt-auto">
+              Close
+            </button>
           </div>
         )}
 
-        {/* ====== BUTTON PALETTE ====== */}
+        {/* ====== BUTTON PALETTE (top floating, toggleable) ====== */}
         {!h.isNativeOverlay && h.showPalette && (
           <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-slate-950/95 border border-slate-700 rounded-lg p-3 shadow-2xl z-40 max-w-[90%]">
-            {/* ... (kode palette tetap sama) */}
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[10px] font-bold text-slate-400 uppercase">Add Button</span>
+              <button onClick={() => h.setShowPalette(false)} className="text-slate-500 hover:text-white"><X className="w-3.5 h-3.5" /></button>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {/* Standard buttons */}
+              <button onClick={() => h.handleAddSpecificButton('A', 'A', 96)} className="w-8 h-8 rounded-full bg-slate-800 hover:bg-emerald-600 text-slate-200 text-[11px] font-bold">A</button>
+              <button onClick={() => h.handleAddSpecificButton('B', 'B', 97)} className="w-8 h-8 rounded-full bg-slate-800 hover:bg-rose-600 text-slate-200 text-[11px] font-bold">B</button>
+              <button onClick={() => h.handleAddSpecificButton('X', 'X', 99)} className="w-8 h-8 rounded-full bg-slate-800 hover:bg-blue-600 text-slate-200 text-[11px] font-bold">X</button>
+              <button onClick={() => h.handleAddSpecificButton('Y', 'Y', 100)} className="w-8 h-8 rounded-full bg-slate-800 hover:bg-amber-500 text-slate-200 text-[11px] font-bold">Y</button>
+              <button onClick={() => h.handleAddSpecificButton('LB', 'LB', 102, 64)} className="h-8 px-2 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold">LB</button>
+              <button onClick={() => h.handleAddSpecificButton('LT', 'LT', 104, 64)} className="h-8 px-2 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold">LT</button>
+              <button onClick={() => h.handleAddSpecificButton('RB', 'RB', 103, 64)} className="h-8 px-2 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold">RB</button>
+              <button onClick={() => h.handleAddSpecificButton('RT', 'RT', 105, 64)} className="h-8 px-2 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold">RT</button>
+              <div className="w-px h-8 bg-slate-700 mx-0.5" />
+              <button onClick={() => h.handleAddSpecificButton('↑', 'DPAD_UP', 19, 48)} className="w-8 h-8 rounded bg-slate-800 hover:bg-indigo-500 text-slate-300 text-[11px]">↑</button>
+              <button onClick={() => h.handleAddSpecificButton('↓', 'DPAD_DOWN', 20, 48)} className="w-8 h-8 rounded bg-slate-800 hover:bg-indigo-500 text-slate-300 text-[11px]">↓</button>
+              <button onClick={() => h.handleAddSpecificButton('←', 'DPAD_LEFT', 21, 48)} className="w-8 h-8 rounded bg-slate-800 hover:bg-indigo-500 text-slate-300 text-[11px]">←</button>
+              <button onClick={() => h.handleAddSpecificButton('→', 'DPAD_RIGHT', 22, 48)} className="w-8 h-8 rounded bg-slate-800 hover:bg-indigo-500 text-slate-300 text-[11px]">→</button>
+              <div className="w-px h-8 bg-slate-700 mx-0.5" />
+              <button onClick={() => h.handleAddSpecificButton('L3', 'L3', 106)} className="w-8 h-8 rounded-full border border-dashed border-slate-600 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[9px] font-bold">L3</button>
+              <button onClick={() => h.handleAddSpecificButton('R3', 'R3', 107)} className="w-8 h-8 rounded-full border border-dashed border-slate-600 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[9px] font-bold">R3</button>
+              <button onClick={() => h.handleAddSpecificButton('SELECT', 'SELECT', 109, 42)} className="h-8 px-2 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[8px] font-bold">SEL</button>
+              <button onClick={() => h.handleAddSpecificButton('START', 'START', 108, 42)} className="h-8 px-2 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[8px] font-bold">STR</button>
+              <div className="w-px h-8 bg-slate-700 mx-0.5" />
+              <button onClick={() => h.handleAddSpecificButton('L-Stick', 'L_STICK', 0, 100, 'analog_stick')} className="h-8 px-2 rounded bg-blue-900/50 hover:bg-blue-600 border border-blue-700 text-blue-200 text-[9px] font-bold flex items-center gap-1">
+                <Layers className="w-3 h-3" /> L-Stick
+              </button>
+              <button onClick={() => h.handleAddSpecificButton('R-Stick', 'R_STICK', 0, 100, 'analog_stick')} className="h-8 px-2 rounded bg-pink-900/50 hover:bg-pink-600 border border-pink-700 text-pink-200 text-[9px] font-bold flex items-center gap-1">
+                <Layers className="w-3 h-3" /> R-Stick
+              </button>
+            </div>
           </div>
         )}
 
-        {/* ====== BOTTOM BAR ====== */}
+        {/* ====== BOTTOM BAR (add + properties, always visible) ====== */}
         {!h.isNativeOverlay && (
           <div className="absolute bottom-0 left-0 right-0 bg-slate-950/95 border-t border-slate-800 z-40">
-            {/* ... (kode bottom bar tetap sama seperti yang kamu kirim) */}
+            {/* If button selected: show properties */}
+            {selectedBtn ? (
+              <div className="flex items-center gap-2 px-3 py-2 overflow-x-auto">
+                <span className="text-[10px] text-slate-500 shrink-0">{selectedBtn.label}</span>
+                {/* Nudge controls */}
+                <div className="flex gap-0.5 shrink-0">
+                  <button onClick={(e) => { e.stopPropagation(); h.relocateButtonOffset(selectedBtn.id, 0, -1); }} className="w-6 h-6 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px]">↑</button>
+                  <button onClick={(e) => { e.stopPropagation(); h.relocateButtonOffset(selectedBtn.id, 0, 1); }} className="w-6 h-6 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px]">↓</button>
+                  <button onClick={(e) => { e.stopPropagation(); h.relocateButtonOffset(selectedBtn.id, -1, 0); }} className="w-6 h-6 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px]">←</button>
+                  <button onClick={(e) => { e.stopPropagation(); h.relocateButtonOffset(selectedBtn.id, 1, 0); }} className="w-6 h-6 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px]">→</button>
+                </div>
+                <div className="w-px h-6 bg-slate-700 shrink-0" />
+                {/* Resize */}
+                <button onClick={(e) => { e.stopPropagation(); h.handleUpdateBtnProperties({ width: (selectedBtn.width || 56) - 5, height: (selectedBtn.height || 56) - 5 }); }} className="w-6 h-6 rounded bg-slate-800 hover:bg-rose-900 text-slate-300 text-[10px]">−</button>
+                <button onClick={(e) => { e.stopPropagation(); h.handleUpdateBtnProperties({ width: (selectedBtn.width || 56) + 5, height: (selectedBtn.height || 56) + 5 }); }} className="w-6 h-6 rounded bg-slate-800 hover:bg-indigo-900 text-slate-300 text-[10px]">+</button>
+                <div className="w-px h-6 bg-slate-700 shrink-0" />
+                {/* Mapped key selector */}
+                <select
+                  className="bg-slate-900 text-slate-100 text-[10px] px-1.5 py-1 rounded border border-slate-700 shrink-0"
+                  value={selectedBtn.mappedKey}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    const updates: Partial<VirtualButton> = { mappedKey: val as any };
+                    const codeMap: Record<string, number> = { A:96, B:97, X:99, Y:100, LB:102, RB:103, LT:104, RT:105, L3:106, R3:107, DPAD_UP:19, DPAD_DOWN:20, DPAD_LEFT:21, DPAD_RIGHT:22, SELECT:109, START:108 };
+                    if (val === 'SWIPE_UP') Object.assign(updates, { type:'swipe', androidEventCode:201, swipeDirection:'UP' });
+                    else if (val === 'SWIPE_DOWN') Object.assign(updates, { type:'swipe', androidEventCode:202, swipeDirection:'DOWN' });
+                    else if (val === 'SWIPE_LEFT') Object.assign(updates, { type:'swipe', androidEventCode:203, swipeDirection:'LEFT' });
+                    else if (val === 'SWIPE_RIGHT') Object.assign(updates, { type:'swipe', androidEventCode:204, swipeDirection:'RIGHT' });
+                    else if (codeMap[val]) updates.androidEventCode = codeMap[val];
+                    h.handleUpdateBtnProperties(updates);
+                  }}
+                >
+                  <optgroup label="Buttons">
+                    <option value="A">A</option><option value="B">B</option><option value="X">X</option><option value="Y">Y</option>
+                    <option value="LB">LB</option><option value="RB">RB</option><option value="LT">LT</option><option value="RT">RT</option>
+                    <option value="L3">L3</option><option value="R3">R3</option>
+                    <option value="SELECT">SELECT</option><option value="START">START</option>
+                    <option value="DPAD_UP">DPAD ↑</option><option value="DPAD_DOWN">DPAD ↓</option>
+                    <option value="DPAD_LEFT">DPAD ←</option><option value="DPAD_RIGHT">DPAD →</option>
+                  </optgroup>
+                  <optgroup label="Swipe">
+                    <option value="SWIPE_UP">Swipe ↑</option><option value="SWIPE_DOWN">Swipe ↓</option>
+                    <option value="SWIPE_LEFT">Swipe ←</option><option value="SWIPE_RIGHT">Swipe →</option>
+                  </optgroup>
+                </select>
+                {/* Label input */}
+                <input type="text" value={selectedBtn.label}
+                  onChange={(e) => h.handleUpdateBtnProperty('label', e.target.value)}
+                  className="bg-slate-900 text-slate-100 text-[10px] px-1.5 py-1 rounded border border-slate-700 w-16 shrink-0" />
+                <div className="w-px h-6 bg-slate-700 shrink-0" />
+                {/* Delete */}
+                <button onClick={() => h.handleRemoveButton(selectedBtn.id)}
+                  className="p-1.5 rounded bg-rose-950/60 hover:bg-rose-900 text-rose-400 shrink-0">
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+                {/* Deselect */}
+                <button onClick={() => h.setSelectedButtonId(null)}
+                  className="p-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-400 shrink-0">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : (
+              /* No selection: show add button */
+              <div className="flex items-center gap-2 px-3 py-2">
+                <button onClick={() => h.setShowPalette(!h.showPalette)}
+                  className={`px-3 py-1.5 rounded text-xs font-bold flex items-center gap-1 ${h.showPalette ? 'bg-indigo-600 text-white' : 'bg-slate-800 hover:bg-slate-700 text-slate-300'}`}>
+                  <Plus className="w-3.5 h-3.5" /> Add Button
+                </button>
+                <span className="text-[10px] text-slate-600">Tap a button to edit • Drag to move • Tap canvas to deselect</span>
+              </div>
+            )}
           </div>
         )}
+
+        {/* ====== ANALOG STICK PROPERTIES (inline saat analog selected) ====== */}
+        {!h.isNativeOverlay && selectedBtn?.type === 'analog_stick' && (
+          <div className="absolute bottom-12 right-2 bg-slate-950/95 border border-slate-700 rounded-lg p-2 z-40 text-[10px] space-y-1.5 w-40">
+            <div className="font-bold text-slate-400">Analog</div>
+            <div className="flex justify-between items-center"><span className="text-slate-500">Deadzone</span><span className="text-indigo-400 font-mono">{selectedBtn.deadzone || 0.15}</span></div>
+            <input type="range" min="0" max="1" step="0.01" value={selectedBtn.deadzone || 0.15}
+              onChange={(e) => h.handleUpdateBtnProperty('deadzone', parseFloat(e.target.value))}
+              className="w-full accent-indigo-500 h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer" />
+          </div>
+        )}
+
       </div>
     </div>
   );

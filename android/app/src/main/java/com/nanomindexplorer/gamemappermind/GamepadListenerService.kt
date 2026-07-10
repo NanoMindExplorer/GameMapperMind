@@ -318,6 +318,25 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
                     "ABS_RY" -> { rStickY = normalizeAxis(rawVal); hasAxisChange = true }
                     "ABS_Z", "ABS_GAS" -> { l2Trigger = normalizeTrigger(rawVal); hasAxisChange = true }
                     "ABS_RZ", "ABS_BRAKE" -> { r2Trigger = normalizeTrigger(rawVal); hasAxisChange = true }
+                    // FIX: D-pad on most controllers reports as ABS_HAT0X/ABS_HAT0Y (-1/0/1), not
+                    // as BTN_DPAD_* keys. This was previously unhandled here entirely — harmless
+                    // while testing on the main app screen (GamepadPlugin's onGenericMotionEvent
+                    // path covers it there), but during actual gameplay MainActivity has no window
+                    // focus so THIS listener is the only path receiving input, and D-pad silently
+                    // did nothing. Mirrors the same DPAD_* button convention GamepadPlugin uses,
+                    // so downstream mapping/dedup in NativeGamepadMapper.handleButton works as-is.
+                    "ABS_HAT0X" -> {
+                        GamepadJniPlugin.handleButtonBatched(0, "DPAD_LEFT", rawVal < 0)
+                        GamepadJniPlugin.handleButtonBatched(0, "DPAD_RIGHT", rawVal > 0)
+                        TouchInjectionPlugin.emitGamepadButton("DPAD_LEFT", if (rawVal < 0) 1 else 0, 1.0f)
+                        TouchInjectionPlugin.emitGamepadButton("DPAD_RIGHT", if (rawVal > 0) 1 else 0, 1.0f)
+                    }
+                    "ABS_HAT0Y" -> {
+                        GamepadJniPlugin.handleButtonBatched(0, "DPAD_UP", rawVal < 0)
+                        GamepadJniPlugin.handleButtonBatched(0, "DPAD_DOWN", rawVal > 0)
+                        TouchInjectionPlugin.emitGamepadButton("DPAD_UP", if (rawVal < 0) 1 else 0, 1.0f)
+                        TouchInjectionPlugin.emitGamepadButton("DPAD_DOWN", if (rawVal > 0) 1 else 0, 1.0f)
+                    }
                 }
             } catch (_: Exception) {}
         }
@@ -339,6 +358,13 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
             evdevName.contains("BTN_START") -> "START"
             evdevName.contains("BTN_SELECT") -> "SELECT"
             evdevName.contains("BTN_MODE") -> "HOME"
+            // FIX: fallback for controllers that send D-pad as discrete keys instead of
+            // ABS_HAT0X/Y (handled separately in handleAbsEvent). Rare but seen on some
+            // generic/cheap HID gamepads.
+            evdevName.contains("BTN_DPAD_UP") -> "DPAD_UP"
+            evdevName.contains("BTN_DPAD_DOWN") -> "DPAD_DOWN"
+            evdevName.contains("BTN_DPAD_LEFT") -> "DPAD_LEFT"
+            evdevName.contains("BTN_DPAD_RIGHT") -> "DPAD_RIGHT"
             else -> "UNKNOWN"
         }
     }

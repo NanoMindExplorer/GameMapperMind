@@ -64,9 +64,7 @@ class InstalledGamesPlugin : Plugin() {
                 // Battle Royale variants
                 "com.dts.freefireth", "com.garena.game.codm",
                 // Honor of Kings
-                "com.levelgame.hok", "com.tencent.tmgp.hok",
-                // Common Indonesian games
-                "com.gramedia.gramedia", "com.gojek.gopay"
+                "com.levelgame.hok", "com.tencent.tmgp.hok"
             )
 
             // Heuristic name patterns for game detection

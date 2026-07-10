@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import OverlayWysiwyg from './components/OverlayWysiwyg';
 import { GamepadProfile } from './types';
+import { INITIAL_PROFILES } from './defaults';
 import { useInputInjector } from './hooks/useInputInjector';
 import TouchInjection from './plugins/TouchInjection';
 
@@ -10,17 +11,114 @@ interface ToastMessage {
 }
 
 interface OverlayAppProps {
-  activeProfile: GamepadProfile;
-  onUpdateProfile: (profile: GamepadProfile) => void;
+  // Opsional: overlay window (FloatingOverlayService.java) adalah WebView
+  // TERPISAH dari App.tsx utama -- tidak berbagi React state/instance.
+  // Kalau prop ini tidak dikasih (kasus nyata di production), OverlayApp
+  // memuat & menyimpan profile sendiri lewat Capacitor Preferences,
+  // pakai key yang sama dengan App.tsx ('nexion_profiles' / 'nexion_active_profile').
+  activeProfile?: GamepadProfile;
+  onUpdateProfile?: (profile: GamepadProfile) => void;
   onLogMessage?: (msg: string) => void;
 }
 
-export default function OverlayApp({ activeProfile, onUpdateProfile, onLogMessage }: OverlayAppProps) {
+export default function OverlayApp({ activeProfile: externalProfile, onUpdateProfile: externalOnUpdate, onLogMessage }: OverlayAppProps) {
   const { startOverlay, stopOverlay } = useInputInjector();
 
   const [overlayActive, setOverlayActive] = useState(false);
   const [isMacroRecording, setIsMacroRecording] = useState(false);
   const [toastMessage, setToastMessage] = useState<ToastMessage | null>(null);
+
+  // ==================== SELF-LOADED PROFILE (fix: overlay window terpisah dari App.tsx) ====================
+  const [profiles, setProfiles] = useState<GamepadProfile[]>(INITIAL_PROFILES);
+  const [activeProfileId, setActiveProfileId] = useState('efootball');
+  const [profileLoaded, setProfileLoaded] = useState(false);
+
+  // Profile yang di-push LANGSUNG oleh native lewat window.injectConfig(). Ini jembatan
+  // yang sudah ada di FloatingOverlayService.java (onPageFinished / onReactReady /
+  // pushConfigToActiveOverlay) tapi sebelumnya tidak pernah didefinisikan di sisi JS --
+  // jadi selama ini no-op (di-guard `if(window.injectConfig)` di Java, makanya tidak crash,
+  // cuma tidak pernah jalan). Native selalu punya data intent-time-fresh (persis yang aktif
+  // saat user tekan "Start Overlay" di App.tsx), jadi ini lebih cepat & bebas race
+  // dibanding baca dari Preferences yang bisa saja belum selesai ke-persist.
+  const [nativeProfile, setNativeProfile] = useState<GamepadProfile | null>(null);
+
+  useEffect(() => {
+    if (externalProfile) {
+      setProfileLoaded(true);
+      return;
+    }
+    let cancelled = false;
+    import('@capacitor/preferences').then(({ Preferences }) => {
+      Promise.all([
+        Preferences.get({ key: 'nexion_profiles' }),
+        Preferences.get({ key: 'nexion_active_profile' }),
+      ]).then(([profilesRes, activeRes]) => {
+        if (cancelled) return;
+        if (profilesRes.value) {
+          try {
+            const parsed = JSON.parse(profilesRes.value);
+            if (Array.isArray(parsed) && parsed.length > 0) setProfiles(parsed);
+          } catch (e) {
+            console.error('OverlayApp: failed to parse nexion_profiles', e);
+          }
+        }
+        if (activeRes.value) setActiveProfileId(activeRes.value);
+        setProfileLoaded(true);
+      }).catch((e) => {
+        console.warn('OverlayApp: failed to load profile from Preferences', e);
+        if (!cancelled) setProfileLoaded(true);
+      });
+    }).catch((e) => {
+      console.warn('OverlayApp: capacitor preferences import error', e);
+      if (!cancelled) setProfileLoaded(true);
+    });
+    return () => { cancelled = true; };
+  }, [externalProfile]);
+
+  useEffect(() => {
+    if (externalProfile) return; // host controls the profile directly, native bridge not needed
+    (window as any).injectConfig = (jsonStr: string) => {
+      try {
+        const profile = JSON.parse(jsonStr);
+        if (profile && profile.id) {
+          setNativeProfile(profile);
+          setProfileLoaded(true);
+        }
+      } catch (e) {
+        console.error('OverlayApp: failed to parse config from native injectConfig', e);
+      }
+    };
+    // Tell native React has mounted and is ready to receive the config now — closes the
+    // ordering race where onPageFinished fires (and calls injectConfig) before this
+    // effect has had a chance to define window.injectConfig.
+    try {
+      (window as any).AndroidOverlay?.onReactReady?.();
+    } catch (e) {
+      console.warn('OverlayApp: AndroidOverlay.onReactReady failed', e);
+    }
+    return () => { delete (window as any).injectConfig; };
+  }, [externalProfile]);
+
+  const activeProfile = externalProfile ?? nativeProfile ?? profiles.find(p => p.id === activeProfileId) ?? profiles[0];
+
+  const handleUpdateProfile = useCallback((updated: GamepadProfile) => {
+    if (externalOnUpdate) {
+      externalOnUpdate(updated);
+      return;
+    }
+    // Keep whichever source is currently driving `activeProfile` in sync immediately
+    // (no flicker back to a stale value), then persist to Preferences as usual.
+    setNativeProfile(prev => (prev && prev.id === updated.id ? updated : prev));
+    setProfiles(prev => {
+      const next = prev.map(p => (p.id === updated.id ? updated : p));
+      import('@capacitor/preferences').then(({ Preferences }) => {
+        Preferences.set({ key: 'nexion_profiles', value: JSON.stringify(next) }).catch((e) =>
+          console.warn('OverlayApp: failed to persist profile update', e)
+        );
+      }).catch(() => {});
+      return next;
+    });
+  }, [externalOnUpdate]);
 
   const showToast = (type: ToastMessage['type'], text: string) => {
     setToastMessage({ type, text });
@@ -30,6 +128,7 @@ export default function OverlayApp({ activeProfile, onUpdateProfile, onLogMessag
 
   // ==================== OVERLAY ====================
   const handleStartOverlay = async () => {
+    if (!activeProfile) return;
     try {
       const success = await startOverlay(activeProfile, 'canvas');
       if (success) {
@@ -82,6 +181,14 @@ export default function OverlayApp({ activeProfile, onUpdateProfile, onLogMessag
     }
   };
 
+  if (!profileLoaded || !activeProfile) {
+    return (
+      <div className="flex items-center justify-center h-full bg-slate-950 text-slate-400 text-sm">
+        Memuat profile...
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-full bg-slate-950 text-slate-200">
       {/* Top Control Bar */}
@@ -116,7 +223,7 @@ export default function OverlayApp({ activeProfile, onUpdateProfile, onLogMessag
       <div className="flex-1 overflow-hidden">
         <OverlayWysiwyg
           activeProfile={activeProfile}
-          onUpdateProfile={onUpdateProfile}
+          onUpdateProfile={handleUpdateProfile}
           onLogMessage={(msg: string) => showToast('info', msg)}
           activeKeys={[]}
           activeAxes={{ lx: 0, ly: 0, rx: 0, ry: 0 }}

@@ -141,6 +141,23 @@ class NativeGamepadMapper(private val context: Context) {
         }
     }
 
+    // FIX: previously referenced by GamepadListenerService's notification "Test Tap" action
+    // and by TouchDaemonService.testInjection(), but never actually defined anywhere — a
+    // straight-up compile error once a real Kotlin build was run (this sandbox can only
+    // typecheck the TS side, not compile Kotlin, so it slipped through prior patches).
+    // Runs a real diagnostic tap at screen center via the AIDL binder and returns the
+    // daemon's structured JSON report (success / active injection path / error).
+    fun runDiagnosticTestTap(): String {
+        return try {
+            val ts = TouchInjectionPlugin.touchService
+                ?: return "{\"error\":\"Shizuku/TouchService not connected\"}"
+            val (x, y) = getScreenCoords(50.0, 50.0)
+            ts.testInjection(x, y)
+        } catch (e: Exception) {
+            "{\"error\":\"${e.message}\"}"
+        }
+    }
+
     private fun findButtonMapping(mappedKey: String): JSONObject? = buttonMapCache[mappedKey]
 
     private fun getAntiBanOffset(enabled: Boolean): Pair<Float, Float> {

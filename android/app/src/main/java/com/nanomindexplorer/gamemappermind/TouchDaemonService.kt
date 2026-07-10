@@ -335,9 +335,24 @@ class TouchDaemonService : ITouchService.Stub {
     }
 
     override fun testInjection(x: Float, y: Float): String {
+        // FIX: previously called NativeGamepadMapper.instance?.runDiagnosticTestTap(), which
+        // (a) never compiled — that method was never defined anywhere in the codebase, and
+        // (b) could never have worked anyway: TouchDaemonService runs as a Shizuku UserService
+        // in its own separate process, so the app-process NativeGamepadMapper singleton is
+        // always null here regardless. Self-contained instead: actually exercise the real
+        // Path A/B/C injection machinery with a short real tap and report what happened.
         return try {
-            NativeGamepadMapper.instance?.runDiagnosticTestTap()
-                ?: "{\"error\":\"NativeGamepadMapper not initialized\"}"
+            val success = injectTap(x, y, 80L)
+            val json = org.json.JSONObject()
+            json.put("success", success)
+            json.put("path", activePath ?: "none")
+            json.put("failCount", pathFailCount.get())
+            if (success) {
+                json.put("recommendation", "Injection OK via Path ${activePath ?: "?"}")
+            } else {
+                json.put("error", "Test tap failed on Path A, B, and C")
+            }
+            json.toString()
         } catch (e: Exception) {
             "{\"error\":\"${e.message}\"}"
         }

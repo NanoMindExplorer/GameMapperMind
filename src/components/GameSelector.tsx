@@ -6,7 +6,7 @@
 
 import React, { useRef } from 'react';
 import { GamepadProfile } from '../types';
-import { Target, Settings, Sliders, Box, HardDrive, Cpu, AlertTriangle, Play, Flame, Plus, Trash2, Edit2, Check, X, ShieldAlert, Download, Upload } from 'lucide-react';
+import { Target, Settings, Sliders, Box, HardDrive, Cpu, AlertTriangle, Play, Flame, Plus, Trash2, Edit2, Check, X, ShieldAlert, Download, Upload, Crosshair } from 'lucide-react';
 import { GamepadProfileSchema } from '../schemas/profile';
 
 interface GameSelectorProps {
@@ -426,6 +426,45 @@ export default function GameSelector({ profiles, activeProfileId, onProfileSelec
                       </div>
                     </div>
                   )}
+                </div>
+
+                {/* FIX: previously there was no way to tell GameMapperMind that a game
+                    doesn't render truly edge-to-edge (visible status bar, letterboxing,
+                    different aspect ratio) — every mapped button position assumed 1:1 with
+                    the full physical screen, which could land in the wrong spot in-game even
+                    though it looked correct in this editor. */}
+                <div className="pt-3 mt-3 border-t border-slate-800">
+                  <div className="flex items-center gap-1.5 text-[10px] text-slate-400 mb-2 uppercase font-semibold">
+                    <Crosshair className="w-3.5 h-3.5 text-cyan-400" />
+                    Game Screen Calibration
+                  </div>
+                  <p className="text-[8px] text-slate-500 mb-2 leading-normal">
+                    Kalau posisi tombol di game meleset dari posisi di editor ini (status bar kelihatan, game gak full-screen, dll), atur inset di bawah supaya area mapping cocok sama area render game yang sebenarnya. Default 0 = asumsi game full-screen (perilaku lama).
+                  </p>
+                  <div className="grid grid-cols-2 gap-3">
+                    {([
+                      ['screenInsetTop', 'Top Inset'],
+                      ['screenInsetBottom', 'Bottom Inset'],
+                      ['screenInsetLeft', 'Left Inset'],
+                      ['screenInsetRight', 'Right Inset'],
+                    ] as const).map(([field, label]) => (
+                      <div key={field}>
+                        <div className="flex justify-between text-[10px] text-slate-400 mb-1">
+                          <span>{label}</span>
+                          <span className="text-cyan-400 font-mono">{(activeProfile[field] ?? 0).toFixed(0)}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="0"
+                          max="30"
+                          step="1"
+                          className="w-full accent-cyan-500"
+                          value={activeProfile[field] ?? 0}
+                          onChange={(e) => updateProfileValue(field, parseFloat(e.target.value))}
+                        />
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             ) : (

@@ -165,6 +165,9 @@ export default function ShizukuPanel({ shizukuState, setShizukuState, onLogMessa
       onLogMessage(`[TEST] injectMethod: ${result.injectMethod_null ? 'NULL (not found)' : 'OK'}`);
       onLogMessage(`[TEST] touchDown: ${result.touchDown_result ? 'SUCCESS' : 'FAILED'}`);
       onLogMessage(`[TEST] shellInputTap: ${result.shellInputTap_result ? 'SUCCESS' : 'FAILED'}`);
+      if (result.lastError) {
+        onLogMessage(`[TEST] Last error: ${result.lastError}`);
+      }
       if (result.recommendation) {
         onLogMessage(`[TEST] → ${result.recommendation}`);
       }

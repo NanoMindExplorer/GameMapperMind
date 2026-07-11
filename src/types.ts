@@ -71,6 +71,15 @@ export interface GamepadProfile {
   gyroSensitivity: number;
   deadzone: number;
   smoothing: number; // exponential smoothing factor
+  // Screen calibration (% of full physical screen, default 0 = legacy full-screen behavior).
+  // Compensates for games that don't render edge-to-edge (visible status bar, letterboxing,
+  // aspect-ratio mismatch) — without this, a button mapped at "90% from top" lands at a
+  // different relative position in-game than in the editor if the game's actual play area
+  // isn't the full physical screen.
+  screenInsetTop?: number;
+  screenInsetBottom?: number;
+  screenInsetLeft?: number;
+  screenInsetRight?: number;
   isCustom: boolean;
   globalOpacity?: number; // Master opacity for all virtual buttons
   antiBanEnabled?: boolean; // Anti-ban humanized randomization

@@ -420,11 +420,22 @@ public class FloatingOverlayService extends Service {
             int sizePx = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 52, dm);
             int strokePx = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 1.5f, dm);
 
+            // FIX: previously used raw pctX/pctY straight against the full screen, which drifted
+            // out of sync with NativeGamepadMapper.getScreenCoords() once that started applying
+            // Game Screen Calibration insets — the K2-style dots would visually sit somewhere
+            // different from where the actual touch gets injected. Same remap formula here.
+            double insetTop = root.optDouble("screenInsetTop", 0.0);
+            double insetBottom = root.optDouble("screenInsetBottom", 0.0);
+            double insetLeft = root.optDouble("screenInsetLeft", 0.0);
+            double insetRight = root.optDouble("screenInsetRight", 0.0);
+            double usableWidthFrac = (100.0 - insetLeft - insetRight) / 100.0;
+            double usableHeightFrac = (100.0 - insetTop - insetBottom) / 100.0;
+
             for (int i = 0; i < buttons.length(); i++) {
                 JSONObject b = buttons.optJSONObject(i);
                 if (b == null) continue;
-                double pctX = b.optDouble("x", 50.0);
-                double pctY = b.optDouble("y", 50.0);
+                double pctX = insetLeft + (b.optDouble("x", 50.0) / 100.0) * usableWidthFrac * 100.0;
+                double pctY = insetTop + (b.optDouble("y", 50.0) / 100.0) * usableHeightFrac * 100.0;
                 String label = b.optString("mappedKey", "?");
 
                 TextView dot = new TextView(this);

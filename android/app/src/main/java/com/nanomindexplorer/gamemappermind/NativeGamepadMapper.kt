@@ -78,6 +78,14 @@ class NativeGamepadMapper(private val context: Context) {
     var currentProfileId: String = "default"
     var currentScene: String = "default"
 
+    // Screen calibration cache — read once per buildMapCache() call, applied in
+    // getScreenCoords(). Defaults to 0 (legacy full-screen behavior, no change for anyone
+    // who hasn't calibrated).
+    @Volatile private var screenInsetTop = 0.0
+    @Volatile private var screenInsetBottom = 0.0
+    @Volatile private var screenInsetLeft = 0.0
+    @Volatile private var screenInsetRight = 0.0
+
     fun buildMapCache() {
         buttonMapCache.clear()
         triggerMapCache.clear()
@@ -86,6 +94,10 @@ class NativeGamepadMapper(private val context: Context) {
 
         try {
             val root = JSONObject(jsonStr)
+            screenInsetTop = root.optDouble("screenInsetTop", 0.0).coerceIn(0.0, 45.0)
+            screenInsetBottom = root.optDouble("screenInsetBottom", 0.0).coerceIn(0.0, 45.0)
+            screenInsetLeft = root.optDouble("screenInsetLeft", 0.0).coerceIn(0.0, 45.0)
+            screenInsetRight = root.optDouble("screenInsetRight", 0.0).coerceIn(0.0, 45.0)
             val buttons = root.optJSONArray("buttons") ?: return
 
             for (i in 0 until buttons.length()) {
@@ -129,12 +141,23 @@ class NativeGamepadMapper(private val context: Context) {
         buildMapCache()
     }
 
+    // FIX: previously mapped percentages directly onto the full physical screen bounds with
+    // no way to compensate for a game that doesn't render truly edge-to-edge (visible status
+    // bar, letterboxing, aspect-ratio mismatch) — a button placed at "90% from top" in the
+    // editor could land at a visibly different relative position inside the actual game.
+    // screenInsetTop/Bottom/Left/Right (calibrated per-profile, see GameSelector.tsx) now
+    // remap the 0-100% editor space onto the actual game play-area rectangle within the
+    // screen. All insets default to 0, so uncalibrated profiles behave exactly as before.
     private fun getScreenCoords(pctX: Double, pctY: Double): Pair<Float, Float> {
         return try {
             val bounds = windowManager.currentWindowMetrics.bounds
+            val usableWidthFrac = (100.0 - screenInsetLeft - screenInsetRight) / 100.0
+            val usableHeightFrac = (100.0 - screenInsetTop - screenInsetBottom) / 100.0
+            val effectivePctX = screenInsetLeft + (pctX / 100.0) * usableWidthFrac * 100.0
+            val effectivePctY = screenInsetTop + (pctY / 100.0) * usableHeightFrac * 100.0
             Pair(
-                ((pctX / 100.0) * bounds.width()).toFloat(),
-                ((pctY / 100.0) * bounds.height()).toFloat()
+                ((effectivePctX / 100.0) * bounds.width()).toFloat(),
+                ((effectivePctY / 100.0) * bounds.height()).toFloat()
             )
         } catch (e: Exception) {
             Pair(1080f, 1920f)

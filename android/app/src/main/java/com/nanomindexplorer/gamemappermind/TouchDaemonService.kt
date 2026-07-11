@@ -22,6 +22,7 @@ class TouchDaemonService : ITouchService.Stub {
     private val pathFailCount = AtomicInteger(0)
     private val MAX_FAIL_BEFORE_SWITCH = 3
     @Volatile private var isInitialized = true
+    @Volatile private var lastInjectionError: String? = null
 
     constructor() : super()
     constructor(context: Context?) : super() {
@@ -236,10 +237,24 @@ class TouchDaemonService : ITouchService.Stub {
 
         return try {
             val result = method.invoke(proxy, event, 0) as Boolean
-            if (!result) pathFailCount.incrementAndGet()
+            if (!result) {
+                pathFailCount.incrementAndGet()
+                Log.w(TAG, "Path A: injectInputEvent returned false (no exception thrown, OS rejected the event)")
+            }
             result
+        } catch (e: java.lang.reflect.InvocationTargetException) {
+            // FIX: previously this exception (and its actual cause, e.g. SecurityException:
+            // "Injecting to another application requires INJECT_EVENTS permission") was
+            // silently discarded — reflection wraps the real thrown exception in
+            // InvocationTargetException, so e.cause is what actually matters here.
+            pathFailCount.incrementAndGet()
+            lastInjectionError = "Path A: ${e.cause?.javaClass?.simpleName}: ${e.cause?.message}"
+            Log.e(TAG, "Path A: injectInputEvent threw (cause: ${e.cause?.javaClass?.simpleName}: ${e.cause?.message})", e.cause ?: e)
+            false
         } catch (e: Exception) {
             pathFailCount.incrementAndGet()
+            lastInjectionError = "Path A: ${e.javaClass.simpleName}: ${e.message}"
+            Log.e(TAG, "Path A: injectInputEvent failed (${e.javaClass.simpleName}: ${e.message})", e)
             false
         }
     }
@@ -250,10 +265,20 @@ class TouchDaemonService : ITouchService.Stub {
 
         return try {
             val result = method.invoke(im, event, 0) as Boolean
-            if (!result) pathFailCount.incrementAndGet()
+            if (!result) {
+                pathFailCount.incrementAndGet()
+                Log.w(TAG, "Path B: injectInputEvent returned false (no exception thrown, OS rejected the event)")
+            }
             result
+        } catch (e: java.lang.reflect.InvocationTargetException) {
+            pathFailCount.incrementAndGet()
+            lastInjectionError = "Path B: ${e.cause?.javaClass?.simpleName}: ${e.cause?.message}"
+            Log.e(TAG, "Path B: injectInputEvent threw (cause: ${e.cause?.javaClass?.simpleName}: ${e.cause?.message})", e.cause ?: e)
+            false
         } catch (e: Exception) {
             pathFailCount.incrementAndGet()
+            lastInjectionError = "Path B: ${e.javaClass.simpleName}: ${e.message}"
+            Log.e(TAG, "Path B: injectInputEvent failed (${e.javaClass.simpleName}: ${e.message})", e)
             false
         }
     }
@@ -261,10 +286,25 @@ class TouchDaemonService : ITouchService.Stub {
     private fun shellInputTap(x: Float, y: Float): Boolean {
         return try {
             val process = Runtime.getRuntime().exec(arrayOf("input", "tap", x.toInt().toString(), y.toInt().toString()))
+            val stderr = process.errorStream.bufferedReader().readText()
             val finished = process.waitFor(800, java.util.concurrent.TimeUnit.MILLISECONDS)
-            if (!finished) process.destroyForcibly()
-            process.exitValue() == 0
+            if (!finished) {
+                process.destroyForcibly()
+                Log.e(TAG, "Path C: shell 'input tap' timed out after 800ms")
+                return false
+            }
+            val exitCode = process.exitValue()
+            // FIX: previously the exit code and stderr were discarded on failure, giving no
+            // way to tell a permission denial (common on MIUI/ColorOS/etc even with Shizuku
+            // connected) apart from any other failure mode.
+            if (exitCode != 0) {
+                lastInjectionError = "Path C: exit=$exitCode stderr=${stderr.take(200)}"
+                Log.e(TAG, "Path C: shell 'input tap' exited $exitCode, stderr: $stderr")
+            }
+            exitCode == 0
         } catch (e: Exception) {
+            lastInjectionError = "Path C: ${e.javaClass.simpleName}: ${e.message}"
+            Log.e(TAG, "Path C: shell 'input tap' threw (${e.javaClass.simpleName}: ${e.message})", e)
             false
         }
     }
@@ -360,6 +400,11 @@ class TouchDaemonService : ITouchService.Stub {
                 json.put("recommendation", "Injection OK via Path ${activePath ?: "?"}")
             } else {
                 json.put("error", "Test tap failed on Path A, B, and C")
+                // FIX: surface the actual captured exception/exit-code instead of leaving the
+                // user to dig through `adb logcat`. Very commonly a permission restriction
+                // (e.g. MIUI/ColorOS/etc blocking synthetic input even with Shizuku connected)
+                // rather than a code bug, and this makes that diagnosable from the app itself.
+                json.put("lastError", lastInjectionError ?: "(no exception captured — OS silently rejected the event)")
                 json.put("recommendation", "All injection paths failed. Check Shizuku permission and daemon status.")
             }
             json.toString()

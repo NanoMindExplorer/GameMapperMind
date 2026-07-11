@@ -154,6 +154,30 @@ export default function OverlayWysiwyg(props: OverlayWysiwygProps) {
           {/* Dim overlay */}
           <div className="absolute inset-0 bg-black pointer-events-none" style={{ opacity: h.bgDimLevel / 100 }} />
 
+          {/* FIX: visual feedback for Game Screen Calibration (GameSelector.tsx) — without
+              this, insets are invisible in the editor and a user has no way to see where the
+              calibrated boundary actually sits relative to the buttons they're placing. Only
+              rendered when at least one inset is non-zero, so uncalibrated profiles look
+              exactly like before. */}
+          {(() => {
+            const p = h.activeProfile;
+            const top = p?.screenInsetTop ?? 0;
+            const bottom = p?.screenInsetBottom ?? 0;
+            const left = p?.screenInsetLeft ?? 0;
+            const right = p?.screenInsetRight ?? 0;
+            if (!top && !bottom && !left && !right) return null;
+            return (
+              <div
+                className="absolute pointer-events-none z-10 border-2 border-dashed border-cyan-400/70"
+                style={{ top: `${top}%`, bottom: `${bottom}%`, left: `${left}%`, right: `${right}%` }}
+              >
+                <span className="absolute -top-4 left-0 text-[8px] font-bold text-cyan-400 bg-slate-950/80 px-1 rounded">
+                  Game Play Area
+                </span>
+              </div>
+            );
+          })()}
+
           {/* Grid */}
           {!h.hideGrid && (
             <div className="absolute inset-0 pointer-events-none opacity-15"

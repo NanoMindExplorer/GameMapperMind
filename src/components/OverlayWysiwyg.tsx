@@ -500,10 +500,19 @@ export default function OverlayWysiwyg(props: OverlayWysiwygProps) {
         {!h.isNativeOverlay && selectedBtn?.type === 'analog_stick' && (
           <div className="absolute bottom-12 right-2 bg-slate-950/95 border border-slate-700 rounded-lg p-2 z-40 text-[10px] space-y-1.5 w-40">
             <div className="font-bold text-slate-400">Analog</div>
-            <div className="flex justify-between items-center"><span className="text-slate-500">Deadzone</span><span className="text-indigo-400 font-mono">{selectedBtn.deadzone || 0.15}</span></div>
-            <input type="range" min="0" max="1" step="0.01" value={selectedBtn.deadzone || 0.15}
+            <div className="flex justify-between items-center"><span className="text-slate-500">Deadzone</span><span className="text-indigo-400 font-mono">{selectedBtn.deadzone ?? 0.15}</span></div>
+            <input type="range" min="0" max="1" step="0.01" value={selectedBtn.deadzone ?? 0.15}
               onChange={(e) => h.handleUpdateBtnProperty('deadzone', parseFloat(e.target.value))}
               className="w-full accent-indigo-500 h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer" />
+            {/* FIX: previously no UI anywhere set this per-button field, so NativeGamepadMapper's
+                smoothing filter fell back to 0.0 (= no smoothing at all) for every profile,
+                including the built-in ones. This is what NativeGamepadMapper.handleAxes()
+                actually reads (mapping.optDouble("smoothing", 0.0)) — the profile-level
+                "Exponential Smoothing" slider in the Profile Manager tab does NOT reach here. */}
+            <div className="flex justify-between items-center"><span className="text-slate-500">Smoothing</span><span className="text-indigo-400 font-mono">{selectedBtn.smoothing ?? 0.18}</span></div>
+            <input type="range" min="0" max="0.9" step="0.01" value={selectedBtn.smoothing ?? 0.18}
+              onChange={(e) => h.handleUpdateBtnProperty('smoothing', parseFloat(e.target.value))}
+              className="w-full accent-pink-500 h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer" />
           </div>
         )}
 

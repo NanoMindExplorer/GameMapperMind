@@ -26,6 +26,7 @@ export const VirtualButtonSchema = z.object({
   opacity: z.number(),
   macroId: z.string().optional(),
   deadzone: z.number().optional(),
+  smoothing: z.number().optional(),
   sensitivity: z.number().optional(),
   radius: z.number().optional(),
   swipeDirection: z.enum(['UP', 'DOWN', 'LEFT', 'RIGHT']).optional(),

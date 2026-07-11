@@ -35,6 +35,8 @@ export interface VirtualButton {
   opacity: number;
   macroId?: string;
   deadzone?: number;
+  smoothing?: number; // per-stick exponential smoothing (0-0.95). Native reads this per-button,
+                       // NOT the profile-level GamepadProfile.smoothing field below.
   sensitivity?: number;
   radius?: number;
   swipeDirection?: 'UP' | 'DOWN' | 'LEFT' | 'RIGHT';

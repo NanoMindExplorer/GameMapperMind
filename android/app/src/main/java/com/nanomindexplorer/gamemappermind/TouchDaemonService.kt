@@ -343,14 +343,24 @@ class TouchDaemonService : ITouchService.Stub {
         // Path A/B/C injection machinery with a short real tap and report what happened.
         return try {
             val success = injectTap(x, y, 80L)
+            val usedShellFallback = activePath == "C"
             val json = org.json.JSONObject()
             json.put("success", success)
             json.put("path", activePath ?: "none")
             json.put("failCount", pathFailCount.get())
+            // FIX 2: JS side (ShizukuPanel.tsx, OnboardingWizard.tsx) expects these exact
+            // field names — an earlier version only had success/path/failCount, so those
+            // screens showed "undefined" for every diagnostic line despite the call working.
+            json.put("inputManager_null", inputManagerInstance == null)
+            json.put("injectMethod_null", pathA_injectMethod == null)
+            json.put("touchDown_result", success)
+            json.put("shellInputTap_result", usedShellFallback && success)
+            json.put("useShellFallback", usedShellFallback)
             if (success) {
                 json.put("recommendation", "Injection OK via Path ${activePath ?: "?"}")
             } else {
                 json.put("error", "Test tap failed on Path A, B, and C")
+                json.put("recommendation", "All injection paths failed. Check Shizuku permission and daemon status.")
             }
             json.toString()
         } catch (e: Exception) {

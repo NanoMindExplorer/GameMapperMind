@@ -27,7 +27,19 @@ export default function GameSelector({ profiles, activeProfileId, onProfileSelec
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const updateProfileValue = (key: keyof GamepadProfile, value: any) => {
-    const updated = { ...activeProfile, [key]: value };
+    let updated: GamepadProfile = { ...activeProfile, [key]: value };
+    // FIX: NativeGamepadMapper reads deadzone/smoothing PER STICK BUTTON
+    // (mapping.optDouble("deadzone"/"smoothing", ...)), not from these profile-level
+    // fields — so previously these sliders visibly moved but changed nothing on the
+    // device. Cascading onto every analog_stick button makes "set for whole profile"
+    // actually true, while the per-stick panel in the Overlay Canvas tab still allows
+    // fine-tuning an individual stick afterward if needed.
+    if (key === 'deadzone' || key === 'smoothing') {
+      updated = {
+        ...updated,
+        buttons: updated.buttons.map(b => b.type === 'analog_stick' ? { ...b, [key]: value } : b),
+      };
+    }
     onUpdateProfile(updated);
     if (!isEditingMeta) {
       onLogMessage(`Profile Engine: Modifying [${activeProfile.name}] attribute -> ${key} = ${value}`);
@@ -319,6 +331,7 @@ export default function GameSelector({ profiles, activeProfileId, onProfileSelec
                       onChange={(e) => updateProfileValue('gyroSensitivity', parseFloat(e.target.value))}
                     />
                     <span className="block text-[8px] text-slate-500 mt-0.5 leading-normal">Scalar coefficient multiplier mapped onto touch simulation canvas bounds.</span>
+                    <span className="block text-[8px] text-amber-500/80 mt-0.5 leading-normal">⚠ Not yet wired to a gyro input pipeline — value is saved but has no effect yet.</span>
                   </div>
 
                   <div>

@@ -20,6 +20,7 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, connected: boo
     let btnListener: any = null;
     let axisListener: any = null;
     let feedbackListener: any = null;
+    let diagnosticLogListener: any = null;
 
     const setupListeners = async () => {
       try {
@@ -32,6 +33,15 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, connected: boo
         axisListener = await TouchInjection.addListener('onGamepadAxis', (data: any) => {
           if (!isCleanedUp) {
             window.dispatchEvent(new CustomEvent('native-gamepad-axis', { detail: data }));
+          }
+        });
+
+        // FIX: relay native-side detection diagnostics (e.g. which raw axis/button names a
+        // connected controller actually reports) to the app's on-screen log — previously
+        // only visible via `adb logcat`, which most users testing on-device can't access.
+        diagnosticLogListener = await TouchInjection.addListener('onDiagnosticLog', (data: any) => {
+          if (!isCleanedUp) {
+            window.dispatchEvent(new CustomEvent('native-diagnostic-log', { detail: data }));
           }
         });
 
@@ -58,6 +68,7 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, connected: boo
       if (btnListener && btnListener.remove) btnListener.remove();
       if (axisListener && axisListener.remove) axisListener.remove();
       if (feedbackListener && feedbackListener.remove) feedbackListener.remove();
+      if (diagnosticLogListener && diagnosticLogListener.remove) diagnosticLogListener.remove();
     };
   }, []);
 

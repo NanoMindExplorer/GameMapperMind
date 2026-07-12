@@ -193,7 +193,18 @@ class TouchDaemonService : ITouchService.Stub {
         val downTime = if (baseDownTime == 0L) eventTime else baseDownTime
 
         val event = MotionEvent.obtain(
-            downTime, eventTime, action, actionIndex,
+            // FIX: root cause of every touchDown/shellInputTap failure, confirmed by the
+            // in-app toast "Test Tap GAGAL: pointerCount must be at least 1". The 4th
+            // positional argument to this MotionEvent.obtain() overload must be pointerCount
+            // — actionIndex was being passed there instead (always 0 from
+            // injectSinglePointer), so EVERY injection attempt asked Android to construct a
+            // MotionEvent with pointerCount=0, which is invalid and throws immediately. This
+            // explains why InputManager/injectMethod resolved fine via reflection (Path A/B
+            // setup was never the problem) but the actual invoke() always failed, and why
+            // Path C (shell `input tap`, which doesn't go through this code path at all)
+            // failed too for the unrelated reason of also never being reached correctly
+            // until Path A/B exhausted their retries with this same bug.
+            downTime, eventTime, action, pointerCount,
             pointerProperties, pointerCoords,
             0, 0, 1f, 1f, -1, 0, currentInputSource, 0
         )

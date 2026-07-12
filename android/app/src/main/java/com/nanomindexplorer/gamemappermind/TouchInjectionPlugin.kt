@@ -53,6 +53,20 @@ class TouchInjectionPlugin : Plugin() {
             data.put("duration", duration)
             instance?.get()?.notifyListeners("onGamepadFeedback", data)
         }
+
+        // FIX: previously the only way to see which raw evdev axis names a controller
+        // actually reports (needed to diagnose LT/RT / stick detection issues per-device)
+        // was `adb logcat` — not accessible to most users. This surfaces the same info to
+        // the app's own on-screen log instead.
+        fun emitDiagnosticLog(message: String) {
+            try {
+                val data = JSObject()
+                data.put("message", message)
+                instance?.get()?.notifyListeners("onDiagnosticLog", data)
+            } catch (e: Exception) {
+                Log.w("GameMapper", "emitDiagnosticLog failed: ${e.message}")
+            }
+        }
     }
 
     private var isBound = false

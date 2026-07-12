@@ -98,12 +98,19 @@ export default function GamepadTesterComponent({ onLogMessage }: GamepadTesterPr
         }
     };
 
+    const handleDiagnosticLog = (e: Event) => {
+      const data = (e as CustomEvent).detail;
+      if (data?.message) onLogMessage(data.message);
+    };
+
     window.addEventListener('native-gamepad-button', handleNativeBtn);
     window.addEventListener('native-gamepad-axis', handleNativeAxis);
+    window.addEventListener('native-diagnostic-log', handleDiagnosticLog);
 
     return () => {
       window.removeEventListener('native-gamepad-button', handleNativeBtn);
       window.removeEventListener('native-gamepad-axis', handleNativeAxis);
+      window.removeEventListener('native-diagnostic-log', handleDiagnosticLog);
     };
   }, [onLogMessage, nativeGamepadActive]);
 

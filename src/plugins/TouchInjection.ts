@@ -42,6 +42,11 @@ export interface TouchInjectionPluginType {
     eventName: 'onShizukuPermissionResult',
     listenerFunc: (data: { granted: boolean }) => void
   ): Promise<PluginListenerHandle>;
+
+  addListener(
+    eventName: 'onDiagnosticLog',
+    listenerFunc: (data: { message: string }) => void
+  ): Promise<PluginListenerHandle>;
 }
 
 const TouchInjection = registerPlugin<TouchInjectionPluginType>('TouchInjection');

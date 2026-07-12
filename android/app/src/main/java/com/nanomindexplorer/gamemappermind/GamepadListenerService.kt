@@ -242,9 +242,11 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
 
             val devices = mutableListOf<String>()
             val deviceAxisRanges = mutableMapOf<String, MutableMap<String, Pair<Int, Int>>>()
+            val deviceButtonNames = mutableMapOf<String, MutableSet<String>>()
             var currentPath: String? = null
             var isGamepad = false
             val axisLineRegex = Regex("(ABS_\\w+)\\s*:.*?min\\s+(-?\\d+),\\s*max\\s+(-?\\d+)")
+            val btnLineRegex = Regex("(BTN_\\w+)")
 
             for (line in lines) {
                 if (line.contains("add device")) {
@@ -267,6 +269,16 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
                         deviceAxisRanges.getOrPut(currentPath!!) { mutableMapOf() }[axisName] = Pair(min, max)
                     }
                 }
+
+                // FIX: previously only ABS_ axis names were collected. Some controllers send
+                // LT/RT as plain digital buttons (BTN_TL2/BTN_TR2) instead of any analog axis
+                // — without seeing the BTN_ names too, there was no way to tell that case
+                // apart from "this controller just doesn't send LT/RT at all".
+                if (currentPath != null && (line.trim().startsWith("BTN_") || line.contains("KEY (0001)"))) {
+                    btnLineRegex.findAll(line).forEach { m ->
+                        deviceButtonNames.getOrPut(currentPath!!) { mutableSetOf() }.add(m.value)
+                    }
+                }
             }
 
             if (isGamepad && currentPath != null && !devices.contains(currentPath)) {
@@ -275,11 +287,19 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
 
             val chosen = devices.firstOrNull()
             detectedAxisRanges = if (chosen != null) deviceAxisRanges[chosen] ?: emptyMap() else emptyMap()
+            val detectedButtonNames = if (chosen != null) deviceButtonNames[chosen] ?: emptySet() else emptySet()
             rightStickUsesZRZ = !detectedAxisRanges.containsKey("ABS_RX") &&
                 !detectedAxisRanges.containsKey("ABS_RY") &&
                 detectedAxisRanges.containsKey("ABS_Z") &&
                 detectedAxisRanges.containsKey("ABS_RZ")
-            Log.i("GameMapper", "Detected axis ranges for $chosen: $detectedAxisRanges (rightStickUsesZRZ=$rightStickUsesZRZ)")
+            Log.i("GameMapper", "Detected axis ranges for $chosen: $detectedAxisRanges (rightStickUsesZRZ=$rightStickUsesZRZ), buttons: $detectedButtonNames")
+            // FIX: surface this on-screen too — previously only visible via `adb logcat`,
+            // which most users can't access. Directly useful for diagnosing why a specific
+            // controller's LT/RT or a stick doesn't register: the axis/button names actually
+            // present here are the ground truth for what this hardware sends, no guessing needed.
+            val axisNames = if (detectedAxisRanges.isEmpty()) "(none)" else detectedAxisRanges.keys.sorted().joinToString(", ")
+            val btnNames = if (detectedButtonNames.isEmpty()) "(none)" else detectedButtonNames.sorted().joinToString(", ")
+            TouchInjectionPlugin.emitDiagnosticLog("[GAMEPAD-DETECT] axes: $axisNames | buttons: $btnNames | R-stick uses Z/RZ: $rightStickUsesZRZ")
             chosen
         } catch (e: Exception) {
             Log.e("GameMapper", "detectGamepadDevice failed", e)

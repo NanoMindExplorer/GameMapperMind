@@ -146,50 +146,77 @@ export default function OverlayWysiwyg(props: OverlayWysiwygProps) {
             WebkitTouchCallout: 'none',
           }}
         >
-          {/* Screenshot */}
-          {isDataUrl && (
-            <img src={bgUrl} alt="Screenshot" className="absolute inset-0 w-full h-full object-contain" style={{ pointerEvents: 'none' }} />
-          )}
-
-          {/* Dim overlay */}
+          {/* Dim overlay — stays at container level so it darkens the full visible area
+              (including any letterbox margins), not just the screen content. */}
           <div className="absolute inset-0 bg-black pointer-events-none" style={{ opacity: h.bgDimLevel / 100 }} />
 
-          {/* FIX: visual feedback for Game Screen Calibration (GameSelector.tsx) — without
-              this, insets are invisible in the editor and a user has no way to see where the
-              calibrated boundary actually sits relative to the buttons they're placing. Only
-              rendered when at least one inset is non-zero, so uncalibrated profiles look
-              exactly like before. */}
-          {(() => {
-            const p = h.activeProfile;
-            const top = p?.screenInsetTop ?? 0;
-            const bottom = p?.screenInsetBottom ?? 0;
-            const left = p?.screenInsetLeft ?? 0;
-            const right = p?.screenInsetRight ?? 0;
-            if (!top && !bottom && !left && !right) return null;
-            return (
-              <div
-                className="absolute pointer-events-none z-10 border-2 border-dashed border-cyan-400/70"
-                style={{ top: `${top}%`, bottom: `${bottom}%`, left: `${left}%`, right: `${right}%` }}
-              >
-                <span className="absolute -top-4 left-0 text-[8px] font-bold text-cyan-400 bg-slate-950/80 px-1 rounded">
-                  Game Play Area
-                </span>
-              </div>
-            );
-          })()}
+          {/* FIX: everything that represents "the game's screen" (screenshot, buttons,
+              calibration boundary) now lives inside #content-rect, which is explicitly
+              sized/positioned to match the screenshot's own aspect ratio within the
+              container (see contentRect in useOverlayWysiwyg.ts). Previously the screenshot
+              was rendered with object-contain (visually letterboxed) while button x/y % was
+              computed against the FULL container — two different reference frames that only
+              coincidentally matched when the container happened to have the exact same
+              aspect ratio as the screenshot. Now both the visuals and the coordinate math
+              use the same rectangle, so a button placed "on" something in the editor lands
+              on the same physical spot on the device at runtime. */}
+          <div
+            id="content-rect"
+            className="absolute"
+            style={
+              h.contentRect
+                ? { left: h.contentRect.left, top: h.contentRect.top, width: h.contentRect.width, height: h.contentRect.height }
+                : { inset: 0 }
+            }
+          >
+            {/* Screenshot */}
+            {isDataUrl && (
+              <img
+                src={bgUrl}
+                alt="Screenshot"
+                className="absolute inset-0 w-full h-full"
+                style={{ pointerEvents: 'none' }}
+                onLoad={(e) => h.handleBackgroundImageLoad(e.currentTarget.naturalWidth, e.currentTarget.naturalHeight)}
+              />
+            )}
 
-          {/* Grid */}
-          {!h.hideGrid && (
-            <div className="absolute inset-0 pointer-events-none opacity-15"
-              style={{
-                backgroundImage: 'linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)',
-                backgroundSize: '20px 20px'
-              }}
-            />
-          )}
+            {/* FIX: visual feedback for Game Screen Calibration (GameSelector.tsx) — without
+                this, insets are invisible in the editor and a user has no way to see where the
+                calibrated boundary actually sits relative to the buttons they're placing. Only
+                rendered when at least one inset is non-zero, so uncalibrated profiles look
+                exactly like before. */}
+            {(() => {
+              const p = h.activeProfile;
+              const top = p?.screenInsetTop ?? 0;
+              const bottom = p?.screenInsetBottom ?? 0;
+              const left = p?.screenInsetLeft ?? 0;
+              const right = p?.screenInsetRight ?? 0;
+              if (!top && !bottom && !left && !right) return null;
+              return (
+                <div
+                  className="absolute pointer-events-none z-10 border-2 border-dashed border-cyan-400/70"
+                  style={{ top: `${top}%`, bottom: `${bottom}%`, left: `${left}%`, right: `${right}%` }}
+                >
+                  <span className="absolute -top-4 left-0 text-[8px] font-bold text-cyan-400 bg-slate-950/80 px-1 rounded">
+                    Game Play Area
+                  </span>
+                </div>
+              );
+            })()}
 
-          {/* Button nodes */}
-          {!h.hideAllNodes && h.activeProfile?.buttons?.map((btn: any) => {
+            {/* Grid — inside content-rect so alignment guides match the actual screen area,
+                not any letterbox padding around it. */}
+            {!h.hideGrid && (
+              <div className="absolute inset-0 pointer-events-none opacity-15"
+                style={{
+                  backgroundImage: 'linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)',
+                  backgroundSize: '20px 20px'
+                }}
+              />
+            )}
+
+            {/* Button nodes */}
+            {!h.hideAllNodes && h.activeProfile?.buttons?.map((btn: any) => {
             const isSel = h.selectedButtonId === btn.id;
             const isPressed = h.activeKeys?.includes(btn.mappedKey) ||
               (btn.trigger?.inputs && btn.trigger.inputs.some((inp: string) => h.activeKeys?.includes(inp)));
@@ -303,6 +330,8 @@ export default function OverlayWysiwyg(props: OverlayWysiwygProps) {
               </div>
             );
           })}
+          </div>
+          {/* ^ closes #content-rect */}
 
           {/* Coordinate display */}
           {h.isDragging && selectedBtn && (

@@ -38,6 +38,63 @@ export function useOverlayWysiwyg({
   // button positions (percentages) don't map correctly to the game screen.
   const [screenshotDimensions, setScreenshotDimensions] = React.useState<{w: number, h: number} | null>(null);
 
+  // FIX: screenshotDimensions above was declared and returned from this hook, but nothing
+  // ever called setScreenshotDimensions() and nothing ever read the value — it was
+  // completely inert. This is the actual root cause of "posisi tombol sangat jauh dan tidak
+  // tepat": button x/y percentages were computed relative to the full canvas-container, but
+  // the background screenshot (rendered with object-contain) only occupies a letterboxed/
+  // pillarboxed sub-rectangle of that container whenever the container's aspect ratio
+  // (screen width x (screen height - top bar)) differs from the screenshot's own aspect
+  // ratio (the device's raw physical screen). At runtime the native overlay has no top bar
+  // and maps percentages onto the full physical screen 1:1 — so a button placed "on" a
+  // player in the editor visibly lands somewhere else entirely once injected for real.
+  //
+  // Fix: track the container's live pixel size, compute the actual rendered content
+  // rectangle (mirroring object-contain's own letterbox math) and expose it so both the
+  // JSX (to size the #content-rect wrapper the image + buttons live inside) and the drag
+  // handlers below (to compute percentages relative to that rect, not the outer container)
+  // use the exact same reference frame — which now matches the physical screen 1:1.
+  const [containerSize, setContainerSize] = React.useState<{w: number, h: number} | null>(null);
+
+  React.useEffect(() => {
+    const el = document.getElementById('canvas-container');
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const update = () => setContainerSize({ w: el.clientWidth, h: el.clientHeight });
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const handleBackgroundImageLoad = React.useCallback((naturalWidth: number, naturalHeight: number) => {
+    if (naturalWidth > 0 && naturalHeight > 0) {
+      setScreenshotDimensions({ w: naturalWidth, h: naturalHeight });
+    }
+  }, []);
+
+  // Pure letterbox/pillarbox math — same result object-contain would produce, but computed
+  // explicitly so both rendering and drag-coordinate code agree on the exact same rectangle.
+  const contentRect = React.useMemo(() => {
+    if (!containerSize || containerSize.w <= 0 || containerSize.h <= 0) return null;
+    if (!screenshotDimensions || screenshotDimensions.w <= 0 || screenshotDimensions.h <= 0) {
+      // No screenshot loaded yet — content rect is the full container (legacy behavior).
+      return { left: 0, top: 0, width: containerSize.w, height: containerSize.h };
+    }
+    const containerAspect = containerSize.w / containerSize.h;
+    const imgAspect = screenshotDimensions.w / screenshotDimensions.h;
+    let width: number, height: number;
+    if (imgAspect > containerAspect) {
+      // Image is relatively wider than the container → constrained by width, letterboxed top/bottom.
+      width = containerSize.w;
+      height = width / imgAspect;
+    } else {
+      // Image is relatively taller than the container → constrained by height, pillarboxed left/right.
+      height = containerSize.h;
+      width = height * imgAspect;
+    }
+    return { left: (containerSize.w - width) / 2, top: (containerSize.h - height) / 2, width, height };
+  }, [containerSize, screenshotDimensions]);
+
   // BUG-FIX: Clear screenshot dimensions when switching away from custom mode.
   // Otherwise, canvas-container keeps old aspect ratio from previous screenshot.
   React.useEffect(() => {
@@ -80,8 +137,15 @@ export function useOverlayWysiwyg({
     e.stopPropagation();
     if (e.preventDefault) e.preventDefault();
 
-    // BUG-FIX: Cache rect ONCE at drag start — stable coordinate space for entire drag.
-    cachedRectRef.current = document.getElementById('canvas-container')?.getBoundingClientRect() ?? null;
+    // FIX: previously cached the outer canvas-container's rect directly, which is wrong
+    // whenever the screenshot is letterboxed/pillarboxed within it (see contentRect above).
+    // Combine the container's viewport position with the computed content-rect offset/size
+    // so all drag math below operates in "screenshot space", matching the physical screen
+    // 1:1 at runtime.
+    const containerRect = document.getElementById('canvas-container')?.getBoundingClientRect() ?? null;
+    cachedRectRef.current = containerRect && contentRect
+      ? new DOMRect(containerRect.left + contentRect.left, containerRect.top + contentRect.top, contentRect.width, contentRect.height)
+      : containerRect;
 
     isDraggingRef.current = true;
     selectedButtonIdRef.current = btnId;
@@ -338,7 +402,7 @@ export function useOverlayWysiwyg({
     isDraggingNexion, setIsDraggingNexion, isDraggingNexionRef, nexionDragHasMoved, showPalette, setShowPalette,
     activePlayer, setActivePlayer, hideGrid, setHideGrid, hideAllNodes, setHideAllNodes,
     bgDimLevel, setBgDimLevel, globalNodeOpacity, setGlobalNodeOpacity, selectedButton,
-    screenshotDimensions, setScreenshotDimensions,
+    screenshotDimensions, setScreenshotDimensions, contentRect, handleBackgroundImageLoad,
     handleContainerClick, handleDragStart, handleDragMove, handleDragEnd, handleUpdateBtnProperty,
     handleUpdateBtnProperties, relocateButtonOffset, handleAddSpecificButton, handleAddNewButton, handleRemoveButton, getBackgroundUrl
   };

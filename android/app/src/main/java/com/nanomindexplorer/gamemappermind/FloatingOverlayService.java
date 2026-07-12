@@ -163,6 +163,32 @@ public class FloatingOverlayService extends Service {
             currentConfigJson = intent.getStringExtra("config");
         }
 
+        // FIX: intent.hasExtra("overlayMode") only ever arrives from TouchInjectionPlugin's
+        // startOverlay() call (a genuine, explicit "Start Overlay" tap from the app) — never
+        // from the ACTION_EDIT/ACTION_PLAY notification actions, which return early above.
+        // Previously, if the user had tapped "Edit Layout" in a *previous* overlay session and
+        // never tapped "Resume Play" back (e.g. they just backed out of the app, or the overlay
+        // was stopped mid-edit), the window stayed FLAG-touchable indefinitely — every later
+        // "Start Overlay" would silently resume in that same stuck, screen-blocking state with
+        // no obvious way back short of hunting for that exact notification button. Since
+        // reaching this code means the user just explicitly asked to (re)start the overlay for
+        // play, force it back to play mode every time — matches their actual intent, and an
+        // in-progress edit is never silently lost since edits save to the profile immediately.
+        if (intent != null && intent.hasExtra("overlayMode")) {
+            new Handler(Looper.getMainLooper()).post(() -> {
+                if ("floating".equals(overlayMode)) {
+                    setFloatingInteractive(false);
+                } else {
+                    setOverlayInteractive(false);
+                    if (webView != null) {
+                        final WebView wv = webView;
+                        wv.evaluateJavascript("if(window.togglePalette) window.togglePalette(false);", null);
+                    }
+                }
+                updateNotification(false);
+            });
+        }
+
         if (!overlayViewCreated) {
             overlayViewCreated = true;
             final String modeToInit = overlayMode;

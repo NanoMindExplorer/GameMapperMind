@@ -328,6 +328,21 @@ public class FloatingOverlayService extends Service {
                     WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
             }
             webViewParams.gravity = Gravity.FILL;
+            // FIX (root cause of "seluruh layar terblokir, gak bisa keluar app sama sekali"):
+            // Android 12+ actively BLOCKS touches from passing through a
+            // TYPE_APPLICATION_OVERLAY window that uses FLAG_NOT_TOUCHABLE when that overlay
+            // sits on top of a DIFFERENT app (exactly this app's whole purpose — overlaying
+            // eFootball). This is a deliberate OS security policy ("untrusted touch events"),
+            // not something FLAG_NOT_TOUCHABLE being set correctly can work around — see
+            // https://developer.android.com/about/versions/12/behavior-changes-all#untrusted-touch-events.
+            // The one documented exemption that doesn't require an Accessibility Service is:
+            // window alpha at or below InputManager.getMaximumObscuringOpacityForTouch()
+            // (0.8 by default). Below that, the OS treats the window as "sufficiently
+            // translucent" and touches pass through normally again — including system
+            // gestures, which is exactly what was being swallowed system-wide.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                webViewParams.alpha = 0.75f;
+            }
 
             windowManager.addView(webView, webViewParams);
             // BUG-CRITICAL-4 FIX (kept from original): no webView.requestFocus() — it
@@ -416,6 +431,12 @@ public class FloatingOverlayService extends Service {
                     WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
             }
             floatingParams.gravity = Gravity.FILL;
+            // FIX: same Android 12+ untrusted-touch-events policy as the canvas overlay above —
+            // this window needs alpha <= 0.8 for play-mode touches to actually pass through
+            // to eFootball (and to system gestures) instead of being blocked system-wide.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                floatingParams.alpha = 0.75f;
+            }
 
             windowManager.addView(floatingContainer, floatingParams);
             Log.d("GameMapper", "Floating (k2er-style) overlay created");

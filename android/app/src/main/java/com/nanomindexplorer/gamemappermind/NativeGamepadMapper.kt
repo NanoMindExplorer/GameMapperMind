@@ -18,12 +18,35 @@ class NativeGamepadMapper(private val context: Context) {
         @Volatile var instance: NativeGamepadMapper? = null
         val syncLock = Any()
 
+        // FIX (root cause of "RB tekan → analog berhenti", general delay, "analog nyangkut"):
+        // every touchDown/touchMove/touchUp/injectTap call is a SYNCHRONOUS cross-process
+        // Binder call into the Shizuku daemon. Previously these ran INLINE on the single
+        // thread that also decides button/axis state (GamepadJniPlugin's injectionThread) —
+        // so one slow injection (very commonly a button, since those go through more
+        // interaction-type branching) blocked ALL subsequent processing on that thread,
+        // including fresh stick-movement updates, until the Binder call returned. A held
+        // button could stall stick input for its entire hold duration.
+        // Fix: dispatch the actual AIDL call onto its own dedicated background thread,
+        // decoupled from the decision-making thread, which now only does fast in-memory
+        // work (pointer allocation, deadzone/smoothing math, lastState edge-detection) and
+        // is never blocked waiting on IPC. A single background thread (not a pool)
+        // preserves strict FIFO delivery order for touch events, matching prior behavior —
+        // just off the critical path that also has to keep up with a moving stick.
+        private val aidlThread = android.os.HandlerThread("TouchAidlDispatch").also { it.start() }
+        private val aidlHandler = Handler(aidlThread.looper)
+
+        fun dispatchTouchCall(block: () -> Unit) {
+            aidlHandler.post(block)
+        }
+
         fun resetAll() {
             synchronized(syncLock) {
                 instance?.pointers?.forEach {
                     if (it.isActive) {
-                        try { TouchInjectionPlugin.touchService?.touchUp(it.id) } catch (e: Exception) { instance?.logInjectFailure("touchUp", it.id, e) }
                         it.isActive = false
+                        dispatchTouchCall {
+                            try { TouchInjectionPlugin.touchService?.touchUp(it.id) } catch (e: Exception) { instance?.logInjectFailure("touchUp", it.id, e) }
+                        }
                     }
                 }
                 instance?.lastState?.clear()
@@ -33,7 +56,13 @@ class NativeGamepadMapper(private val context: Context) {
         }
     }
 
-    class PointerState(val id: Int, var isActive: Boolean, val type: String, var virtualKey: String? = null)
+    // FIX: isActive/virtualKey are now written from BOTH the decision thread (allocation) and
+    // the background aidlThread (failure rollback after a dispatched call fails) — @Volatile
+    // for correct cross-thread visibility. No compound check-then-act race is introduced since
+    // allocation decisions (the only place these are read-then-written together) stay
+    // exclusively on the single decision thread; the background thread only ever does a plain
+    // rollback write (isActive = false) on failure.
+    class PointerState(val id: Int, @Volatile var isActive: Boolean, val type: String, @Volatile var virtualKey: String? = null)
 
     val pointers = mutableListOf<PointerState>().apply {
         for (gp in 0..3) {
@@ -211,7 +240,10 @@ class NativeGamepadMapper(private val context: Context) {
         if (mapping == null || !mapping.has("x") || !mapping.has("y")) {
             if (pointer.isActive) {
                 pointer.isActive = false
-                try { TouchInjectionPlugin.touchService?.touchUp(pointer.id) } catch (e: Exception) { logInjectFailure("touchUp", pointer.id, e) }
+                val pid = pointer.id
+                dispatchTouchCall {
+                    try { TouchInjectionPlugin.touchService?.touchUp(pid) } catch (e: Exception) { logInjectFailure("touchUp", pid, e) }
+                }
             }
             return
         }
@@ -226,7 +258,10 @@ class NativeGamepadMapper(private val context: Context) {
 
         if (rawMag <= deadzone) {
             if (pointer.isActive) {
-                try { TouchInjectionPlugin.touchService?.touchUp(pointer.id) } catch (e: Exception) { logInjectFailure("touchUp", pointer.id, e) }
+                val pid = pointer.id
+                dispatchTouchCall {
+                    try { TouchInjectionPlugin.touchService?.touchUp(pid) } catch (e: Exception) { logInjectFailure("touchUp", pid, e) }
+                }
                 pointer.isActive = false
             }
             smoothBuffer[smoothOffset] = 0f
@@ -264,32 +299,40 @@ class NativeGamepadMapper(private val context: Context) {
 
         if (!pointer.isActive) {
             pointer.isActive = true
-            try {
-                TouchInjectionPlugin.touchService?.touchDown(pointer.id, cX + ox, cY + oy)
-            } catch (e: Exception) {
-                pointer.isActive = false
-                logInjectFailure("touchDown", pointer.id, e)
+            val pid = pointer.id
+            val downX = cX + ox; val downY = cY + oy
+            dispatchTouchCall {
+                try {
+                    TouchInjectionPlugin.touchService?.touchDown(pid, downX, downY)
+                } catch (e: Exception) {
+                    pointer.isActive = false
+                    logInjectFailure("touchDown", pid, e)
+                }
             }
         }
         if (pointer.isActive) {
-            try {
-                // touchMove returns false (no exception) when TouchDaemonService is degraded
-                // to shell-fallback Path C, which only supports single-pointer tap and silently
-                // rejects MOVE. A false return is just as much a dropped frame as a thrown
-                // exception, so it must hit the same failure-tracking path below.
-                val moved = TouchInjectionPlugin.touchService?.touchMove(pointer.id, tX + ox, tY + oy) ?: false
-                if (moved) {
-                    if (moveFailWarned[pointer.id] == true) moveFailWarned[pointer.id] = false
-                } else if (moveFailWarned[pointer.id] != true) {
-                    moveFailWarned[pointer.id] = true
-                    Log.w(TAG, "Touch injection returned false: touchMove pointer=${pointer.id} (stick drag likely stuck on shell-fallback Path C)")
-                }
-            } catch (e: Exception) {
-                // Hot path (fires every axis update while stick deflected) - log once per
-                // failure streak instead of every frame, or logcat gets flooded.
-                if (moveFailWarned[pointer.id] != true) {
-                    moveFailWarned[pointer.id] = true
-                    logInjectFailure("touchMove", pointer.id, e)
+            val pid = pointer.id
+            val moveX = tX + ox; val moveY = tY + oy
+            dispatchTouchCall {
+                try {
+                    // touchMove returns false (no exception) when TouchDaemonService is degraded
+                    // to shell-fallback Path C, which only supports single-pointer tap and silently
+                    // rejects MOVE. A false return is just as much a dropped frame as a thrown
+                    // exception, so it must hit the same failure-tracking path below.
+                    val moved = TouchInjectionPlugin.touchService?.touchMove(pid, moveX, moveY) ?: false
+                    if (moved) {
+                        if (moveFailWarned[pid] == true) moveFailWarned[pid] = false
+                    } else if (moveFailWarned[pid] != true) {
+                        moveFailWarned[pid] = true
+                        Log.w(TAG, "Touch injection returned false: touchMove pointer=$pid (stick drag likely stuck on shell-fallback Path C)")
+                    }
+                } catch (e: Exception) {
+                    // Hot path (fires every axis update while stick deflected) - log once per
+                    // failure streak instead of every frame, or logcat gets flooded.
+                    if (moveFailWarned[pid] != true) {
+                        moveFailWarned[pid] = true
+                        logInjectFailure("touchMove", pid, e)
+                    }
                 }
             }
         }
@@ -337,7 +380,10 @@ class NativeGamepadMapper(private val context: Context) {
             for (i in 0 until 16) {
                 val p = pointersById[offset + i]
                 if (p != null && p.isActive) {
-                    try { TouchInjectionPlugin.touchService?.touchUp(p.id) } catch (e: Exception) { logInjectFailure("touchUp", p.id, e) }
+                    val pid = p.id
+                    dispatchTouchCall {
+                        try { TouchInjectionPlugin.touchService?.touchUp(pid) } catch (e: Exception) { logInjectFailure("touchUp", pid, e) }
+                    }
                     p.isActive = false
                     p.virtualKey = null
                 }
@@ -462,10 +508,12 @@ class NativeGamepadMapper(private val context: Context) {
         val (x, y) = getScreenCoords(mapping.getDouble("x"), mapping.getDouble("y"))
         val (ox, oy) = getAntiBanOffset(mapping.optBoolean("antiBanEnabled", false))
         val tapDuration = mapping.optLong("tapDuration", 60L)
-        try {
-            TouchInjectionPlugin.touchService?.injectTap(x + ox, y + oy, tapDuration)
-        } catch (e: Exception) {
-            Log.w(TAG, "handleTap failed: ${e.message}")
+        dispatchTouchCall {
+            try {
+                TouchInjectionPlugin.touchService?.injectTap(x + ox, y + oy, tapDuration)
+            } catch (e: Exception) {
+                Log.w(TAG, "handleTap failed: ${e.message}")
+            }
         }
     }
 
@@ -479,10 +527,17 @@ class NativeGamepadMapper(private val context: Context) {
 
             val runnable = object : Runnable {
                 override fun run() {
-                    try {
-                        TouchInjectionPlugin.touchService?.injectTap(x + ox, y + oy, tapDuration)
-                    } catch (e: Exception) {
-                        Log.w(TAG, "turbo failed: ${e.message}")
+                    // FIX: previously called injectTap() directly on mainHandler (the UI
+                    // thread) — since injectTap blocks for its full duration on the daemon
+                    // side per AIDL call, this meant every turbo repeat briefly blocked the
+                    // UI thread too, on top of the same "blocks other input" problem shared
+                    // with every other direct touchService call in this file.
+                    dispatchTouchCall {
+                        try {
+                            TouchInjectionPlugin.touchService?.injectTap(x + ox, y + oy, tapDuration)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "turbo failed: ${e.message}")
+                        }
                     }
                     mainHandler.postDelayed(this, intervalMs)
                 }
@@ -507,7 +562,10 @@ class NativeGamepadMapper(private val context: Context) {
             if (p != null) {
                 p.isActive = true
                 p.virtualKey = "toggle_$nodeId"
-                try { TouchInjectionPlugin.touchService?.touchDown(p.id, x + ox, y + oy) } catch (e: Exception) { logInjectFailure("touchDown", p.id, e) }
+                val pid = p.id
+                dispatchTouchCall {
+                    try { TouchInjectionPlugin.touchService?.touchDown(pid, x + ox, y + oy) } catch (e: Exception) { logInjectFailure("touchDown", pid, e) }
+                }
             }
             toggleState[nodeId] = true
         } else {
@@ -516,7 +574,10 @@ class NativeGamepadMapper(private val context: Context) {
             if (p != null) {
                 p.isActive = false
                 p.virtualKey = null
-                try { TouchInjectionPlugin.touchService?.touchUp(p.id) } catch (e: Exception) { logInjectFailure("touchUp", p.id, e) }
+                val pid = p.id
+                dispatchTouchCall {
+                    try { TouchInjectionPlugin.touchService?.touchUp(pid) } catch (e: Exception) { logInjectFailure("touchUp", pid, e) }
+                }
             }
             toggleState[nodeId] = false
         }
@@ -535,10 +596,12 @@ class NativeGamepadMapper(private val context: Context) {
                 val (x, y) = getScreenCoords(mapping.getDouble("x"), mapping.getDouble("y"))
                 val (ox, oy) = getAntiBanOffset(mapping.optBoolean("antiBanEnabled", false))
                 val tapDuration = mapping.optLong("tapDuration", 60L)
-                try {
-                    TouchInjectionPlugin.touchService?.injectTap(x + ox, y + oy, tapDuration)
-                } catch (e: Exception) {
-                    Log.w(TAG, "charge tap failed: ${e.message}")
+                dispatchTouchCall {
+                    try {
+                        TouchInjectionPlugin.touchService?.injectTap(x + ox, y + oy, tapDuration)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "charge tap failed: ${e.message}")
+                    }
                 }
             }
         }
@@ -555,9 +618,16 @@ class NativeGamepadMapper(private val context: Context) {
             if (p != null) {
                 p.isActive = true
                 p.virtualKey = nodeId
-                try { TouchInjectionPlugin.touchService?.touchDown(p.id, x + ox, y + oy) } catch (e: Exception) {
-                    p.isActive = false
-                    logInjectFailure("touchDown", p.id, e)
+                val pid = p.id
+                // FIX: this is the single most impactful site for "RB tekan → analog kiri/
+                // kanan berhenti" — RB (and most ordinary buttons) use the default "hold"
+                // interaction type, so THIS touchDown was almost certainly the exact call
+                // blocking the shared decision thread while a stick was actively moving.
+                dispatchTouchCall {
+                    try { TouchInjectionPlugin.touchService?.touchDown(pid, x + ox, y + oy) } catch (e: Exception) {
+                        p.isActive = false
+                        logInjectFailure("touchDown", pid, e)
+                    }
                 }
             }
         } else {
@@ -566,7 +636,10 @@ class NativeGamepadMapper(private val context: Context) {
             if (p != null) {
                 p.isActive = false
                 p.virtualKey = null
-                try { TouchInjectionPlugin.touchService?.touchUp(p.id) } catch (e: Exception) { logInjectFailure("touchUp", p.id, e) }
+                val pid = p.id
+                dispatchTouchCall {
+                    try { TouchInjectionPlugin.touchService?.touchUp(pid) } catch (e: Exception) { logInjectFailure("touchUp", pid, e) }
+                }
             }
         }
     }
@@ -607,10 +680,15 @@ class NativeGamepadMapper(private val context: Context) {
 
                 when (action.lowercase()) {
                     "tap" -> {
-                        try {
-                            TouchInjectionPlugin.touchService?.injectTap(screenX + ox, screenY + oy, duration)
-                        } catch (e: Exception) {
-                            Log.w(TAG, "Macro tap failed: ${e.message}")
+                        // FIX: same as turbo — this runnable is scheduled on mainHandler (the
+                        // UI thread), so calling injectTap() directly here blocked the UI
+                        // thread for the duration of each macro step's AIDL round-trip.
+                        dispatchTouchCall {
+                            try {
+                                TouchInjectionPlugin.touchService?.injectTap(screenX + ox, screenY + oy, duration)
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Macro tap failed: ${e.message}")
+                            }
                         }
                     }
                 }

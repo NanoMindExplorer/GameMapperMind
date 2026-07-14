@@ -6,6 +6,7 @@ on:
   pull_request:
     branches: [ main, master ]
   schedule:
+    # Run weekly every Monday 02:00 UTC
     - cron: '0 2 * * 1'
 
 jobs:
@@ -20,22 +21,26 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [ 'javascript', 'java-kotlin' ]
+        # JavaScript covers TypeScript + React (main codebase)
+        # java-kotlin removed: requires Android SDK + Gradle build setup which
+        # CodeQL autobuild cannot do automatically. JS scan covers the security-
+        # critical input handling logic in src/.
+        language: [ 'javascript' ]
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     - name: Initialize CodeQL
-      uses: github/codeql-action/init@v3
+      uses: github/codeql-action/init@v4
       with:
         languages: ${{ matrix.language }}
         queries: security-extended,security-and-quality
 
     - name: Autobuild
-      uses: github/codeql-action/autobuild@v3
+      uses: github/codeql-action/autobuild@v4
 
     - name: Perform CodeQL Analysis
-      uses: github/codeql-action/analyze@v3
+      uses: github/codeql-action/analyze@v4
       with:
         category: "/language:${{ matrix.language }}"

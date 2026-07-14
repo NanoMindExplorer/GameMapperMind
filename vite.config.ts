@@ -18,10 +18,20 @@ export default defineConfig(() => {
       chunkSizeWarningLimit: 1000,
       rollupOptions: {
         output: {
-          manualChunks: {
-            'vendor-react': ['react', 'react-dom'],
-            'vendor-icons': ['lucide-react'],
-            'vendor-capacitor': ['@capacitor/core']
+          // FIX: vite 8 / Rollup 4+ requires manualChunks as a function, not an object.
+          // The function receives the module ID and returns the chunk name (or null to
+          // leave it in the default chunk). This is backward-compatible with vite 6.
+          manualChunks(id) {
+            if (id.includes('node_modules/react/') || id.includes('node_modules/react-dom/')) {
+              return 'vendor-react';
+            }
+            if (id.includes('node_modules/lucide-react/')) {
+              return 'vendor-icons';
+            }
+            if (id.includes('node_modules/@capacitor/core/')) {
+              return 'vendor-capacitor';
+            }
+            return null;
           }
         }
       }

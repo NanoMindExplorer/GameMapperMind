@@ -365,6 +365,28 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
             if (btnIdx >= 0 && stateIdx > btnIdx) {
                 val btnRaw = parts[btnIdx]
                 val isDown = parts[stateIdx] == "DOWN"
+
+                // FIX (root cause of BTN_GAMEPAD log spam + A not injecting):
+                // Many generic Bluetooth gamepads emit BTN_GAMEPAD as a "meta" / sync event
+                // ALONGSIDE every real button press (BTN_A, BTN_B, etc.). It's not a real
+                // button — it's the controller announcing "a gamepad button event is
+                // happening right now". Treating it as a real button caused:
+                //   1. Log spam ("Unmapped button BTN_GAMEPAD DOWN/UP" flooding the log)
+                //   2. Wasted CPU cycles on every button press
+                //   3. On some controllers, BTN_GAMEPAD DOWN arrives slightly BEFORE the
+                //      real button DOWN — and since the dedupe `lastKeyState` map is keyed
+                //      by raw name, this was harmless for the real button, but the volume
+                //      of meta events still consumed decision-thread time and inflated the
+                //      batchedEvents queue in GamepadJniPlugin, delaying real button
+                //      processing by 1-2 queue slots per press.
+                // Filter these meta events out at the source. BTN_GAMEPAD, BTN_JOYSTICK,
+                // and BTN_SOUTH (alias for BTN_A on some kernels — but we already map
+                // BTN_SOUTH → A above, so this guard only catches the bare BTN_GAMEPAD /
+                // BTN_JOYSTICK meta codes that have no real-button meaning).
+                if (btnRaw == "BTN_GAMEPAD" || btnRaw == "BTN_JOYSTICK") {
+                    return
+                }
+
                 val btnName = mapEvdevToButton(btnRaw)
 
                 if (btnName != "UNKNOWN") {

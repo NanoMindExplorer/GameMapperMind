@@ -15,7 +15,19 @@ private const val TAG = "GameMapper"
 class TouchDaemonService : ITouchService.Stub {
 
     private var ctx: Context? = null
-    private var baseDownTime: Long = 0L
+    // FIX (root cause of "tombol A tidak inject saat analog aktif"):
+    // Previously a SINGLE baseDownTime was shared across ALL pointers. When the L_STICK
+    // (pointer 2) went DOWN, baseDownTime was set. When button A (pointer 3) went DOWN,
+    // it reused the same baseDownTime. When the stick went UP, baseDownTime was reset to
+    // 0. Then when button A went UP, downTime was computed as eventTime (current time),
+    // NOT matching the original DOWN event's downTime — Android's InputManager rejects
+    // ACTION_UP events whose downTime doesn't match the corresponding ACTION_DOWN, so the
+    // UP was silently dropped and the touch appeared "stuck down" or never registered.
+    //
+    // Now downTime is tracked PER POINTER ID. Each pointer's DOWN records its own downTime;
+    // its UP uses that same downTime. Multiple concurrent pointers (stick + button) each
+    // have independent downTimes, matching how Android's MotionEvent contract requires.
+    private val pointerDownTimes = java.util.concurrent.ConcurrentHashMap<Int, Long>()
     private var currentInputSource: Int = InputDevice.SOURCE_TOUCHSCREEN
 
     @Volatile private var activePath: String? = null
@@ -138,7 +150,9 @@ class TouchDaemonService : ITouchService.Stub {
     // ==================== TOUCH INJECTION ====================
 
     override fun touchDown(pointerId: Int, x: Float, y: Float): Boolean {
-        if (baseDownTime == 0L) baseDownTime = SystemClock.uptimeMillis()
+        // Record this pointer's downTime — used by subsequent MOVE/UP events for the same
+        // pointer so Android's InputManager sees a consistent MotionEvent stream.
+        pointerDownTimes[pointerId] = SystemClock.uptimeMillis()
         return injectSinglePointer(pointerId, MotionEvent.ACTION_DOWN, x, y)
     }
 
@@ -148,7 +162,7 @@ class TouchDaemonService : ITouchService.Stub {
 
     override fun touchUp(pointerId: Int): Boolean {
         val result = injectSinglePointer(pointerId, MotionEvent.ACTION_UP, 0f, 0f)
-        if (result) baseDownTime = 0L
+        if (result) pointerDownTimes.remove(pointerId)
         return result
     }
 
@@ -184,7 +198,13 @@ class TouchDaemonService : ITouchService.Stub {
             size = 1f
         })
 
-        return injectMotionEvent(action, 0, 1, properties, coords)
+        // Look up this pointer's recorded downTime (set on touchDown). For MOVE/UP this
+        // MUST match the original DOWN's downTime or Android silently drops the event —
+        // which was the root cause of "tombol A tidak inject" when multiple pointers were
+        // active. Default to eventTime for safety if not found (e.g. MOVE without prior
+        // DOWN, which shouldn't happen but can on edge cases like service restart).
+        val downTime = pointerDownTimes[pointerId] ?: SystemClock.uptimeMillis()
+        return injectMotionEvent(action, 0, 1, properties, coords, downTime)
     }
 
     private fun injectMotionEvent(
@@ -192,7 +212,8 @@ class TouchDaemonService : ITouchService.Stub {
         actionIndex: Int,
         pointerCount: Int,
         pointerProperties: Array<MotionEvent.PointerProperties>,
-        pointerCoords: Array<MotionEvent.PointerCoords>
+        pointerCoords: Array<MotionEvent.PointerCoords>,
+        downTime: Long
     ): Boolean {
 
         // FIX (root cause of "analog nyangkut / touchMove return false"):
@@ -215,7 +236,8 @@ class TouchDaemonService : ITouchService.Stub {
         // for MOVE (shell can't do MOVE anyway). Only use shell for DOWN/UP when A/B fail.
 
         val eventTime = SystemClock.uptimeMillis()
-        val downTime = if (baseDownTime == 0L) eventTime else baseDownTime
+        // downTime is now passed in from the caller (per-pointer), no longer a shared field.
+        // See injectSinglePointer() for why this matters.
 
         val event = MotionEvent.obtain(
             downTime, eventTime, action, pointerCount,
@@ -398,6 +420,9 @@ class TouchDaemonService : ITouchService.Stub {
     }
 
     override fun releaseAllPointers(): Boolean {
+        // Clear per-pointer downTime tracking so stale entries don't accumulate across
+        // profile switches / service restarts.
+        pointerDownTimes.clear()
         return true
     }
 

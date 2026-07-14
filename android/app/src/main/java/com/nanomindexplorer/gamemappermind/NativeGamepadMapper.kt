@@ -29,14 +29,71 @@ class NativeGamepadMapper(private val context: Context) {
         // Fix: dispatch the actual AIDL call onto its own dedicated background thread,
         // decoupled from the decision-making thread, which now only does fast in-memory
         // work (pointer allocation, deadzone/smoothing math, lastState edge-detection) and
-        // is never blocked waiting on IPC. A single background thread (not a pool)
-        // preserves strict FIFO delivery order for touch events, matching prior behavior —
-        // just off the critical path that also has to keep up with a moving stick.
-        private val aidlThread = android.os.HandlerThread("TouchAidlDispatch").also { it.start() }
-        private val aidlHandler = Handler(aidlThread.looper)
+        // is never blocked waiting on IPC.
 
+        // FIX v2 (root cause of "analog berhenti sejenak saat tombol lain ditekan"):
+        // The previous fix used a SINGLE aidlThread for ALL touch calls (analog move AND
+        // button down/up). Since Binder calls are 5-15ms each and the queue is strict FIFO,
+        // a burst of button events (DOWN + multiple BTN_GAMEPAD meta events + UP) would
+        // pile up in front of pending touchMove calls — the stick appeared to "freeze" for
+        // 50-100ms every time a button was tapped during movement.
+        //
+        // Solution: TWO separate HandlerThreads.
+        //   - stickAidlHandler: HIGH priority, processes touchDown/touchMove/touchUp for
+        //     analog pointers only. Coalesces consecutive moves (only the latest move per
+        //     pointer is actually sent — intermediate positions are dropped, since a fast-
+        //     moving stick only cares about the final position per frame anyway).
+        //   - buttonAidlHandler: LOWER priority, processes touchDown/touchUp/injectTap for
+        //     button pointers. A 10-20ms delay on a button press is imperceptible; a 10-20ms
+        //     delay on stick movement is VERY perceptible (the "pemain diam sejenak" bug).
+        //
+        // Both threads can execute Binder calls in parallel — Android's InputManager accepts
+        // concurrent injectInputEvent calls for different pointer IDs without serialization.
+        private val stickAidlThread = android.os.HandlerThread("StickAidlDispatch").also {
+            it.priority = Thread.MAX_PRIORITY
+            it.start()
+        }
+        private val stickAidlHandler = Handler(stickAidlThread.looper)
+
+        private val buttonAidlThread = android.os.HandlerThread("ButtonAidlDispatch").also {
+            it.priority = Thread.NORM_PRIORITY
+            it.start()
+        }
+        private val buttonAidlHandler = Handler(buttonAidlThread.looper)
+
+        // Coalescing: at most one pending move per pointer ID. When a new move is posted
+        // for a pointer that already has a pending move queued, the pending one is removed
+        // and replaced — so only the LATEST position reaches the daemon. This caps stick
+        // move latency at one Binder call regardless of how fast getevent fires.
+        private val pendingMoveRunnables = mutableMapOf<Int, Runnable>()
+
+        fun dispatchStickCall(block: () -> Unit) {
+            stickAidlHandler.post(block)
+        }
+
+        fun dispatchButtonCall(block: () -> Unit) {
+            buttonAidlHandler.post(block)
+        }
+
+        // Coalesced stick move: replaces any pending move for the same pointer ID with
+        // this newer one. Guarantees the daemon only sees the most recent position per
+        // pointer, eliminating the "stale moves piling up in the queue" delay.
+        fun dispatchStickMove(pointerId: Int, block: () -> Unit) {
+            synchronized(pendingMoveRunnables) {
+                pendingMoveRunnables[pointerId]?.let { stickAidlHandler.removeCallbacks(it) }
+                val runnable = Runnable {
+                    synchronized(pendingMoveRunnables) { pendingMoveRunnables.remove(pointerId) }
+                    block()
+                }
+                pendingMoveRunnables[pointerId] = runnable
+                stickAidlHandler.post(runnable)
+            }
+        }
+
+        // Legacy entry point — keep for back-compat with existing callers. Routes to the
+        // button queue by default (most existing call sites are button touchDown/touchUp).
         fun dispatchTouchCall(block: () -> Unit) {
-            aidlHandler.post(block)
+            dispatchButtonCall(block)
         }
 
         fun resetAll() {
@@ -44,8 +101,10 @@ class NativeGamepadMapper(private val context: Context) {
                 instance?.pointers?.forEach {
                     if (it.isActive) {
                         it.isActive = false
-                        dispatchTouchCall {
-                            try { TouchInjectionPlugin.touchService?.touchUp(it.id) } catch (e: Exception) { instance?.logInjectFailure("touchUp", it.id, e) }
+                        val pid = it.id
+                        val handler = if (it.type == "analog") ::dispatchStickCall else ::dispatchButtonCall
+                        handler {
+                            try { TouchInjectionPlugin.touchService?.touchUp(pid) } catch (e: Exception) { instance?.logInjectFailure("touchUp", pid, e) }
                         }
                     }
                 }
@@ -241,7 +300,9 @@ class NativeGamepadMapper(private val context: Context) {
             if (pointer.isActive) {
                 pointer.isActive = false
                 val pid = pointer.id
-                dispatchTouchCall {
+                // FIX: analog pointer release goes on the stick queue (high priority) so a
+                // stick release isn't delayed behind queued button events.
+                dispatchStickCall {
                     try { TouchInjectionPlugin.touchService?.touchUp(pid) } catch (e: Exception) { logInjectFailure("touchUp", pid, e) }
                 }
             }
@@ -262,7 +323,8 @@ class NativeGamepadMapper(private val context: Context) {
         if (rawInputMag <= deadzone) {
             if (pointer.isActive) {
                 val pid = pointer.id
-                dispatchTouchCall {
+                // FIX: analog pointer release goes on the stick queue (high priority).
+                dispatchStickCall {
                     try { TouchInjectionPlugin.touchService?.touchUp(pid) } catch (e: Exception) { logInjectFailure("touchUp", pid, e) }
                 }
                 pointer.isActive = false
@@ -313,7 +375,8 @@ class NativeGamepadMapper(private val context: Context) {
             pointer.isActive = true
             val pid = pointer.id
             val downX = cX + ox; val downY = cY + oy
-            dispatchTouchCall {
+            // FIX: analog pointer DOWN goes on the stick queue (high priority).
+            dispatchStickCall {
                 try {
                     TouchInjectionPlugin.touchService?.touchDown(pid, downX, downY)
                 } catch (e: Exception) {
@@ -325,12 +388,17 @@ class NativeGamepadMapper(private val context: Context) {
         if (pointer.isActive) {
             val pid = pointer.id
             val moveX = tX + ox; val moveY = tY + oy
-            dispatchTouchCall {
+            // FIX v2 (root cause of "pemain diam sejenak saat tombol lain ditekan"):
+            // COALESCED dispatch — only the LATEST pending move per pointer reaches the
+            // daemon. Previously every getevent axis sample queued a separate Binder call;
+            // at 100-200Hz stick reporting that built up a 5-15 call backlog, each blocking
+            // the next. Now if a new move arrives before the previous one was processed,
+            // the older one is removed from the queue and only the newest position is sent.
+            // This caps stick move latency at one Binder call (~10ms) regardless of input
+            // rate, and decouples analog responsiveness from whatever button events are
+            // happening concurrently on the separate buttonAidlHandler queue.
+            dispatchStickMove(pid) {
                 try {
-                    // touchMove returns false (no exception) when TouchDaemonService is degraded
-                    // to shell-fallback Path C, which only supports single-pointer tap and silently
-                    // rejects MOVE. A false return is just as much a dropped frame as a thrown
-                    // exception, so it must hit the same failure-tracking path below.
                     val moved = TouchInjectionPlugin.touchService?.touchMove(pid, moveX, moveY) ?: false
                     if (moved) {
                         if (moveFailWarned[pid] == true) moveFailWarned[pid] = false
@@ -339,8 +407,6 @@ class NativeGamepadMapper(private val context: Context) {
                         Log.w(TAG, "Touch injection returned false: touchMove pointer=$pid (stick drag likely stuck on shell-fallback Path C)")
                     }
                 } catch (e: Exception) {
-                    // Hot path (fires every axis update while stick deflected) - log once per
-                    // failure streak instead of every frame, or logcat gets flooded.
                     if (moveFailWarned[pid] != true) {
                         moveFailWarned[pid] = true
                         logInjectFailure("touchMove", pid, e)
@@ -393,7 +459,8 @@ class NativeGamepadMapper(private val context: Context) {
                 val p = pointersById[offset + i]
                 if (p != null && p.isActive) {
                     val pid = p.id
-                    dispatchTouchCall {
+                    val handler = if (p.type == "analog") ::dispatchStickCall else ::dispatchButtonCall
+                    handler {
                         try { TouchInjectionPlugin.touchService?.touchUp(pid) } catch (e: Exception) { logInjectFailure("touchUp", pid, e) }
                     }
                     p.isActive = false
@@ -567,7 +634,7 @@ class NativeGamepadMapper(private val context: Context) {
                 p.isActive = true
                 p.virtualKey = "toggle_$nodeId"
                 val pid = p.id
-                dispatchTouchCall {
+                dispatchButtonCall {
                     try { TouchInjectionPlugin.touchService?.touchDown(pid, x + ox, y + oy) } catch (e: Exception) { logInjectFailure("touchDown", pid, e) }
                 }
             }
@@ -579,7 +646,7 @@ class NativeGamepadMapper(private val context: Context) {
                 p.isActive = false
                 p.virtualKey = null
                 val pid = p.id
-                dispatchTouchCall {
+                dispatchButtonCall {
                     try { TouchInjectionPlugin.touchService?.touchUp(pid) } catch (e: Exception) { logInjectFailure("touchUp", pid, e) }
                 }
             }
@@ -614,7 +681,13 @@ class NativeGamepadMapper(private val context: Context) {
     private fun handleHoldInteraction(mapping: JSONObject, isDown: Boolean, offset: Int) {
         val (x, y) = getScreenCoords(mapping.getDouble("x"), mapping.getDouble("y"))
         val (ox, oy) = getAntiBanOffset(mapping.optBoolean("antiBanEnabled", false))
-        val nodeId = "hold_${mapping.optString("id", "")}"
+        // FIX: use BOTH id and mappedKey in the nodeId to guarantee uniqueness across
+        // buttons. Previously only `mapping.id` was used — if a profile had a button with
+        // empty/missing id, nodeId became "hold_" and multiple such buttons would share the
+        // same virtualKey, causing the UP event of one to release the pointer of another.
+        // Including mappedKey (which is always present for mapped buttons) disambiguates.
+        val mappedKey = mapping.optString("mappedKey", "")
+        val nodeId = "hold_${mapping.optString("id", "")}_$mappedKey"
 
         if (isDown) {
             val p = (offset..offset + 15).mapNotNull { pointersById[it] }
@@ -627,7 +700,7 @@ class NativeGamepadMapper(private val context: Context) {
                 // kanan berhenti" — RB (and most ordinary buttons) use the default "hold"
                 // interaction type, so THIS touchDown was almost certainly the exact call
                 // blocking the shared decision thread while a stick was actively moving.
-                dispatchTouchCall {
+                dispatchButtonCall {
                     try { TouchInjectionPlugin.touchService?.touchDown(pid, x + ox, y + oy) } catch (e: Exception) {
                         p.isActive = false
                         logInjectFailure("touchDown", pid, e)
@@ -641,7 +714,7 @@ class NativeGamepadMapper(private val context: Context) {
                 p.isActive = false
                 p.virtualKey = null
                 val pid = p.id
-                dispatchTouchCall {
+                dispatchButtonCall {
                     try { TouchInjectionPlugin.touchService?.touchUp(pid) } catch (e: Exception) { logInjectFailure("touchUp", pid, e) }
                 }
             }

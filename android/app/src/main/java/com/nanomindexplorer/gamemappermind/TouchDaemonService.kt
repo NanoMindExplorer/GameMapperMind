@@ -15,19 +15,6 @@ private const val TAG = "GameMapper"
 class TouchDaemonService : ITouchService.Stub {
 
     private var ctx: Context? = null
-    // FIX (root cause of "tombol A tidak inject saat analog aktif"):
-    // Previously a SINGLE baseDownTime was shared across ALL pointers. When the L_STICK
-    // (pointer 2) went DOWN, baseDownTime was set. When button A (pointer 3) went DOWN,
-    // it reused the same baseDownTime. When the stick went UP, baseDownTime was reset to
-    // 0. Then when button A went UP, downTime was computed as eventTime (current time),
-    // NOT matching the original DOWN event's downTime — Android's InputManager rejects
-    // ACTION_UP events whose downTime doesn't match the corresponding ACTION_DOWN, so the
-    // UP was silently dropped and the touch appeared "stuck down" or never registered.
-    //
-    // Now downTime is tracked PER POINTER ID. Each pointer's DOWN records its own downTime;
-    // its UP uses that same downTime. Multiple concurrent pointers (stick + button) each
-    // have independent downTimes, matching how Android's MotionEvent contract requires.
-    private val pointerDownTimes = java.util.concurrent.ConcurrentHashMap<Int, Long>()
     private var currentInputSource: Int = InputDevice.SOURCE_TOUCHSCREEN
 
     @Volatile private var activePath: String? = null
@@ -149,99 +136,148 @@ class TouchDaemonService : ITouchService.Stub {
 
     // ==================== TOUCH INJECTION ====================
 
+    // FIX v3 (root cause of "analog kembali ke tengah saat tombol lain ditekan"):
+    // Previously, touchDown/touchMove/touchUp each created a MotionEvent with pointerCount=1
+    // containing ONLY the single pointer being acted upon, using ACTION_DOWN/ACTION_UP for
+    // every pointer transition. This is WRONG for multi-touch: when pointer 0 (L_STICK) is
+    // already DOWN and pointer 2 (button A) injects ACTION_DOWN with pointerCount=1, Android
+    // interprets this as a NEW touch session — the previous session (stick) gets CANCELLED,
+    // and the stick's touch is released. The player appears to "stop" every time a button
+    // is pressed while moving.
+    //
+    // Correct Android multi-touch semantics:
+    //   - First pointer DOWN: ACTION_DOWN, pointerCount=1
+    //   - Additional pointer DOWN while others active: ACTION_POINTER_DOWN, pointerCount=ALL,
+    //     actionIndex = index of the new pointer in the properties array
+    //   - Any pointer MOVE: ACTION_MOVE, pointerCount=ALL, all positions updated
+    //   - Pointer UP while others remain: ACTION_POINTER_UP, pointerCount=ALL,
+    //     actionIndex = index of the pointer being released
+    //   - Last pointer UP: ACTION_UP, pointerCount=1
+    //
+    // This requires tracking ALL active pointers (their IDs, positions, and the gesture's
+    // original downTime) and building each MotionEvent with the full pointer set.
+    private data class ActivePointer(val id: Int, @Volatile var x: Float, @Volatile var y: Float)
+    private val activePointers = java.util.concurrent.ConcurrentHashMap<Int, ActivePointer>()
+    private val pointersLock = Any()
+
+    @Volatile private var gestureDownTime: Long = 0L
+
     override fun touchDown(pointerId: Int, x: Float, y: Float): Boolean {
-        // Record this pointer's downTime — used by subsequent MOVE/UP events for the same
-        // pointer so Android's InputManager sees a consistent MotionEvent stream.
-        pointerDownTimes[pointerId] = SystemClock.uptimeMillis()
-        return injectSinglePointer(pointerId, MotionEvent.ACTION_DOWN, x, y)
+        val now = SystemClock.uptimeMillis()
+        synchronized(pointersLock) {
+            activePointers[pointerId] = ActivePointer(pointerId, x, y)
+            if (activePointers.size == 1) {
+                // First pointer — starts a new gesture, records the gesture downTime
+                gestureDownTime = now
+            }
+        }
+        return injectMultiPointerEvent(pointerId, MotionEvent.ACTION_DOWN, gestureDownTime)
     }
 
     override fun touchMove(pointerId: Int, x: Float, y: Float): Boolean {
-        return injectSinglePointer(pointerId, MotionEvent.ACTION_MOVE, x, y)
+        val ap = activePointers[pointerId]
+        if (ap == null) {
+            // Pointer not active — can't move. This can happen if touchDown failed and the
+            // caller didn't handle the error. Log once to aid diagnosis.
+            Log.w(TAG, "touchMove called for inactive pointer $pointerId")
+            return false
+        }
+        ap.x = x
+        ap.y = y
+        return injectMultiPointerEvent(pointerId, MotionEvent.ACTION_MOVE, gestureDownTime)
     }
 
     override fun touchUp(pointerId: Int): Boolean {
-        val result = injectSinglePointer(pointerId, MotionEvent.ACTION_UP, 0f, 0f)
-        if (result) pointerDownTimes.remove(pointerId)
+        val ap = activePointers[pointerId]
+        if (ap == null) {
+            Log.w(TAG, "touchUp called for inactive pointer $pointerId")
+            return false
+        }
+        val isLastPointer: Boolean
+        synchronized(pointersLock) {
+            isLastPointer = activePointers.size <= 1
+        }
+        val result = injectMultiPointerEvent(pointerId, MotionEvent.ACTION_UP, gestureDownTime)
+        synchronized(pointersLock) {
+            activePointers.remove(pointerId)
+            if (activePointers.isEmpty()) {
+                gestureDownTime = 0L
+            }
+        }
         return result
     }
 
     override fun injectTap(x: Float, y: Float, durationMs: Long): Boolean {
-        // FIX (root cause of "tombol A/LT/RT tidak inject" + "analog rusak saat tap"):
-        // Previously this used pointer ID 0 — the SAME pointer ID that NativeGamepadMapper
-        // allocates to the L_STICK analog stick (offset+0 for gamepad 0 = pointer 0).
-        // When injectTap fired while the left stick was active, touchDown(0,...) was
-        // interpreted by Android as a MOVE for the existing L_STICK pointer (moving it to
-        // the tap location), then Thread.sleep, then touchUp(0) released the L_STICK
-        // pointer entirely. Result: the tap didn't register as a new touch, AND the analog
-        // stick got hijacked/released.
-        //
-        // Pointer ID 50 is well outside the 0-15 per-gamepad allocation range
-        // (gamepad 0: 0-15, gamepad 1: 16-31, ..., gamepad 3: 48-63), so it can never
-        // collide with any analog or button pointer the mapper allocates.
+        // Pointer ID 50 is well outside the 0-15 per-gamepad allocation range, so it can
+        // never collide with any analog or button pointer the mapper allocates.
         val tapPointerId = 50
         if (!touchDown(tapPointerId, x, y)) return false
         Thread.sleep(durationMs.coerceAtLeast(10))
         return touchUp(tapPointerId)
     }
 
-    private fun injectSinglePointer(pointerId: Int, action: Int, x: Float, y: Float): Boolean {
-        val properties = arrayOf(MotionEvent.PointerProperties().apply {
-            this.id = pointerId
-            toolType = MotionEvent.TOOL_TYPE_FINGER
-        })
+    /**
+     * Build and inject a MotionEvent with the CORRECT multi-pointer semantics.
+     *
+     * - Gathers ALL currently-active pointers (not just the one being acted upon)
+     * - Determines the correct action code:
+     *     ACTION_DOWN / ACTION_UP for first/last pointer
+     *     ACTION_POINTER_DOWN / ACTION_POINTER_UP for intermediate pointers
+     *     ACTION_MOVE for position updates
+     * - Sets actionIndex to the position of the target pointer in the properties array
+     * - Uses the gesture's original downTime (from the first pointer's DOWN) for consistency
+     */
+    private fun injectMultiPointerEvent(pointerId: Int, action: Int, downTime: Long): Boolean {
+        // Snapshot all active pointers under lock to ensure consistency
+        val allPointers: List<ActivePointer>
+        synchronized(pointersLock) {
+            allPointers = activePointers.values.sortedBy { it.id }
+        }
+        val pointerCount = allPointers.size
+        if (pointerCount == 0) return false
 
-        val coords = arrayOf(MotionEvent.PointerCoords().apply {
-            this.x = x
-            this.y = y
-            pressure = if (action == MotionEvent.ACTION_UP) 0f else 1f
-            size = 1f
-        })
+        val actionIndex = allPointers.indexOfFirst { it.id == pointerId }
+        if (actionIndex < 0) {
+            Log.w(TAG, "injectMultiPointerEvent: pointer $pointerId not in active set")
+            return false
+        }
 
-        // Look up this pointer's recorded downTime (set on touchDown). For MOVE/UP this
-        // MUST match the original DOWN's downTime or Android silently drops the event —
-        // which was the root cause of "tombol A tidak inject" when multiple pointers were
-        // active. Default to eventTime for safety if not found (e.g. MOVE without prior
-        // DOWN, which shouldn't happen but can on edge cases like service restart).
-        val downTime = pointerDownTimes[pointerId] ?: SystemClock.uptimeMillis()
-        return injectMotionEvent(action, 0, 1, properties, coords, downTime)
-    }
+        // Build the correct action code
+        val finalAction = when (action) {
+            MotionEvent.ACTION_DOWN -> {
+                if (pointerCount == 1) MotionEvent.ACTION_DOWN
+                else MotionEvent.ACTION_POINTER_DOWN or (actionIndex shl MotionEvent.ACTION_POINTER_INDEX_SHIFT)
+            }
+            MotionEvent.ACTION_UP -> {
+                if (pointerCount == 1) MotionEvent.ACTION_UP
+                else MotionEvent.ACTION_POINTER_UP or (actionIndex shl MotionEvent.ACTION_POINTER_INDEX_SHIFT)
+            }
+            else -> MotionEvent.ACTION_MOVE
+        }
 
-    private fun injectMotionEvent(
-        action: Int,
-        actionIndex: Int,
-        pointerCount: Int,
-        pointerProperties: Array<MotionEvent.PointerProperties>,
-        pointerCoords: Array<MotionEvent.PointerCoords>,
-        downTime: Long
-    ): Boolean {
+        // Build properties and coords for ALL active pointers
+        val properties = Array(pointerCount) { i ->
+            MotionEvent.PointerProperties().apply {
+                this.id = allPointers[i].id
+                toolType = MotionEvent.TOOL_TYPE_FINGER
+            }
+        }
 
-        // FIX (root cause of "analog nyangkut / touchMove return false"):
-        // Previously, once Path A failed and the code fell through to Path C (shell input),
-        // `activePath` was permanently set to "C". On every subsequent call, the code took
-        // the `if (activePath == "C")` short-circuit, which returns `false` for ACTION_MOVE
-        // (shell `input tap` only supports single-pointer DOWN/UP, not move). Once Path C
-        // was locked in, the analog stick was effectively dead — every touchMove returned
-        // false, the pointer's screen position never updated, and the stick appeared
-        // "stuck" at its last position.
-        //
-        // New behavior: Path C is only used as a one-shot fallback for DOWN/UP. It is NEVER
-        // cached as the active path. Every call tries A first, then B, then (only for
-        // DOWN/UP) shell. If A/B recover on a later call (transient failure), they're used
-        // again immediately — no permanent lock-in. The cost is one extra reflection probe
-        // per call when A is genuinely broken, which is negligible compared to breaking
-        // all analog movement permanently.
-
-        // Fast path: if we previously fell back to shell for DOWN/UP, still try A/B first
-        // for MOVE (shell can't do MOVE anyway). Only use shell for DOWN/UP when A/B fail.
+        val coords = Array(pointerCount) { i ->
+            MotionEvent.PointerCoords().apply {
+                this.x = allPointers[i].x
+                this.y = allPointers[i].y
+                // The pointer being released gets pressure=0
+                pressure = if ((finalAction == MotionEvent.ACTION_UP || finalAction == MotionEvent.ACTION_POINTER_UP) && i == actionIndex) 0f else 1f
+                size = 1f
+            }
+        }
 
         val eventTime = SystemClock.uptimeMillis()
-        // downTime is now passed in from the caller (per-pointer), no longer a shared field.
-        // See injectSinglePointer() for why this matters.
 
         val event = MotionEvent.obtain(
-            downTime, eventTime, action, pointerCount,
-            pointerProperties, pointerCoords,
+            downTime, eventTime, finalAction, pointerCount,
+            properties, coords,
             0, 0, 1f, 1f, -1, 0, currentInputSource, 0
         )
 
@@ -269,18 +305,18 @@ class TouchDaemonService : ITouchService.Stub {
             event.recycle()
         }
 
-        // Both A and B failed. Fall back to shell input — but ONLY for single-pointer
-        // DOWN/UP (shell `input tap` cannot do MOVE or multi-pointer).
-        // CRITICAL: do NOT cache activePath = "C" here. Next call will retry A/B first,
-        // so a transient A/B failure doesn't permanently kill analog movement.
-        if (pointerCount == 1 && (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_UP)) {
-            Log.w(TAG, "Paths A and B failed — falling back to shell input for this call only")
-            val success = shellInputTap(pointerCoords[0].x, pointerCoords[0].y)
-            // Do NOT set activePath = "C" — we want A/B to be retried on the next call
-            return success
+        // Both A and B failed.
+        // FIX v3: do NOT fall back to shell `input tap` when there are OTHER active pointers.
+        // Shell `input tap` injects a single-pointer DOWN+UP on pointer 0, which would
+        // hijack/cancel any existing multi-touch session (e.g., the L_STICK being held).
+        // Only use shell fallback when this is the ONLY active pointer (pointerCount == 1
+        // at the time of the snapshot, meaning no other touches are in progress).
+        if (pointerCount == 1 && (finalAction == MotionEvent.ACTION_DOWN || finalAction == MotionEvent.ACTION_UP)) {
+            Log.w(TAG, "Paths A and B failed — falling back to shell input (single-pointer only)")
+            return shellInputTap(coords[0].x, coords[0].y)
         }
 
-        Log.w(TAG, "All injection paths failed for action=$action pointerCount=$pointerCount (MOVE on shell fallback is unsupported)")
+        Log.w(TAG, "Injection failed: action=0x${finalAction.toString(16)} pointerCount=$pointerCount (multi-pointer shell fallback not supported — would hijack existing touches)")
         return false
     }
 
@@ -420,9 +456,12 @@ class TouchDaemonService : ITouchService.Stub {
     }
 
     override fun releaseAllPointers(): Boolean {
-        // Clear per-pointer downTime tracking so stale entries don't accumulate across
+        // Clear all active pointer tracking so stale entries don't accumulate across
         // profile switches / service restarts.
-        pointerDownTimes.clear()
+        synchronized(pointersLock) {
+            activePointers.clear()
+            gestureDownTime = 0L
+        }
         return true
     }
 

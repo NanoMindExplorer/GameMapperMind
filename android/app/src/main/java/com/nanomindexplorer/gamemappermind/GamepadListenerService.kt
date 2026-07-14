@@ -366,27 +366,6 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
                 val btnRaw = parts[btnIdx]
                 val isDown = parts[stateIdx] == "DOWN"
 
-                // FIX (root cause of BTN_GAMEPAD log spam + A not injecting):
-                // Many generic Bluetooth gamepads emit BTN_GAMEPAD as a "meta" / sync event
-                // ALONGSIDE every real button press (BTN_A, BTN_B, etc.). It's not a real
-                // button — it's the controller announcing "a gamepad button event is
-                // happening right now". Treating it as a real button caused:
-                //   1. Log spam ("Unmapped button BTN_GAMEPAD DOWN/UP" flooding the log)
-                //   2. Wasted CPU cycles on every button press
-                //   3. On some controllers, BTN_GAMEPAD DOWN arrives slightly BEFORE the
-                //      real button DOWN — and since the dedupe `lastKeyState` map is keyed
-                //      by raw name, this was harmless for the real button, but the volume
-                //      of meta events still consumed decision-thread time and inflated the
-                //      batchedEvents queue in GamepadJniPlugin, delaying real button
-                //      processing by 1-2 queue slots per press.
-                // Filter these meta events out at the source. BTN_GAMEPAD, BTN_JOYSTICK,
-                // and BTN_SOUTH (alias for BTN_A on some kernels — but we already map
-                // BTN_SOUTH → A above, so this guard only catches the bare BTN_GAMEPAD /
-                // BTN_JOYSTICK meta codes that have no real-button meaning).
-                if (btnRaw == "BTN_GAMEPAD" || btnRaw == "BTN_JOYSTICK") {
-                    return
-                }
-
                 val btnName = mapEvdevToButton(btnRaw)
 
                 if (btnName != "UNKNOWN") {
@@ -400,14 +379,9 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
                     GamepadJniPlugin.handleButtonBatched(0, btnName, isDown)
                     TouchInjectionPlugin.emitGamepadButton(btnName, if (isDown) 1 else 0, 1.0f)
                 } else {
-                    // FIX (root cause of "LT/RT tidak bereaksi" on some controllers):
-                    // Previously, unknown evdev button codes were silently dropped — no log,
-                    // no diagnostic. If a controller sent LT/RT as BTN_LT/BTN_RT (non-standard
-                    // but seen on some cheap Bluetooth gamepads) or any other unmapped code,
-                    // the press vanished completely with no way for the user to figure out
-                    // why. Now we surface every unrecognized button code to the on-screen
-                    // diagnostic log so the user can see exactly what their hardware sends
-                    // and we can extend mapEvdevToButton() to cover it.
+                    // FIX: surface unrecognized button codes to the on-screen diagnostic log
+                    // so the user can see exactly what their hardware sends and we can extend
+                    // mapEvdevToButton() to cover it.
                     if (lastKeyState[btnRaw] != isDown) {
                         lastKeyState[btnRaw] = isDown
                         TouchInjectionPlugin.emitDiagnosticLog("[GAMEPAD-KEY] Unmapped button $btnRaw ${if (isDown) "DOWN" else "UP"} — raw line: $line")
@@ -522,7 +496,17 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
 
     private fun mapEvdevToButton(evdevName: String): String {
         return when {
-            evdevName.contains("BTN_A") || evdevName.contains("BTN_SOUTH") -> "A"
+            // FIX v3 (root cause of "Tombol A tidak menginjeksi"):
+            // In Linux input.h, BTN_GAMEPAD (0x130) = BTN_SOUTH = BTN_A — they are ALL the
+            // SAME code. Many generic Bluetooth gamepads report their A button as
+            // "BTN_GAMEPAD" in getevent (both in capability dumps AND event streams).
+            // The previous code only checked for "BTN_A" and "BTN_SOUTH" as substrings,
+            // which DON'T match "BTN_GAMEPAD" — so the A button was mapped to UNKNOWN and
+            // silently dropped during gameplay (when only getevent is active, not the
+            // Android GamepadPlugin which uses KeyCode and correctly maps KEYCODE_BUTTON_A).
+            // Now BTN_GAMEPAD is explicitly mapped to "A", matching the kernel's own
+            // alias definition.
+            evdevName == "BTN_GAMEPAD" || evdevName.contains("BTN_A") || evdevName.contains("BTN_SOUTH") -> "A"
             evdevName.contains("BTN_B") || evdevName.contains("BTN_EAST") -> "B"
             evdevName.contains("BTN_X") || evdevName.contains("BTN_NORTH") -> "X"
             evdevName.contains("BTN_Y") || evdevName.contains("BTN_WEST") -> "Y"

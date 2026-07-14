@@ -1,0 +1,36 @@
+# CODEOWNERS — auto-request review untuk perubahan kode
+
+# Default owner
+*                           @NanoMindExplorer
+
+# Touch injection (high-risk)
+/android/app/src/main/java/com/nanomindexplorer/gamemappermind/TouchDaemonService.kt   @NanoMindExplorer
+/android/app/src/main/java/com/nanomindexplorer/gamemappermind/TouchInjectionPlugin.kt  @NanoMindExplorer
+/android/app/src/main/java/com/nanomindexplorer/gamemappermind/NativeGamepadMapper.kt   @NanoMindExplorer
+
+# Gamepad input handling
+/android/app/src/main/java/com/nanomindexplorer/gamemappermind/GamepadListenerService.kt @NanoMindExplorer
+/android/app/src/main/java/com/nanomindexplorer/gamemappermind/GamepadPlugin.kt          @NanoMindExplorer
+/android/app/src/main/java/com/nanomindexplorer/gamemappermind/GamepadJniPlugin.kt       @NanoMindExplorer
+
+# AIDL interface
+/android/app/src/main/aidl/                                                                @NanoMindExplorer
+
+# Security-sensitive files
+/SECURITY.md                                                                               @NanoMindExplorer
+/.github/                                                                                  @NanoMindExplorer
+/android/app/src/main/AndroidManifest.xml                                                  @NanoMindExplorer
+/server.ts                                                                                 @NanoMindExplorer
+
+# Profile schema
+/src/schemas/                                                                              @NanoMindExplorer
+/src/defaults.ts                                                                           @NanoMindExplorer
+
+# Build config
+/android/app/build.gradle                                                                  @NanoMindExplorer
+/android/build.gradle                                                                      @NanoMindExplorer
+/capacitor.config.ts                                                                       @NanoMindExplorer
+
+# Documentation
+/README.md                                                                                 @NanoMindExplorer
+/CHANGELOG.md                                                                              @NanoMindExplorer

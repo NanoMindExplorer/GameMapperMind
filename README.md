@@ -7,9 +7,17 @@
 [![Shizuku](https://img.shields.io/badge/Requires-Shizuku%20v13%2B-blue)]()
 [![Demo Video](https://img.shields.io/badge/Demo-YouTube-red?logo=youtube)](https://youtu.be/OtdO_hg2ZdI)
 
-> **Game Test Demo**: https://youtu.be/OtdO_hg2ZdI
-
 Aplikasi pemetaan gamepad (Keymapper) untuk menghubungkan kontroler fisik dengan layar sentuh Android. Mendukung multi-touch injection yang benar (analog + tombol bersamaan tanpa gangguan), 6 interaction types, dan 3-path injection dengan failover otomatis.
+
+## Game Test Demo
+
+<a href="https://youtu.be/OtdO_hg2ZdI" target="_blank">
+  <img src="https://img.youtube.com/vi/OtdO_hg2ZdI/maxresdefault.jpg" alt="GameMapperMind Game Test Demo" width="640" style="border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.3);">
+</a>
+
+> **▶️ Click the thumbnail above to watch the demo on YouTube** — Full game test showing multi-pointer touch injection (analog + button simultaneous), combo without delay, and BTN_GAMEPAD compatibility fix.
+
+[![Watch on YouTube](https://img.shields.io/badge/▶_Watch_on_YouTube-OtdO__hg2ZdI-red?style=for-the-badge&logo=youtube)](https://youtu.be/OtdO_hg2ZdI)
 
 ## Features
 - **Multi-pointer touch injection** — analog stick dan tombol aktif bersamaan tanpa saling mengganggu (ACTION_POINTER_DOWN/UP yang benar)

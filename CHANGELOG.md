@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.1] - 2026-07-15 — Multi-Pointer + Gamepad Compatibility Fix
+### Added
+- **Game Test Demo video** — https://youtu.be/OtdO_hg2ZdI
+- **Gamepad Compatibility table** di README — dokumentasi lengkap evdev code mapping per logical button
+- **On-screen diagnostic log** sekarang menampilkan `[GAMEPAD-DETECT] axes: ... | buttons: ...` saat controller terdeteksi, dan `[GAMEPAD-KEY] Unmapped button BTN_XXX` untuk kode non-standard
+- **BTN_GAMEPAD → A mapping** — BTN_GAMEPAD = BTN_A = 0x130 di Linux kernel (banyak generic Bluetooth gamepads pakai nama ini)
+
+### Fixed
+- **Multi-pointer MotionEvent** (root cause of "analog kembali ke tengah saat tombol lain ditekan"): rewrite `touchDown`/`touchMove`/`touchUp` di `TouchDaemonService` untuk menggunakan `ACTION_POINTER_DOWN`/`ACTION_POINTER_UP` dengan SEMUA pointer aktif dalam satu MotionEvent. Sebelumnya `ACTION_DOWN` dengan `pointerCount=1` membatalkan touch session stick yang aktif.
+- **BTN_GAMEPAD filter salah** (root cause of "tombol A tidak menginjeksi"): v2 salah memfilter `BTN_GAMEPAD` sebagai meta event. Padahal BTN_GAMEPAD = BTN_A = 0x130 di Linux input.h — adalah tombol A yang sesungguhnya. Filter dihapus, mapping ditambahkan.
+- **Shell fallback (Path C) hijack multi-touch**: Path C sekarang TIDAK PERNAH fire saat ada pointer aktif lain. Sebelumnya `input tap` shell command inject pointer 0 DOWN+UP yang membatalkan session multi-touch yang aktif.
+- **Per-pointer downTime** (root cause of "tombol A tidak inject saat analog aktif"): ganti shared `baseDownTime` dengan `ConcurrentHashMap<Int, Long>` per pointer. Sebelumnya saat L_STICK UP me-reset `baseDownTime=0`, tombol A UP pakai `downTime=eventTime` yang tidak match dengan DOWN → Android reject ACTION_UP.
+- **Combo delay** (root cause of "pemain diam sejenak saat tombol lain ditekan"): pisahkan AIDL dispatch ke dua thread — `stickAidlHandler` (MAX_PRIORITY + coalescing) dan `buttonAidlHandler` (NORM_PRIORITY). Sebelumnya single thread FIFO queue membuat button event numpuk di depan stick move → stick freeze 50-100ms.
+- **Analog nyangkut ke bawah**: deadzone check sekarang pada RAW input (bukan smoothed) → release immediate saat stick kembali ke center.
+- **injectTap pointer ID collision**: `injectTap` sekarang pakai pointer ID 50 (di luar range 0-63 analog/button per gamepad). Sebelumnya pakai pointer 0 = L_STICK → konflik.
+- **Path C permanent lock**: `injectMotionEvent` tidak lagi cache `activePath = "C"`. Selalu retry A → B → C setiap call.
+- **Trigger normalization fallback**: heuristic berdasarkan magnitude raw value (255/1023/4095/32767) untuk controller yang tidak terdeteksi range-nya.
+- **handleButton interactionType**: sekarang honor `interactionType` (tap/turbo/toggle/charge/macro) untuk SEMUA button, bukan hanya yang punya object `trigger`.
+- **nodeId collision**: `handleHoldInteraction` nodeId sekarang include `mappedKey` untuk uniqueness saat `mapping.id` kosong.
+
+### Changed
+- `TouchDaemonService` rewrite lengkap: hapus `baseDownTime`/`pointerDownTimes`, tambah `activePointers` ConcurrentHashMap + `gestureDownTime` shared per gesture
+- `NativeGamepadMapper` companion object: hapus single `aidlThread`/`aidlHandler`, tambah `stickAidlThread` + `buttonAidlThread` + `pendingMoveRunnables` untuk coalescing
+- `NativeGamepadMapper.processStick`: pakai `dispatchStickCall` (down/up) + `dispatchStickMove` (move, coalesced)
+- `NativeGamepadMapper.handleHoldInteraction`/`handleToggle`/`resetGamepad`: pakai `dispatchButtonCall`
+- `GamepadListenerService.mapEvdevToButton`: tambah BTN_GAMEPAD, BTN_LT, BTN_RT alias
+- `GamepadListenerService.normalizeTrigger`: heuristic fallback untuk range non-255
+- `GamepadListenerService.handleKeyEvent`: log unmapped button codes via `emitDiagnosticLog`
+- README.md updated dengan Multi-Pointer MotionEvent section, Dual AIDL Dispatch Thread section, Gamepad Compatibility table, dan Changelog Ringkasan
+
 ## [2.1.0] - 2026-06-28 — RELEASE
 ### Added
 - **Flexible trigger system** — "Learn Trigger" mode captures any physical gamepad button (including non-standard via raw evdev) and assigns it as trigger

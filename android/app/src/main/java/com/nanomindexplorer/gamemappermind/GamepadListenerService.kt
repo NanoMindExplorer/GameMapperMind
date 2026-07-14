@@ -377,6 +377,19 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
 
                     GamepadJniPlugin.handleButtonBatched(0, btnName, isDown)
                     TouchInjectionPlugin.emitGamepadButton(btnName, if (isDown) 1 else 0, 1.0f)
+                } else {
+                    // FIX (root cause of "LT/RT tidak bereaksi" on some controllers):
+                    // Previously, unknown evdev button codes were silently dropped — no log,
+                    // no diagnostic. If a controller sent LT/RT as BTN_LT/BTN_RT (non-standard
+                    // but seen on some cheap Bluetooth gamepads) or any other unmapped code,
+                    // the press vanished completely with no way for the user to figure out
+                    // why. Now we surface every unrecognized button code to the on-screen
+                    // diagnostic log so the user can see exactly what their hardware sends
+                    // and we can extend mapEvdevToButton() to cover it.
+                    if (lastKeyState[btnRaw] != isDown) {
+                        lastKeyState[btnRaw] = isDown
+                        TouchInjectionPlugin.emitDiagnosticLog("[GAMEPAD-KEY] Unmapped button $btnRaw ${if (isDown) "DOWN" else "UP"} — raw line: $line")
+                    }
                 }
             }
         }
@@ -466,8 +479,22 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
                     return ((raw - min) / span).coerceIn(0f, 1f)
                 }
             }
-            // Fallback: most common convention for triggers on generic HID gamepads.
-            return (raw / 255f).coerceIn(0f, 1f)
+            // Fallback: when the axis range wasn't detected (e.g. detectGamepadDevice failed
+            // to parse getevent -lp output, or the controller uses a non-standard axis),
+            // pick the most likely max based on the raw value's magnitude. Common trigger
+            // ranges: 0..255 (8-bit HID), 0..1023 (10-bit), 0..4095 (12-bit), 0..32767 (15-bit).
+            // The old fallback hardcoded /255f — which on a 0..1023 trigger always returned
+            // 1.0 (clamped) from the very first sample, making the trigger permanently
+            // "pressed" and freezing all subsequent LT/RT input. The heuristic below at least
+            // gives a sane fraction for partial presses on wider ranges, and full presses
+            // still reach 1.0 on every range.
+            val maxGuess = when {
+                raw > 4095 -> 32767f
+                raw > 1023 -> 4095f
+                raw > 255 -> 1023f
+                else -> 255f
+            }
+            return (raw.toFloat() / maxGuess).coerceIn(0f, 1f)
         }
     }
 
@@ -492,6 +519,11 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
             evdevName.contains("BTN_START") -> "START"
             evdevName.contains("BTN_SELECT") -> "SELECT"
             evdevName.contains("BTN_MODE") -> "HOME"
+            // FIX: some generic Bluetooth gamepads use non-standard BTN_LT/BTN_RT aliases
+            // for digital triggers (instead of the standard BTN_TL2/BTN_TR2). Map them too
+            // so LT/RT work without needing to extend the diagnostic log + manual fix.
+            evdevName == "BTN_LT" -> "LT"
+            evdevName == "BTN_RT" -> "RT"
             // FIX: fallback for controllers that send D-pad as discrete keys instead of
             // ABS_HAT0X/Y (handled separately in handleAbsEvent). Rare but seen on some
             // generic/cheap HID gamepads.

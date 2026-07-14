@@ -248,15 +248,18 @@ class NativeGamepadMapper(private val context: Context) {
             return
         }
 
-        smoothBuffer[smoothOffset] = alpha * rawX + (1 - alpha) * smoothBuffer[smoothOffset]
-        smoothBuffer[smoothOffset + 1] = alpha * rawY + (1 - alpha) * smoothBuffer[smoothOffset + 1]
-
-        val sx = smoothBuffer[smoothOffset]
-        val sy = smoothBuffer[smoothOffset + 1]
-        val rawMag = sqrt(sx * sx + sy * sy)
         val deadzone = mapping.optDouble("deadzone", 0.12).toFloat()
 
-        if (rawMag <= deadzone) {
+        // FIX (root cause of "analog nyangkut ke bawah"): deadzone check previously ran on
+        // the SMOOTHED magnitude. When the stick was released (raw → 0), the smoothed value
+        // decayed exponentially over several frames before dropping below deadzone — during
+        // that decay the touch position kept drifting toward center (visually "stuck moving
+        // downward" if the stick had been pushed up). Checking deadzone on the RAW input
+        // makes release immediate: the moment the physical stick returns inside the deadzone
+        // circle, touchUp fires and the smoothing buffer is reset to zero. Smoothing is now
+        // only applied to non-deadzone input, so it never creates release lag.
+        val rawInputMag = sqrt(rawX * rawX + rawY * rawY)
+        if (rawInputMag <= deadzone) {
             if (pointer.isActive) {
                 val pid = pointer.id
                 dispatchTouchCall {
@@ -268,6 +271,15 @@ class NativeGamepadMapper(private val context: Context) {
             smoothBuffer[smoothOffset + 1] = 0f
             return
         }
+
+        // Apply smoothing only for non-deadzone input — keeps movement smooth without
+        // delaying release.
+        smoothBuffer[smoothOffset] = alpha * rawX + (1 - alpha) * smoothBuffer[smoothOffset]
+        smoothBuffer[smoothOffset + 1] = alpha * rawY + (1 - alpha) * smoothBuffer[smoothOffset + 1]
+
+        val sx = smoothBuffer[smoothOffset]
+        val sy = smoothBuffer[smoothOffset + 1]
+        val rawMag = sqrt(sx * sx + sy * sy)
 
         val (dzX, dzY) = applyRadialDeadzone(sx, sy, deadzone)
         val rescaledMag = sqrt(dzX * dzX + dzY * dzY).coerceIn(0f, 1f)
@@ -354,7 +366,7 @@ class NativeGamepadMapper(private val context: Context) {
     fun handleAxes(gamepadIndex: Int, lx: Float, ly: Float, rx: Float, ry: Float, l2: Float, r2: Float) {
         synchronized(syncLock) {
             if (gamepadIndex !in 0..3) return
-            val ts = TouchInjectionPlugin.touchService ?: return
+            if (TouchInjectionPlugin.touchService == null) return
 
             val offset = (gamepadIndex % 4) * 16
             val lMap = findButtonMapping("L_STICK")
@@ -400,7 +412,11 @@ class NativeGamepadMapper(private val context: Context) {
         synchronized(syncLock) {
             if (gamepadIndex !in 0..3) return
             val offset = gamepadIndex * 16
-            val ts = TouchInjectionPlugin.touchService ?: return
+            // Guard: bail out early if the Shizuku touch service isn't bound. All actual
+            // touch calls below go through dispatchTouchCall, which reads
+            // TouchInjectionPlugin.touchService directly (not this local), so we only need
+            // the null check here — no need to keep a reference.
+            if (TouchInjectionPlugin.touchService == null) return
 
             val wasDown = lastState[buttonName + gamepadIndex] ?: false
             lastState[buttonName + gamepadIndex] = isDown
@@ -421,46 +437,34 @@ class NativeGamepadMapper(private val context: Context) {
                     if (p != null) {
                         p.isActive = false
                         p.virtualKey = null
-                        try { ts.touchUp(p.id) } catch (e: Exception) { logInjectFailure("touchUp", p.id, e) }
+                        val pid = p.id
+                        // FIX: async dispatch — previously synchronous ts.touchUp blocked
+                        // the decision thread (same thread that processes axis events),
+                        // causing "analog berhenti saat dikombo dengan tombol lain".
+                        dispatchTouchCall {
+                            try { TouchInjectionPlugin.touchService?.touchUp(pid) } catch (e: Exception) { logInjectFailure("touchUp", pid, e) }
+                        }
                     }
                 }
                 return
             }
 
-            val antiBanEnabled = mapping.optBoolean("antiBanEnabled", false)
-            val (x, y) = getScreenCoords(mapping.getDouble("x"), mapping.getDouble("y"))
-            val (ox, oy) = getAntiBanOffset(antiBanEnabled)
-
-            if (isDown && !wasDown) {
-                val tapDuration = mapping.optLong("tapDuration", 0L)
-                if (tapDuration > 0) {
-                    try { ts.injectTap(x + ox, y + oy, tapDuration) } catch (e: Exception) {
-                        Log.w(TAG, "injectTap failed: ${e.message}")
-                    }
-                    return
-                }
-
-                val p = (offset..offset + 15).mapNotNull { pointersById[it] }
-                    .find { !it.isActive && it.type == "button" }
-
-                if (p != null) {
-                    p.isActive = true
-                    p.virtualKey = buttonName
-                    try { ts.touchDown(p.id, x + ox, y + oy) } catch (e: Exception) {
-                        p.isActive = false
-                        p.virtualKey = null
-                        logInjectFailure("touchDown", p.id, e)
-                    }
-                }
-            } else if (!isDown && wasDown) {
-                val p = (offset..offset + 15).mapNotNull { pointersById[it] }
-                    .find { it.isActive && it.virtualKey == buttonName }
-                if (p != null) {
-                    p.isActive = false
-                    p.virtualKey = null
-                    try { ts.touchUp(p.id) } catch (e: Exception) { logInjectFailure("touchUp", p.id, e) }
-                }
-            }
+            // FIX (root cause of "tombol A, LT, RT tidak menginjeksi sentuhan sama sekali"):
+            // The old code only honored `interactionType` (tap/turbo/toggle/charge/macro)
+            // for buttons that had a `trigger` object — buttons without a trigger always
+            // fell through to a hardcoded "hold" path (or, if tapDuration>0, a synchronous
+            // `ts.injectTap()` that internally used pointer ID 0 — the SAME pointer used by
+            // L_STICK — hijacking the analog stick's pointer and breaking both the tap AND
+            // the stick in one shot).
+            //
+            // The UI lets users set interactionType on ANY button without requiring a
+            // trigger, so the native side must honor it universally. Now every button
+            // dispatches through `dispatchInteraction`, which routes to handleTap /
+            // handleTurbo / handleToggle / handleCharge / handleMacro / handleHoldInteraction
+            // based on `interactionType`. All of those handlers already use `dispatchTouchCall`
+            // for async injection, so button presses no longer block the decision thread
+            // (fixing "analog berhenti saat dikombo dengan tombol lain").
+            dispatchInteraction(mapping, gamepadIndex, isDown, offset)
         }
     }
 

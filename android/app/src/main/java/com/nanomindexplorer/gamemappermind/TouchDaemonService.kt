@@ -153,9 +153,22 @@ class TouchDaemonService : ITouchService.Stub {
     }
 
     override fun injectTap(x: Float, y: Float, durationMs: Long): Boolean {
-        if (!touchDown(0, x, y)) return false
+        // FIX (root cause of "tombol A/LT/RT tidak inject" + "analog rusak saat tap"):
+        // Previously this used pointer ID 0 — the SAME pointer ID that NativeGamepadMapper
+        // allocates to the L_STICK analog stick (offset+0 for gamepad 0 = pointer 0).
+        // When injectTap fired while the left stick was active, touchDown(0,...) was
+        // interpreted by Android as a MOVE for the existing L_STICK pointer (moving it to
+        // the tap location), then Thread.sleep, then touchUp(0) released the L_STICK
+        // pointer entirely. Result: the tap didn't register as a new touch, AND the analog
+        // stick got hijacked/released.
+        //
+        // Pointer ID 50 is well outside the 0-15 per-gamepad allocation range
+        // (gamepad 0: 0-15, gamepad 1: 16-31, ..., gamepad 3: 48-63), so it can never
+        // collide with any analog or button pointer the mapper allocates.
+        val tapPointerId = 50
+        if (!touchDown(tapPointerId, x, y)) return false
         Thread.sleep(durationMs.coerceAtLeast(10))
-        return touchUp(0)
+        return touchUp(tapPointerId)
     }
 
     private fun injectSinglePointer(pointerId: Int, action: Int, x: Float, y: Float): Boolean {
@@ -182,64 +195,71 @@ class TouchDaemonService : ITouchService.Stub {
         pointerCoords: Array<MotionEvent.PointerCoords>
     ): Boolean {
 
-        if (activePath == "C") {
-            if (pointerCount == 1 && (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_UP)) {
-                return shellInputTap(pointerCoords[0].x, pointerCoords[0].y)
-            }
-            return false
-        }
+        // FIX (root cause of "analog nyangkut / touchMove return false"):
+        // Previously, once Path A failed and the code fell through to Path C (shell input),
+        // `activePath` was permanently set to "C". On every subsequent call, the code took
+        // the `if (activePath == "C")` short-circuit, which returns `false` for ACTION_MOVE
+        // (shell `input tap` only supports single-pointer DOWN/UP, not move). Once Path C
+        // was locked in, the analog stick was effectively dead — every touchMove returned
+        // false, the pointer's screen position never updated, and the stick appeared
+        // "stuck" at its last position.
+        //
+        // New behavior: Path C is only used as a one-shot fallback for DOWN/UP. It is NEVER
+        // cached as the active path. Every call tries A first, then B, then (only for
+        // DOWN/UP) shell. If A/B recover on a later call (transient failure), they're used
+        // again immediately — no permanent lock-in. The cost is one extra reflection probe
+        // per call when A is genuinely broken, which is negligible compared to breaking
+        // all analog movement permanently.
+
+        // Fast path: if we previously fell back to shell for DOWN/UP, still try A/B first
+        // for MOVE (shell can't do MOVE anyway). Only use shell for DOWN/UP when A/B fail.
 
         val eventTime = SystemClock.uptimeMillis()
         val downTime = if (baseDownTime == 0L) eventTime else baseDownTime
 
         val event = MotionEvent.obtain(
-            // FIX: root cause of every touchDown/shellInputTap failure, confirmed by the
-            // in-app toast "Test Tap GAGAL: pointerCount must be at least 1". The 4th
-            // positional argument to this MotionEvent.obtain() overload must be pointerCount
-            // — actionIndex was being passed there instead (always 0 from
-            // injectSinglePointer), so EVERY injection attempt asked Android to construct a
-            // MotionEvent with pointerCount=0, which is invalid and throws immediately. This
-            // explains why InputManager/injectMethod resolved fine via reflection (Path A/B
-            // setup was never the problem) but the actual invoke() always failed, and why
-            // Path C (shell `input tap`, which doesn't go through this code path at all)
-            // failed too for the unrelated reason of also never being reached correctly
-            // until Path A/B exhausted their retries with this same bug.
             downTime, eventTime, action, pointerCount,
             pointerProperties, pointerCoords,
             0, 0, 1f, 1f, -1, 0, currentInputSource, 0
         )
 
-        // Try Path A
-        if ((activePath == null || activePath == "A") && tryPathA(event)) {
-            if (activePath == null) {
-                activePath = "A"
-                Log.i(TAG, "Switched to injection Path A (IInputManager AIDL)")
+        try {
+            // Try Path A first
+            if (tryPathA(event)) {
+                if (activePath != "A") {
+                    activePath = "A"
+                    Log.i(TAG, "Using Path A (IInputManager AIDL)")
+                }
+                pathFailCount.set(0)
+                return true
             }
-            pathFailCount.set(0)
-            event.recycle()
-            return true
-        }
 
-        // Try Path B
-        if ((activePath == null || activePath == "B") && tryPathB(event)) {
-            if (activePath == null) {
-                activePath = "B"
-                Log.i(TAG, "Switched to injection Path B (InputManager Reflection)")
+            // Try Path B
+            if (tryPathB(event)) {
+                if (activePath != "B") {
+                    activePath = "B"
+                    Log.i(TAG, "Using Path B (InputManager Reflection)")
+                }
+                pathFailCount.set(0)
+                return true
             }
-            pathFailCount.set(0)
+        } finally {
             event.recycle()
-            return true
         }
 
-        event.recycle()
-
-        // Fallback to Path C
-        Log.w(TAG, "Falling back to Path C (shell input)")
-        val success = shellInputTap(pointerCoords[0].x, pointerCoords[0].y)
-        if (success) {
-            activePath = "C"
+        // Both A and B failed. Fall back to shell input — but ONLY for single-pointer
+        // DOWN/UP (shell `input tap` cannot do MOVE or multi-pointer).
+        // CRITICAL: do NOT cache activePath = "C" here. Next call will retry A/B first,
+        // so a transient A/B failure doesn't permanently kill analog movement.
+        if (pointerCount == 1 && (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_UP)) {
+            Log.w(TAG, "Paths A and B failed — falling back to shell input for this call only")
+            val success = shellInputTap(pointerCoords[0].x, pointerCoords[0].y)
+            // Do NOT set activePath = "C" — we want A/B to be retried on the next call
+            return success
         }
-        return success
+
+        Log.w(TAG, "All injection paths failed for action=$action pointerCount=$pointerCount (MOVE on shell fallback is unsupported)")
+        return false
     }
 
     private fun tryPathA(event: MotionEvent): Boolean {
@@ -393,11 +413,18 @@ class TouchDaemonService : ITouchService.Stub {
         // always null here regardless. Self-contained instead: actually exercise the real
         // Path A/B/C injection machinery with a short real tap and report what happened.
         return try {
+            // After the fix, activePath is only ever "A", "B", or null (never "C" — C is
+            // now a one-shot fallback that doesn't cache). So "used shell fallback" is
+            // inferred from activePath being null AFTER the call + success.
             val success = injectTap(x, y, 80L)
-            val usedShellFallback = activePath == "C"
+            val pathAfter = activePath
+            // Shell fallback was used if path stayed null (A/B both failed) but the call
+            // still succeeded (shell tap worked).
+            val usedShellFallback = success && pathAfter == null
+            val effectivePath = pathAfter ?: if (usedShellFallback) "C" else "none"
             val json = org.json.JSONObject()
             json.put("success", success)
-            json.put("path", activePath ?: "none")
+            json.put("path", effectivePath)
             json.put("failCount", pathFailCount.get())
             // FIX 2: JS side (ShizukuPanel.tsx, OnboardingWizard.tsx) expects these exact
             // field names — an earlier version only had success/path/failCount, so those
@@ -405,10 +432,10 @@ class TouchDaemonService : ITouchService.Stub {
             json.put("inputManager_null", inputManagerInstance == null)
             json.put("injectMethod_null", pathA_injectMethod == null)
             json.put("touchDown_result", success)
-            json.put("shellInputTap_result", usedShellFallback && success)
+            json.put("shellInputTap_result", usedShellFallback)
             json.put("useShellFallback", usedShellFallback)
             if (success) {
-                json.put("recommendation", "Injection OK via Path ${activePath ?: "?"}")
+                json.put("recommendation", "Injection OK via Path $effectivePath")
             } else {
                 json.put("error", "Test tap failed on Path A, B, and C")
                 // FIX: surface the actual captured exception/exit-code instead of leaving the

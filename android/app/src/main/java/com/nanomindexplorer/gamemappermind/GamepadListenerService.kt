@@ -317,6 +317,16 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
         private var r2Trigger = 0f
         private var hasAxisChange = false
 
+        // FIX (bug report: "[GAMEPAD] A DOWN" repeated 7x in a row with no UP in between):
+        // getevent -l reports raw evdev EV_KEY values, and held keys commonly generate
+        // periodic value=2 (repeat) events in addition to the initial value=1 (press). This
+        // listener previously treated every DOWN-labeled line as a fresh event and forwarded
+        // it straight to both the injection pipeline AND the on-screen log — so a single
+        // physical hold could look like (and in NativeGamepadMapper's case, redundantly
+        // re-process) many separate presses. Track last-known state per raw button name here
+        // and only forward genuine transitions.
+        private val lastKeyState = mutableMapOf<String, Boolean>()
+
         override fun onOutputLine(line: String?) {
             if (!isListening || line == null) return
 
@@ -358,6 +368,13 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
                 val btnName = mapEvdevToButton(btnRaw)
 
                 if (btnName != "UNKNOWN") {
+                    // FIX: only forward genuine press/release transitions — see lastKeyState
+                    // comment above. Keyed by the RAW evdev name (not the mapped btnName) so
+                    // this can't mask two different physical buttons that happen to map to
+                    // the same logical name.
+                    if (lastKeyState[btnRaw] == isDown) return
+                    lastKeyState[btnRaw] = isDown
+
                     GamepadJniPlugin.handleButtonBatched(0, btnName, isDown)
                     TouchInjectionPlugin.emitGamepadButton(btnName, if (isDown) 1 else 0, 1.0f)
                 }

@@ -425,6 +425,12 @@ class NativeGamepadMapper(private val context: Context) {
 
         val isActive = if (wasActive) value > releaseThreshold else value > pressThreshold
         if (isActive != wasActive) {
+            // FIX: Emit button event so canvas/UI can highlight LT/RT when pressed.
+            // Previously only emitGamepadAxis was called (axis data), so the WYSIWYG
+            // canvas never knew when triggers were "pressed" — only analog stick
+            // movement was visible. Now emit a button event with value 1 (pressed)
+            // or 0 (released) so the canvas lights up, same as A/B/X/Y buttons.
+            TouchInjectionPlugin.emitGamepadButton(triggerName, if (isActive) 1 else 0, value)
             handleButton(gamepadIndex, triggerName, isActive)
         }
     }

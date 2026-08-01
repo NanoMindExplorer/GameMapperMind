@@ -415,8 +415,8 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
                         else { r2Trigger = normalizeTrigger(axisType, rawVal) }
                         hasAxisChange = true
                     }
-                    "ABS_GAS" -> { l2Trigger = normalizeTrigger(axisType, rawVal); hasAxisChange = true }
-                    "ABS_BRAKE" -> { r2Trigger = normalizeTrigger(axisType, rawVal); hasAxisChange = true }
+                    "ABS_GAS" -> { r2Trigger = normalizeTrigger(axisType, rawVal); hasAxisChange = true }
+                    "ABS_BRAKE" -> { l2Trigger = normalizeTrigger(axisType, rawVal); hasAxisChange = true }
                     // FIX: D-pad on most controllers reports as ABS_HAT0X/ABS_HAT0Y (-1/0/1), not
                     // as BTN_DPAD_* keys. This was previously unhandled here entirely — harmless
                     // while testing on the main app screen (GamepadPlugin's onGenericMotionEvent

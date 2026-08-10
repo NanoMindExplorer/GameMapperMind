@@ -9,6 +9,38 @@
 
 Aplikasi pemetaan gamepad (Keymapper) untuk menghubungkan kontroler fisik dengan layar sentuh Android. Mendukung multi-touch injection yang benar (analog + tombol bersamaan tanpa gangguan), 6 interaction types, dan 3-path injection dengan failover otomatis.
 
+## Download
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <a href="https://appgallery.cloud.huawei.com/ag/n/app/C118378059?locale=in_ID&source=appshare&subsource=C118378059&shareTo=com.android.bluetooth&shareFrom=appmarket&shareIds=571bc7ac8d1245e4a2aacf86b8da6004_com.android.bluetooth&callType=SHARE" target="_blank">
+        <img src="https://img.shields.io/badge/Huawei_AppGallery-Download-red?style=for-the-badge&logo=huawei&logoColor=white" alt="Download from Huawei AppGallery"/>
+        <br>
+        <sub>Install langsung dari AppGallery</sub>
+      </a>
+    </td>
+    <td align="center" width="50%">
+      <a href="https://github.com/NanoMindExplorer/GameMapperMind/releases/tag/v2.1.4" target="_blank">
+        <img src="https://img.shields.io/badge/GitHub_Release-APK-black?style=for-the-badge&logo=github&logoColor=white" alt="Download from GitHub Releases"/>
+        <br>
+        <sub>Download APK (v2.1.4)</sub>
+      </a>
+    </td>
+  </tr>
+</table>
+
+### Latest Release: v2.1.4
+
+**Download:**
+- `app-release.apk` — Production build (signed, optimized, ~2 MB)
+- `app-debug.apk` — Debug build (for testing, ~10 MB)
+
+**Requirements:**
+- Android 12+ (API 31)
+- Shizuku v13+ ([download here](https://shizuku.rikka.app/))
+- Gamepad Bluetooth/USB
+
 ## Game Test Demo
 
 <a href="https://youtu.be/OtdO_hg2ZdI" target="_blank">

@@ -30,7 +30,7 @@
     "@capacitor/screen-orientation": "^6.0.2",
     "@fontsource-variable/geist": "^5.2.9",
     "cors": "^2.8.5",
-    "express": "^4.21.2",
+    "express": "^5.2.1",
     "express-rate-limit": "^8.5.2",
     "lucide-react": "^0.546.0",
     "react": "^19.0.1",

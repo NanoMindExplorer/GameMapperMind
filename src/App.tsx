@@ -337,9 +337,13 @@ export default function App() {
   }, []);
 
   const activeProfile = profiles.find(p => p.id === activeProfileId) || profiles[0];
+  const profileWithMacros = React.useMemo(() => {
+    if (!activeProfile) return null;
+    return { ...activeProfile, macros };
+  }, [activeProfile, macros]);
 
   useGamepadLoop(
-    activeProfile,
+    profileWithMacros,
     shizukuState.status === 'CONNECTED_SHIZUKU' || shizukuState.status === 'CONNECTED_ADB',
     overlayActive
   );

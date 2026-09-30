@@ -19,17 +19,31 @@ export const DEFAULT_DEADZONE = 0.15;
  *   5. BUG-M12 FIX: Clamp final output to [-1, 1] in case input magnitude > 1
  *      (some gamepads report values slightly above 1.0 due to calibration drift).
  */
-export function radialDeadzone(x: number, y: number, deadzone = DEFAULT_DEADZONE) {
+export interface RadialDeadzoneOptions {
+    wasActive?: boolean;
+    hysteresisFactor?: number;
+}
+
+export function radialDeadzone(
+    x: number,
+    y: number,
+    deadzone = DEFAULT_DEADZONE,
+    options?: RadialDeadzoneOptions
+) {
     const magnitude = Math.sqrt(x * x + y * y);
-    if (magnitude <= deadzone) {
+    const effectiveDeadzone = options?.wasActive
+        ? deadzone * (options.hysteresisFactor ?? 0.88)
+        : deadzone;
+
+    if (magnitude <= effectiveDeadzone) {
         return { x: 0, y: 0 };
     }
     // BUG-M3 FIX: Guard against division by zero when deadzone = 1 (edge case).
-    const denom = 1 - deadzone;
+    const denom = 1 - effectiveDeadzone;
     if (denom <= 0) {
         return { x: 0, y: 0 };
     }
-    let scale = (magnitude - deadzone) / denom;
+    let scale = (magnitude - effectiveDeadzone) / denom;
     // BUG-M12 FIX: Clamp scale to [0, 1] — magnitude can exceed 1 on some gamepads.
     if (scale > 1) scale = 1;
     if (scale < 0) scale = 0;
@@ -38,3 +52,4 @@ export function radialDeadzone(x: number, y: number, deadzone = DEFAULT_DEADZONE
         y: (y / magnitude) * scale
     };
 }
+

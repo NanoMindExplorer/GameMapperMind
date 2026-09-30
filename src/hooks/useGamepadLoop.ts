@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import TouchInjection from '../plugins/TouchInjection';
 import { GamepadProfile } from '../types';
+import { ProfileDebouncer } from '../utils/profileDebouncer';
 
 export function useGamepadLoop(mapProfile: GamepadProfile | null, connected: boolean, injectActive: boolean) {
   // BUG-N2/N3 FIX: Use refs for all values accessed inside closures (listeners, callbacks).
@@ -8,8 +9,7 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, connected: boo
   // deps only runs once. Without refs, listeners always see initial values.
   const mapProfileRef = useRef(mapProfile);
   const injectActiveRef = useRef(injectActive);
-  const prevInjectActiveRef = useRef(injectActive);
-  const lastProfileUpdateRef = useRef(0);
+  const debouncerRef = useRef<ProfileDebouncer | null>(null);
 
   useEffect(() => { mapProfileRef.current = mapProfile; }, [mapProfile]);
   useEffect(() => { injectActiveRef.current = injectActive; }, [injectActive]);
@@ -72,57 +72,56 @@ export function useGamepadLoop(mapProfile: GamepadProfile | null, connected: boo
     };
   }, []);
 
-  // Effect 2: Manage Shizuku bind + profile update.
-  // BUG-N3 FIX: Include injectActive in deps so ref updates correctly when it changes.
-  // Previously, injectActive was excluded from deps, so prevInjectActiveRef was never
-  // updated when injectActive changed — the "only injectActive changed" branch never
-  // triggered because the comparison always showed "not changed" (both stale).
-  //
-  // CACAT #2 FIX: Profile SELALU dikirim ke daemon saat connected=true, terlepas dari
-  // injectActive (overlay on/off). Sebelumnya, profile dikirim sebagai "{}" saat
-  // injectActive=false (overlay off) — akibatnya buildMapCache di NativeGamepadMapper
-  // kosong, findButtonMapping selalu null, dan TIDAK ADA INJEKSI sama sekali.
-  //
-  // injectActive sekarang hanya mengontrol haptic feedback (di Effect 1 listener).
-  // Injection aktif selama Shizuku connected + profile loaded.
+  // Effect 2: Manage Shizuku service binding & listener (isolated from rapid profile drag updates).
+  // Decoupled so that dragging a button doesn't redundantly call bindService/startGamepadListener.
   useEffect(() => {
     let isCleanedUp = false;
-
-    const setupShizuku = async () => {
-      if (!mapProfile) return;
-      try {
-        if (connected) {
+    const initService = async () => {
+      if (connected) {
+        try {
           await TouchInjection.bindService().catch(() => {});
           if (isCleanedUp) return;
           await TouchInjection.startGamepadListener().catch(() => {});
-          if (isCleanedUp) return;
+        } catch (err) {
+          console.error("Failed to connect Shizuku service", err);
         }
-        
-        // PERFORMANCE FIX: Debounce profile updates (max 1 update per 500ms)
-        // When user drags button in canvas, many profile updates fire rapidly.
-        // Sending each one to native causes binder churn. Instead, batch them.
-        const now = Date.now();
-        if (now - lastProfileUpdateRef.current >= 500) {
-          const profileStr = JSON.stringify(mapProfile);
-          await TouchInjection.updateActiveProfile({ profileJson: profileStr });
-          lastProfileUpdateRef.current = now;
-        }
-      } catch (err) {
-        console.error("Failed to setup Shizuku gamepad listener", err);
       }
     };
-
-    setupShizuku();
-    prevInjectActiveRef.current = injectActive;
-
+    initService();
     return () => {
       isCleanedUp = true;
-      // BUG-FIX #3: Do NOT clear profile to "{}" on every effect re-run.
-      // Previously, cleanup cleared profile every time deps changed (mapProfile, connected, injectActive).
-      // This caused: (1) profile cleared when overlay toggled, (2) profile cleared when profile updated during drag.
-      // Result: buttonMapCache empty → findButtonMapping returns null → NO INJECTION.
-      // Fix: Only clear profile on actual unmount (all deps undefined), not on re-runs.
-      // Profile will be re-sent by the next setupShizuku() call if needed.
     };
-  }, [mapProfile, connected, injectActive]);
+  }, [connected]);
+
+  // Effect 3: Instantiate ProfileDebouncer instance with trailing-edge guarantee.
+  useEffect(() => {
+    const debouncer = new ProfileDebouncer({
+      debounceDelayMs: 250,
+      maxWaitMs: 600,
+      onSync: async (profileJson: string) => {
+        await TouchInjection.updateActiveProfile({ profileJson });
+      }
+    });
+    debouncerRef.current = debouncer;
+
+    return () => {
+      debouncer.dispose();
+      debouncerRef.current = null;
+    };
+  }, []);
+
+  // Effect 4: Ingest profile changes into Trailing-Edge Debouncer.
+  // Throttles rapid drag events to avoid IPC Binder churn while GUARANTEEING that the
+  // final resting coordinate/state is delivered to the native layer when dragging finishes.
+  useEffect(() => {
+    if (!mapProfile || !debouncerRef.current) return;
+    debouncerRef.current.update(mapProfile);
+  }, [mapProfile]);
+
+  // Effect 5: When connected state transitions to true, force immediate sync of active profile.
+  useEffect(() => {
+    if (connected && mapProfile && debouncerRef.current) {
+      debouncerRef.current.update(mapProfile, { forceImmediate: true });
+    }
+  }, [connected]);
 }

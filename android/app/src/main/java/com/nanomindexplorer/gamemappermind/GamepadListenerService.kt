@@ -540,6 +540,7 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
         Log.d("GameMapper", "GamepadListenerService: onDestroy")
         isRunning = false
         stopAllListeners()
+        NativeGamepadMapper.instance?.stopGyroListener()
 
         inputManager.unregisterInputDeviceListener(this)
 

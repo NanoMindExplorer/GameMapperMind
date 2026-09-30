@@ -156,16 +156,57 @@ class TouchDaemonService : ITouchService.Stub {
     //
     // This requires tracking ALL active pointers (their IDs, positions, and the gesture's
     // original downTime) and building each MotionEvent with the full pointer set.
-    private data class ActivePointer(val id: Int, @Volatile var x: Float, @Volatile var y: Float)
+    private class ActivePointer(var id: Int = 0, @Volatile var x: Float = 0f, @Volatile var y: Float = 0f)
     private val activePointers = java.util.concurrent.ConcurrentHashMap<Int, ActivePointer>()
     private val pointersLock = Any()
+
+    // ==================== OBJECT & ARRAY POOLING (PERFORMANCE) ====================
+    // Pre-allocated array pools to eliminate Garbage Collection (GC) pressure in the
+    // 60-120Hz hot path (analog stick move & simultaneous button multi-touch).
+    private val MAX_POOLED_POINTERS = 16
+
+    // Pre-allocated snapshot buffer to sort active pointers in-place without ArrayList allocations
+    private val activePointersSnapshot = Array(MAX_POOLED_POINTERS) { ActivePointer() }
+
+    // Master instances of PointerProperties and PointerCoords
+    private val pooledProperties = Array(MAX_POOLED_POINTERS) { i ->
+        MotionEvent.PointerProperties().apply {
+            id = i
+            toolType = MotionEvent.TOOL_TYPE_FINGER
+        }
+    }
+
+    private val pooledCoords = Array(MAX_POOLED_POINTERS) {
+        MotionEvent.PointerCoords().apply {
+            pressure = 1f
+            size = 1f
+        }
+    }
+
+    // Pre-sliced array pools indexed by pointerCount (1..MAX_POOLED_POINTERS).
+    // Eliminates array allocation on every obtain() call while guaranteeing array.length == pointerCount.
+    private val propertiesPool: Array<Array<MotionEvent.PointerProperties>> = Array(MAX_POOLED_POINTERS + 1) { count ->
+        if (count == 0) emptyArray()
+        else Array(count) { i -> pooledProperties[i] }
+    }
+
+    private val coordsPool: Array<Array<MotionEvent.PointerCoords>> = Array(MAX_POOLED_POINTERS + 1) { count ->
+        if (count == 0) emptyArray()
+        else Array(count) { i -> pooledCoords[i] }
+    }
 
     @Volatile private var gestureDownTime: Long = 0L
 
     override fun touchDown(pointerId: Int, x: Float, y: Float): Boolean {
         val now = SystemClock.uptimeMillis()
         synchronized(pointersLock) {
-            activePointers[pointerId] = ActivePointer(pointerId, x, y)
+            val existing = activePointers[pointerId]
+            if (existing != null) {
+                existing.x = x
+                existing.y = y
+            } else {
+                activePointers[pointerId] = ActivePointer(pointerId, x, y)
+            }
             if (activePointers.size == 1) {
                 // First pointer — starts a new gesture, records the gesture downTime
                 gestureDownTime = now
@@ -193,10 +234,6 @@ class TouchDaemonService : ITouchService.Stub {
             Log.w(TAG, "touchUp called for inactive pointer $pointerId")
             return false
         }
-        val isLastPointer: Boolean
-        synchronized(pointersLock) {
-            isLastPointer = activePointers.size <= 1
-        }
         val result = injectMultiPointerEvent(pointerId, MotionEvent.ACTION_UP, gestureDownTime)
         synchronized(pointersLock) {
             activePointers.remove(pointerId)
@@ -219,7 +256,9 @@ class TouchDaemonService : ITouchService.Stub {
     /**
      * Build and inject a MotionEvent with the CORRECT multi-pointer semantics.
      *
+     * - Uses pre-allocated array pools to avoid GC pressure on high-frequency stick moves
      * - Gathers ALL currently-active pointers (not just the one being acted upon)
+     * - In-place insertion sort by id with zero allocations
      * - Determines the correct action code:
      *     ACTION_DOWN / ACTION_UP for first/last pointer
      *     ACTION_POINTER_DOWN / ACTION_POINTER_UP for intermediate pointers
@@ -228,59 +267,116 @@ class TouchDaemonService : ITouchService.Stub {
      * - Uses the gesture's original downTime (from the first pointer's DOWN) for consistency
      */
     private fun injectMultiPointerEvent(pointerId: Int, action: Int, downTime: Long): Boolean {
-        // Snapshot all active pointers under lock to ensure consistency
-        val allPointers: List<ActivePointer>
+        val event: MotionEvent
+        val pointerCount: Int
+        val fallbackCoordsX: Float
+        val fallbackCoordsY: Float
+        val fallbackAction: Int
+
         synchronized(pointersLock) {
-            allPointers = activePointers.values.sortedBy { it.id }
-        }
-        val pointerCount = allPointers.size
-        if (pointerCount == 0) return false
+            val totalActive = activePointers.size
+            if (totalActive == 0) return false
 
-        val actionIndex = allPointers.indexOfFirst { it.id == pointerId }
-        if (actionIndex < 0) {
-            Log.w(TAG, "injectMultiPointerEvent: pointer $pointerId not in active set")
-            return false
-        }
-
-        // Build the correct action code
-        val finalAction = when (action) {
-            MotionEvent.ACTION_DOWN -> {
-                if (pointerCount == 1) MotionEvent.ACTION_DOWN
-                else MotionEvent.ACTION_POINTER_DOWN or (actionIndex shl MotionEvent.ACTION_POINTER_INDEX_SHIFT)
+            // Populate snapshot buffer from active pointers
+            var count = 0
+            for (ap in activePointers.values) {
+                if (count < MAX_POOLED_POINTERS) {
+                    val snap = activePointersSnapshot[count]
+                    snap.id = ap.id
+                    snap.x = ap.x
+                    snap.y = ap.y
+                    count++
+                }
             }
-            MotionEvent.ACTION_UP -> {
-                if (pointerCount == 1) MotionEvent.ACTION_UP
-                else MotionEvent.ACTION_POINTER_UP or (actionIndex shl MotionEvent.ACTION_POINTER_INDEX_SHIFT)
-            }
-            else -> MotionEvent.ACTION_MOVE
-        }
+            pointerCount = count
+            if (pointerCount == 0) return false
 
-        // Build properties and coords for ALL active pointers
-        val properties = Array(pointerCount) { i ->
-            MotionEvent.PointerProperties().apply {
-                this.id = allPointers[i].id
-                toolType = MotionEvent.TOOL_TYPE_FINGER
+            // In-place primitive insertion sort by id (fastest sort for n <= 16, zero object allocation)
+            for (i in 1 until pointerCount) {
+                val keyId = activePointersSnapshot[i].id
+                val keyX = activePointersSnapshot[i].x
+                val keyY = activePointersSnapshot[i].y
+                var j = i - 1
+                while (j >= 0 && activePointersSnapshot[j].id > keyId) {
+                    activePointersSnapshot[j + 1].id = activePointersSnapshot[j].id
+                    activePointersSnapshot[j + 1].x = activePointersSnapshot[j].x
+                    activePointersSnapshot[j + 1].y = activePointersSnapshot[j].y
+                    j--
+                }
+                activePointersSnapshot[j + 1].id = keyId
+                activePointersSnapshot[j + 1].x = keyX
+                activePointersSnapshot[j + 1].y = keyY
             }
-        }
 
-        val coords = Array(pointerCount) { i ->
-            MotionEvent.PointerCoords().apply {
-                this.x = allPointers[i].x
-                this.y = allPointers[i].y
+            var actionIndex = -1
+            for (i in 0 until pointerCount) {
+                if (activePointersSnapshot[i].id == pointerId) {
+                    actionIndex = i
+                    break
+                }
+            }
+
+            if (actionIndex < 0) {
+                Log.w(TAG, "injectMultiPointerEvent: pointer $pointerId not in active set")
+                return false
+            }
+
+            // Build the correct action code
+            val finalAction = when (action) {
+                MotionEvent.ACTION_DOWN -> {
+                    if (pointerCount == 1) MotionEvent.ACTION_DOWN
+                    else MotionEvent.ACTION_POINTER_DOWN or (actionIndex shl MotionEvent.ACTION_POINTER_INDEX_SHIFT)
+                }
+                MotionEvent.ACTION_UP -> {
+                    if (pointerCount == 1) MotionEvent.ACTION_UP
+                    else MotionEvent.ACTION_POINTER_UP or (actionIndex shl MotionEvent.ACTION_POINTER_INDEX_SHIFT)
+                }
+                else -> MotionEvent.ACTION_MOVE
+            }
+
+            // Configure pooled properties and coords
+            for (i in 0 until pointerCount) {
+                val snap = activePointersSnapshot[i]
+                val prop = pooledProperties[i]
+                prop.id = snap.id
+                prop.toolType = MotionEvent.TOOL_TYPE_FINGER
+
+                val coord = pooledCoords[i]
+                coord.x = snap.x
+                coord.y = snap.y
                 // The pointer being released gets pressure=0
-                pressure = if ((finalAction == MotionEvent.ACTION_UP || finalAction == MotionEvent.ACTION_POINTER_UP) && i == actionIndex) 0f else 1f
-                size = 1f
+                coord.pressure = if ((finalAction == MotionEvent.ACTION_UP || finalAction == MotionEvent.ACTION_POINTER_UP) && i == actionIndex) 0f else 1f
+                coord.size = 1f
             }
+
+            val eventTime = SystemClock.uptimeMillis()
+
+            // Pre-allocated exact-sized array slices (zero-allocation)
+            val propsArray = if (pointerCount <= MAX_POOLED_POINTERS) {
+                propertiesPool[pointerCount]
+            } else {
+                Array(pointerCount) { i -> pooledProperties[i] }
+            }
+
+            val coordsArray = if (pointerCount <= MAX_POOLED_POINTERS) {
+                coordsPool[pointerCount]
+            } else {
+                Array(pointerCount) { i -> pooledCoords[i] }
+            }
+
+            val obtained = MotionEvent.obtain(
+                downTime, eventTime, finalAction, pointerCount,
+                propsArray, coordsArray,
+                0, 0, 1f, 1f, -1, 0, currentInputSource, 0
+            ) ?: return false
+
+            event = obtained
+            fallbackCoordsX = pooledCoords[0].x
+            fallbackCoordsY = pooledCoords[0].y
+            fallbackAction = finalAction
         }
 
-        val eventTime = SystemClock.uptimeMillis()
-
-        val event = MotionEvent.obtain(
-            downTime, eventTime, finalAction, pointerCount,
-            properties, coords,
-            0, 0, 1f, 1f, -1, 0, currentInputSource, 0
-        )
-
+        // Injection is performed outside synchronized block to avoid blocking concurrent Binder worker threads
         try {
             // Try Path A first
             if (tryPathA(event)) {
@@ -305,18 +401,13 @@ class TouchDaemonService : ITouchService.Stub {
             event.recycle()
         }
 
-        // Both A and B failed.
-        // FIX v3: do NOT fall back to shell `input tap` when there are OTHER active pointers.
-        // Shell `input tap` injects a single-pointer DOWN+UP on pointer 0, which would
-        // hijack/cancel any existing multi-touch session (e.g., the L_STICK being held).
-        // Only use shell fallback when this is the ONLY active pointer (pointerCount == 1
-        // at the time of the snapshot, meaning no other touches are in progress).
-        if (pointerCount == 1 && (finalAction == MotionEvent.ACTION_DOWN || finalAction == MotionEvent.ACTION_UP)) {
+        // Both A and B failed — one-shot shell fallback (single pointer only)
+        if (pointerCount == 1 && (fallbackAction == MotionEvent.ACTION_DOWN || fallbackAction == MotionEvent.ACTION_UP)) {
             Log.w(TAG, "Paths A and B failed — falling back to shell input (single-pointer only)")
-            return shellInputTap(coords[0].x, coords[0].y)
+            return shellInputTap(fallbackCoordsX, fallbackCoordsY)
         }
 
-        Log.w(TAG, "Injection failed: action=0x${finalAction.toString(16)} pointerCount=$pointerCount (multi-pointer shell fallback not supported — would hijack existing touches)")
+        Log.w(TAG, "Injection failed: action=0x${fallbackAction.toString(16)} pointerCount=$pointerCount (multi-pointer shell fallback not supported — would hijack existing touches)")
         return false
     }
 

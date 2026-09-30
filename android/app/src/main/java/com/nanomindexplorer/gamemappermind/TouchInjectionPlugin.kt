@@ -594,4 +594,51 @@ class TouchInjectionPlugin : Plugin() {
             call.reject("testInjection failed: ${e.message}")
         }
     }
+
+    @PluginMethod
+    fun triggerMacro(call: PluginCall) {
+        val macroId = call.getString("macroId")
+        if (macroId.isNullOrEmpty()) {
+            call.reject("macroId must be provided")
+            return
+        }
+        val mapper = NativeGamepadMapper.instance
+        if (mapper == null) {
+            call.reject("NativeGamepadMapper not initialized")
+            return
+        }
+        val mockMapping = org.json.JSONObject().apply {
+            put("id", macroId)
+            put("interactionType", "macro")
+            put("macroId", macroId)
+        }
+        mapper.handleMacroPublic(mockMapping, 0)
+        call.resolve()
+    }
+
+    @PluginMethod
+    fun startMacroRecording(call: PluginCall) {
+        val macroId = call.getString("macroId") ?: "macro_${System.currentTimeMillis()}"
+        NativeGamepadMapper.instance?.startMacroRecording(macroId)
+        call.resolve()
+    }
+
+    @PluginMethod
+    fun stopMacroRecording(call: PluginCall) {
+        val recorded = NativeGamepadMapper.instance?.stopMacroRecording()
+        val data = JSObject()
+        val array = com.getcapacitor.JSArray()
+        if (recorded != null) {
+            for (i in 0 until recorded.length()) {
+                val item = recorded.getJSONObject(i)
+                val jsItem = JSObject()
+                for (k in item.keys()) {
+                    jsItem.put(k, item.get(k))
+                }
+                array.put(jsItem)
+            }
+        }
+        data.put("actions", array)
+        call.resolve(data)
+    }
 }

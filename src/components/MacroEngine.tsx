@@ -8,6 +8,7 @@ import React from 'react';
 import { GamepadMacro, MacroAction } from '../types';
 import { Play, Square, RefreshCcw, Activity, Plus, FastForward, Check, Trash2, ArrowDownCircle, Info, Edit2 } from 'lucide-react';
 import { useShizuku } from '../hooks/useShizuku';
+import TouchInjection from '../plugins/TouchInjection';
 
 interface MacroEngineProps {
   macros: GamepadMacro[];
@@ -88,6 +89,17 @@ export default function MacroEngineComponent({ macros, onUpdateMacros, onLogMess
     isPlayingRef.current = true;
     onLogMessage(`Macro Engine: Initializing playback sequence [${selectedMacro.name}] at speed: ${playbackSpeed.toFixed(1)}x`);
 
+    // Attempt direct native background execution first (sub-millisecond AIDL injection)
+    try {
+      await TouchInjection.triggerMacro({ macroId: selectedMacro.id });
+      onLogMessage(`Macro Engine: Native AIDL pipeline dispatched [${selectedMacro.name}]. Dispatched ${selectedMacro.actions.length} coordinates.`);
+      setIsPlaying(false);
+      isPlayingRef.current = false;
+      return;
+    } catch (_err) {
+      // Fallback to web-based simulation loop when running in preview/browser mode
+    }
+
     // BUG-N5 FIX: Guard against playbackSpeed <= 0 to prevent division by zero.
     // If playbackSpeed is 0, nextDelay would be Infinity → setTimeout(Infinity) hangs forever.
     const effectiveSpeed = playbackSpeed > 0 ? playbackSpeed : 1.0;
@@ -162,11 +174,24 @@ export default function MacroEngineComponent({ macros, onUpdateMacros, onLogMess
     };
     onUpdateMacros([...macros, freshMacro]);
     setSelectedMacroId(freshMacro.id);
+    TouchInjection.startMacroRecording({ macroId: freshMacro.id }).catch(() => {});
     onLogMessage(`Macro Engine: Recorder armed. Interceptable ABS inputs will spool to sequence buffer.`);
   };
 
-  const stopRecordScenario = () => {
+  const stopRecordScenario = async () => {
     setIsRecording(false);
+    try {
+      const res = await TouchInjection.stopMacroRecording();
+      if (res && Array.isArray(res.actions) && res.actions.length > 0 && selectedMacroId) {
+        onUpdateMacros(macros.map(m => {
+          if (m.id === selectedMacroId) {
+            return { ...m, actions: [...m.actions, ...res.actions] };
+          }
+          return m;
+        }));
+        onLogMessage(`Macro Engine: Captured ${res.actions.length} hardware events into macro buffer.`);
+      }
+    } catch (_e) {}
     onLogMessage(`Macro Engine: Recording concluded. Stuffed biner stream into encrypted storage footprint.`);
   };
 

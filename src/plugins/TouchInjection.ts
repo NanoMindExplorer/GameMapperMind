@@ -22,6 +22,9 @@ export interface TouchInjectionPluginType {
   touchUp(options: { pointerId: number }): Promise<void>;
   injectTap(options: { x: number; y: number; duration?: number }): Promise<void>;
   testInjection(options: { x?: number; y?: number }): Promise<Record<string, any>>;
+  triggerMacro(options: { macroId: string }): Promise<void>;
+  startMacroRecording(options?: { macroId?: string }): Promise<void>;
+  stopMacroRecording(): Promise<{ actions: any[] }>;
 
   addListener(
     eventName: 'onGamepadButton', 

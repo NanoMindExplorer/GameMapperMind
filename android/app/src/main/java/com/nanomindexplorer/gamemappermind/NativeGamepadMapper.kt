@@ -196,6 +196,8 @@ class NativeGamepadMapper(private val context: Context) {
     private val activeGesturePointers = mutableMapOf<String, Int>()
 
     private val macroDefinitions = mutableMapOf<String, JSONObject>()
+    private val macroTriggerMap = mutableMapOf<String, MutableList<JSONObject>>()
+    private var lastRecordEventTime = 0L
 
     // Anti-snapback & stick release damping per pointer (64 slots)
     private val lastStickReleaseTime = LongArray(64)
@@ -437,6 +439,7 @@ class NativeGamepadMapper(private val context: Context) {
             }
 
             macroDefinitions.clear()
+            macroTriggerMap.clear()
             val macrosArray = root.optJSONArray("macros")
             if (macrosArray != null) {
                 for (mIdx in 0 until macrosArray.length()) {
@@ -444,6 +447,17 @@ class NativeGamepadMapper(private val context: Context) {
                     val mId = mObj.optString("id")
                     if (mId.isNotEmpty()) {
                         macroDefinitions[mId] = mObj
+                    }
+                    val triggerKey = mObj.optString("triggerKey", "").trim()
+                    if (triggerKey.isNotEmpty()) {
+                        val upKey = triggerKey.uppercase()
+                        macroTriggerMap.getOrPut(triggerKey) { mutableListOf() }.add(mObj)
+                        macroTriggerMap.getOrPut(upKey) { mutableListOf() }.add(mObj)
+                        if (!upKey.startsWith("BUTTON_")) {
+                            macroTriggerMap.getOrPut("BUTTON_$upKey") { mutableListOf() }.add(mObj)
+                        } else {
+                            macroTriggerMap.getOrPut(upKey.removePrefix("BUTTON_")) { mutableListOf() }.add(mObj)
+                        }
                     }
                 }
             }
@@ -810,6 +824,14 @@ class NativeGamepadMapper(private val context: Context) {
                 if (legacy?.optJSONObject("trigger") == null) {
                     lastState[buttonName + gamepadIndex] = wasDown
                 } else return
+            }
+
+            // Check standalone macros bound to physical gamepad buttons via triggerKey
+            val macroList = macroTriggerMap[buttonName]
+            if (macroList != null && isDown) {
+                for (mObj in macroList) {
+                    handleMacro(mObj, offset)
+                }
             }
 
             val mapping = findButtonMapping(buttonName)
@@ -1348,17 +1370,45 @@ class NativeGamepadMapper(private val context: Context) {
 
     // ==================== MACRO RECORDING (for UI) ====================
 
+    fun handleMacroPublic(mapping: JSONObject, offset: Int = 0) {
+        handleMacro(mapping, offset)
+    }
+
     fun startMacroRecording(macroId: String) {
         isRecordingMacro = true
         currentRecordingId = macroId
         recordedMacros[macroId] = mutableListOf()
+        lastRecordEventTime = android.os.SystemClock.uptimeMillis()
         Log.i(TAG, "Started recording macro: $macroId")
     }
 
-    fun stopMacroRecording() {
+    fun stopMacroRecording(): org.json.JSONArray {
         isRecordingMacro = false
+        val recId = currentRecordingId
         currentRecordingId = null
-        Log.i(TAG, "Stopped macro recording")
+        val list = if (recId != null) recordedMacros.remove(recId) else null
+        val arr = org.json.JSONArray()
+        list?.forEach { arr.put(it) }
+        Log.i(TAG, "Stopped macro recording: ${arr.length()} actions captured")
+        return arr
+    }
+
+    fun recordMacroAction(type: String, x: Double, y: Double, delayMs: Long = 33L, pointerId: Int = 1) {
+        val recId = currentRecordingId ?: return
+        if (!isRecordingMacro) return
+        val list = recordedMacros.getOrPut(recId) { mutableListOf() }
+        val now = android.os.SystemClock.uptimeMillis()
+        val elapsed = if (lastRecordEventTime > 0L) (now - lastRecordEventTime).coerceIn(16L, 5000L) else delayMs
+        lastRecordEventTime = now
+        val action = JSONObject().apply {
+            put("id", "act_${System.currentTimeMillis()}_${list.size}")
+            put("type", type)
+            put("x", x)
+            put("y", y)
+            put("delayMs", elapsed)
+            put("pointerId", pointerId)
+        }
+        list.add(action)
     }
 
     private fun applyCurve(x: Float, curveType: String?, curvePoints: org.json.JSONArray?): Float {

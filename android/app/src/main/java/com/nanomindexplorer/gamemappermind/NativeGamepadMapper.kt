@@ -90,6 +90,14 @@ class NativeGamepadMapper(private val context: Context) {
             }
         }
 
+        // Cancels any queued stick move for this pointer ID so that it doesn't execute
+        // after touchUp (e.g. when returning to deadzone or resetting pointers).
+        fun cancelPendingStickMove(pointerId: Int) {
+            synchronized(pendingMoveRunnables) {
+                pendingMoveRunnables.remove(pointerId)?.let { stickAidlHandler.removeCallbacks(it) }
+            }
+        }
+
         // Legacy entry point — keep for back-compat with existing callers. Routes to the
         // button queue by default (most existing call sites are button touchDown/touchUp).
         fun dispatchTouchCall(block: () -> Unit) {
@@ -102,6 +110,9 @@ class NativeGamepadMapper(private val context: Context) {
                     if (it.isActive) {
                         it.isActive = false
                         val pid = it.id
+                        if (it.type == "analog") {
+                            cancelPendingStickMove(pid)
+                        }
                         val handler = if (it.type == "analog") ::dispatchStickCall else ::dispatchButtonCall
                         handler {
                             try { TouchInjectionPlugin.touchService?.touchUp(pid) } catch (e: Exception) { instance?.logInjectFailure("touchUp", pid, e) }
@@ -323,6 +334,8 @@ class NativeGamepadMapper(private val context: Context) {
         if (rawInputMag <= deadzone) {
             if (pointer.isActive) {
                 val pid = pointer.id
+                // Cancel any pending coalesced move for this pointer before dispatching touchUp
+                cancelPendingStickMove(pid)
                 // FIX: analog pointer release goes on the stick queue (high priority).
                 dispatchStickCall {
                     try { TouchInjectionPlugin.touchService?.touchUp(pid) } catch (e: Exception) { logInjectFailure("touchUp", pid, e) }

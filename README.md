@@ -137,7 +137,7 @@ App uses 3-path injection with automatic failover and **never permanently locks*
 | **B** (fallback) | InputManager class via getSystemService + reflection | High | <1ms | Full (multi-pointer) |
 | **C** (last resort) | `input tap` shell command | Guaranteed | ~100ms | Single-tap only (does not fire when other pointers are active) |
 
-### Multi-Pointer MotionEvent (v3)
+### Multi-Pointer MotionEvent
 
 Touch injection uses **proper Android multi-touch semantics**:
 - First pointer DOWN: `ACTION_DOWN`, `pointerCount=1`
@@ -148,7 +148,7 @@ Touch injection uses **proper Android multi-touch semantics**:
 
 This ensures **analog stick and button presses can be active simultaneously without cancelling each other** — when `L_STICK` is active and button `A` is pressed, Android receives `ACTION_POINTER_DOWN` with both pointers, rather than a new `ACTION_DOWN` that interrupts the active stick session.
 
-### Dual AIDL Dispatch Thread (v2)
+### Dual AIDL Dispatch Thread
 
 Touch calls are dispatched to **two separate threads**:
 - **`stickAidlHandler`** (`Thread.MAX_PRIORITY`) — dedicated to analog `touchDown`/`touchMove`/`touchUp`. Includes **coalescing**: only the most recent `touchMove` per pointer is dispatched; older moves in the queue are dropped (caps latency at ~10ms regardless of `getevent` sampling rate).
@@ -183,8 +183,8 @@ Right stick auto-detect: if the controller does not expose `ABS_RX`/`ABS_RY`, th
 - **Gamepad not detected:** Ensure the gamepad is connected via Bluetooth/OTG and recognized by Android. Check the **"Sensor & Input Diagnostics"** tab. Inspect the on-screen log for `[GAMEPAD-DETECT] axes: ... | buttons: ...` showing detected axes and buttons.
 - **Specific button does not respond:** Check on-screen logs for `[GAMEPAD-KEY] Unmapped button BTN_XXX` — your controller uses a non-standard code. Report this in an Issue so we can add the mapping.
 - **Touch is unresponsive:** Run **"Test Injection"** in the Shizuku tab. The log will indicate which path is active (A/B/C) and show recommendations if any path is failing. Ensure `Injection OK via Path A` appears.
-- **Analog returns to center when a button is pressed:** Fixed in v3 — ensure the installed APK is v3 or newer (proper multi-pointer `MotionEvent`).
-- **Analog feels stuttery or sticks downwards:** Fixed in v1+v2 — radial deadzone checks on raw input + coalesced stick moves.
+- **Analog returns to center when a button is pressed:** Resolved with proper multi-pointer `MotionEvent` semantics. Make sure your app version is up-to-date.
+- **Analog feels stuttery or sticks downwards:** Resolved via radial deadzone on raw input plus stick movement coalescing.
 - **Shizuku stops after device reboot:** Shizuku service needs to be restarted via ADB on reboot for non-rooted devices.
 - **Analog stick does not move at all:** If the app falls back to Path C (shell fallback) while other pointers are active, analog will not work. Path C is strictly for single-pointer DOWN/UP. Ensure Path A or B is active (check `Using Path A` in logs).
 
@@ -202,26 +202,21 @@ A: Yes, all standard Android gamepad mappings are supported. Xbox Bluetooth LT/R
 A: Yes, supports up to 4 simultaneous controllers. Configure Player (1–4) settings on individual button nodes.
 
 **Q: Why can analog and buttons be active simultaneously without conflict?**
-A: v3 implements proper Android multi-touch `MotionEvent` semantics (`ACTION_POINTER_DOWN`/`ACTION_POINTER_UP` containing all active pointers in a single event). Previously, sending `ACTION_DOWN` with `pointerCount=1` would abort the active stick session.
+A: The engine uses proper Android multi-touch `MotionEvent` semantics (`ACTION_POINTER_DOWN`/`ACTION_POINTER_UP` containing all active pointers in a single event), preventing new `ACTION_DOWN` events from interrupting active stick gestures.
 
-## Changelog Summary
+## Changelog
 
-### v2.1.1 (2026-07-15) — Multi-Pointer + Gamepad Compatibility Fix
-- **v3**: Rewrite multi-pointer `MotionEvent` (`ACTION_POINTER_DOWN`/`ACTION_POINTER_UP` containing all active pointers) — fixes "analog snaps to center when button is pressed"
-- **v3**: `BTN_GAMEPAD → A` mapping (`BTN_GAMEPAD` = `BTN_A` = `0x130` in Linux kernel)
-- **v3**: Shell fallback (Path C) does not fire while other pointers are active (prevents hijacking)
-- **v2**: Per-pointer `downTime` tracking (`ConcurrentHashMap`) — fixes `ACTION_UP` rejection during multi-pointer events
-- **v2**: Dual AIDL dispatch threads (stick `MAX_PRIORITY` + button `NORM_PRIORITY`) + stick move coalescing
-- **v2**: Filter `BTN_GAMEPAD`/`BTN_JOYSTICK` meta events (NOTE: reverted in v3 because `BTN_GAMEPAD` = `BTN_A`)
-- **v1**: Async dispatch via `dispatchInteraction`, honors universal `interactionType`
-- **v1**: `injectTap` uses pointer ID 50 (instead of 0) — prevents conflict with `L_STICK`
-- **v1**: Deadzone check on raw input — fixes "analog sticking downwards"
-- **v1**: `injectMotionEvent` does not lock to Path C — always retries A → B → C
-- **v1**: `normalizeTrigger` heuristic fallback (255/1023/4095/32767)
-- **v1**: `handleKeyEvent` logs unknown button codes
-- **v1**: `mapEvdevToButton` adds `BTN_LT`/`BTN_RT` aliases
+Complete version history and detailed release notes are available in [CHANGELOG.md](CHANGELOG.md).
 
-See [CHANGELOG.md](CHANGELOG.md) for full history.
+<details>
+  <summary><b>Recent Highlights (v2.1.x)</b></summary>
+  <br>
+
+  - **Multi-Pointer MotionEvent**: Native multi-pointer event handling prevents analog stick interruption during simultaneous button actions.
+  - **Dual AIDL Dispatch**: Separate prioritized threads for stick (`MAX_PRIORITY` + coalescing) and buttons (`NORM_PRIORITY`) eliminate combo delay.
+  - **Universal Gamepad Support**: Kernel-level evdev code mapping (`BTN_GAMEPAD`, `BTN_TL2`/`TR2`, analog triggers) with automatic axis normalization.
+  - **Non-locking 3-Path Injection**: Continuous retry across AIDL, InputManager reflection, and shell fallback.
+</details>
 
 ## Contributing
 We welcome Pull Requests and open-source contributions.

@@ -72,4 +72,19 @@ export const GamepadProfileSchema = z.object({
   orientation: z.enum(['landscape', 'portrait', 'auto']).optional(),
   portraitButtons: z.array(VirtualButtonSchema).optional(),
   hapticIntensity: z.number().optional(),
+  macros: z.array(z.object({
+    id: z.string(),
+    name: z.string(),
+    actions: z.array(z.object({
+      id: z.string(),
+      type: z.enum(['touch_down', 'touch_move', 'touch_up', 'delay', 'tap']),
+      x: z.number().optional(),
+      y: z.number().optional(),
+      delayMs: z.number().optional(),
+      pointerId: z.number().optional(),
+    })),
+    triggerKey: z.string().optional(),
+    playbackSpeed: z.number().optional(),
+  })).optional(),
 });
+

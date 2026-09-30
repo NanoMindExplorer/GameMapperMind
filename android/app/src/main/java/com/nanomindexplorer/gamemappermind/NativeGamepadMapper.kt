@@ -73,6 +73,12 @@ class NativeGamepadMapper(private val context: Context) {
         // move latency at one Binder call regardless of how fast getevent fires.
         private val pendingMoveRunnables = mutableMapOf<Int, Runnable>()
 
+        // Generational epoch counter per pointer ID (64 pointers max: 4 gamepads * 16 pointers).
+        // Incremented on every cancelPendingStickMove() and touchUp().
+        // Guarantees that any in-flight or dequeued stick move runnable aborts immediately if its
+        // epoch does not match, completely preventing stale touchMove calls from executing after release.
+        private val stickEpochs = java.util.concurrent.atomic.AtomicLongArray(64)
+
         fun dispatchStickCall(block: () -> Unit) {
             stickAidlHandler.post(block)
         }
@@ -85,9 +91,14 @@ class NativeGamepadMapper(private val context: Context) {
         // this newer one. Guarantees the daemon only sees the most recent position per
         // pointer, eliminating the "stale moves piling up in the queue" delay.
         fun dispatchStickMove(pointerId: Int, block: () -> Unit) {
+            val epoch = if (pointerId in 0 until 64) stickEpochs.get(pointerId) else 0L
             synchronized(pendingMoveRunnables) {
                 pendingMoveRunnables[pointerId]?.let { stickAidlHandler.removeCallbacks(it) }
                 val runnable = Runnable {
+                    if (pointerId in 0 until 64 && stickEpochs.get(pointerId) != epoch) {
+                        synchronized(pendingMoveRunnables) { pendingMoveRunnables.remove(pointerId) }
+                        return@Runnable
+                    }
                     synchronized(pendingMoveRunnables) { pendingMoveRunnables.remove(pointerId) }
                     block()
                 }
@@ -99,6 +110,9 @@ class NativeGamepadMapper(private val context: Context) {
         // Cancels any queued stick move for this pointer ID so that it doesn't execute
         // after touchUp (e.g. when returning to deadzone or resetting pointers).
         fun cancelPendingStickMove(pointerId: Int) {
+            if (pointerId in 0 until 64) {
+                stickEpochs.incrementAndGet(pointerId)
+            }
             synchronized(pendingMoveRunnables) {
                 pendingMoveRunnables.remove(pointerId)?.let { stickAidlHandler.removeCallbacks(it) }
             }
@@ -113,6 +127,7 @@ class NativeGamepadMapper(private val context: Context) {
         fun resetAll() {
             synchronized(syncLock) {
                 instance?.stopGyroListener()
+                instance?.cancelAllActiveInteractions()
                 instance?.pointers?.forEach {
                     if (it.isActive) {
                         it.isActive = false
@@ -174,6 +189,61 @@ class NativeGamepadMapper(private val context: Context) {
     private val toggleState = mutableMapOf<String, Boolean>()
     private val chargeTimestamps = mutableMapOf<String, Long>()
     private val activeMacros = mutableMapOf<String, Runnable>()
+    private val activeMacroPointers = mutableMapOf<String, Int>()
+    private val activeSwipes = mutableMapOf<String, Runnable>()
+    private val activeSwipePointers = mutableMapOf<String, Int>()
+    private val activeGestures = mutableMapOf<String, Runnable>()
+    private val activeGesturePointers = mutableMapOf<String, Int>()
+
+    private val macroDefinitions = mutableMapOf<String, JSONObject>()
+
+    // Anti-snapback & stick release damping per pointer (64 slots)
+    private val lastStickReleaseTime = LongArray(64)
+    private val lastHighDeflection = BooleanArray(64)
+
+    fun cancelAllActiveInteractions() {
+        turboRunnables.values.forEach { mainHandler.removeCallbacks(it) }
+        turboRunnables.clear()
+
+        activeMacros.values.forEach { mainHandler.removeCallbacks(it) }
+        activeMacros.clear()
+        activeMacroPointers.values.forEach { pid ->
+            pointersById[pid]?.let {
+                it.isActive = false
+                it.virtualKey = null
+            }
+            dispatchButtonCall {
+                try { TouchInjectionPlugin.touchService?.touchUp(pid) } catch (_: Exception) {}
+            }
+        }
+        activeMacroPointers.clear()
+
+        activeSwipes.values.forEach { mainHandler.removeCallbacks(it) }
+        activeSwipes.clear()
+        activeSwipePointers.values.forEach { pid ->
+            pointersById[pid]?.let {
+                it.isActive = false
+                it.virtualKey = null
+            }
+            dispatchButtonCall {
+                try { TouchInjectionPlugin.touchService?.touchUp(pid) } catch (_: Exception) {}
+            }
+        }
+        activeSwipePointers.clear()
+
+        activeGestures.values.forEach { mainHandler.removeCallbacks(it) }
+        activeGestures.clear()
+        activeGesturePointers.values.forEach { pid ->
+            pointersById[pid]?.let {
+                it.isActive = false
+                it.virtualKey = null
+            }
+            dispatchButtonCall {
+                try { TouchInjectionPlugin.touchService?.touchUp(pid) } catch (_: Exception) {}
+            }
+        }
+        activeGesturePointers.clear()
+    }
 
     // Macro Recording
     private var isRecordingMacro = false
@@ -366,6 +436,18 @@ class NativeGamepadMapper(private val context: Context) {
                 stopGyroListener()
             }
 
+            macroDefinitions.clear()
+            val macrosArray = root.optJSONArray("macros")
+            if (macrosArray != null) {
+                for (mIdx in 0 until macrosArray.length()) {
+                    val mObj = macrosArray.optJSONObject(mIdx) ?: continue
+                    val mId = mObj.optString("id")
+                    if (mId.isNotEmpty()) {
+                        macroDefinitions[mId] = mObj
+                    }
+                }
+            }
+
             val buttons = root.optJSONArray("buttons") ?: return
 
             for (i in 0 until buttons.length()) {
@@ -508,9 +590,19 @@ class NativeGamepadMapper(private val context: Context) {
         // circle, touchUp fires and the smoothing buffer is reset to zero. Smoothing is now
         // only applied to non-deadzone input, so it never creates release lag.
         val rawInputMag = sqrt(rawX * rawX + rawY * rawY)
-        if (rawInputMag <= effectiveDeadzone) {
+        val pid = pointer.id
+
+        // Schmitt-trigger deadzone hysteresis:
+        // When active, require stick to fall below 88% of deadzone to disengage.
+        // Prevents rapid high-frequency flutter on the deadzone boundary due to potentiometer noise.
+        val releaseThreshold = if (pointer.isActive) {
+            (effectiveDeadzone * 0.88f).coerceAtLeast(0.005f)
+        } else {
+            effectiveDeadzone
+        }
+
+        if (rawInputMag <= releaseThreshold) {
             if (pointer.isActive) {
-                val pid = pointer.id
                 // Cancel any pending coalesced move for this pointer before dispatching touchUp
                 cancelPendingStickMove(pid)
                 // FIX: analog pointer release goes on the stick queue (high priority).
@@ -518,10 +610,26 @@ class NativeGamepadMapper(private val context: Context) {
                     try { TouchInjectionPlugin.touchService?.touchUp(pid) } catch (e: Exception) { logInjectFailure("touchUp", pid, e) }
                 }
                 pointer.isActive = false
+                if (pid in 0 until 64) {
+                    lastStickReleaseTime[pid] = android.os.SystemClock.uptimeMillis()
+                }
             }
             smoothBuffer[smoothOffset] = 0f
             smoothBuffer[smoothOffset + 1] = 0f
             return
+        }
+
+        // Anti-snapback filter: if stick was just released from high deflection (< 40ms ago),
+        // suppress mechanical spring bounce-back in the opposite quadrant.
+        if (!pointer.isActive && pid in 0 until 64) {
+            val elapsedSinceRelease = android.os.SystemClock.uptimeMillis() - lastStickReleaseTime[pid]
+            if (elapsedSinceRelease < 40L && rawInputMag < (effectiveDeadzone * 1.6f) && lastHighDeflection[pid]) {
+                lastHighDeflection[pid] = false
+                return
+            }
+        }
+        if (rawInputMag > 0.65f && pid in 0 until 64) {
+            lastHighDeflection[pid] = true
         }
 
         // Apply smoothing only for non-deadzone input — keeps movement smooth without
@@ -778,7 +886,9 @@ class NativeGamepadMapper(private val context: Context) {
             "turbo" -> handleTurbo(mapping, mapping.optString("id"), isDown, gamepadIndex)
             "toggle" -> handleToggle(mapping, mapping.optString("id"), isDown, offset)
             "charge" -> handleCharge(mapping, mapping.optString("id"), isDown, offset)
-            "macro" -> handleMacro(mapping, offset)
+            "swipe" -> if (isDown) handleSwipe(mapping, offset)
+            "gesture" -> if (isDown) handleGesture(mapping, offset)
+            "macro" -> if (isDown) handleMacro(mapping, offset)
             else -> handleHoldInteraction(mapping, isDown, offset)
         }
     }
@@ -929,62 +1039,311 @@ class NativeGamepadMapper(private val context: Context) {
         }
     }
 
-    // ==================== MACRO SYSTEM (Phase 4) ====================
+    // ==================== SWIPE & GESTURE SYSTEM ====================
+
+    private fun handleSwipe(mapping: JSONObject, offset: Int) {
+        val swipeId = mapping.optString("id", "")
+        if (swipeId.isEmpty()) return
+
+        activeSwipes[swipeId]?.let {
+            mainHandler.removeCallbacks(it)
+            activeSwipes.remove(swipeId)
+        }
+        activeSwipePointers.remove(swipeId)?.let { oldPid ->
+            pointersById[oldPid]?.let {
+                it.isActive = false
+                it.virtualKey = null
+            }
+            dispatchButtonCall {
+                try { TouchInjectionPlugin.touchService?.touchUp(oldPid) } catch (_: Exception) {}
+            }
+        }
+
+        val p = (offset + 2..offset + 15).mapNotNull { pointersById[it] }.find { !it.isActive } ?: return
+        p.isActive = true
+        p.virtualKey = "swipe_$swipeId"
+        val pid = p.id
+        activeSwipePointers[swipeId] = pid
+
+        val startPctX = mapping.getDouble("x")
+        val startPctY = mapping.getDouble("y")
+        val (startX, startY) = getScreenCoords(startPctX, startPctY)
+        val (ox, oy) = getAntiBanOffset(mapping.optBoolean("antiBanEnabled", false))
+
+        val endPctX = if (mapping.has("swipeEndX")) mapping.getDouble("swipeEndX") else {
+            when (mapping.optString("swipeDirection", "UP").uppercase()) {
+                "LEFT" -> (startPctX - 25.0).coerceAtLeast(0.0)
+                "RIGHT" -> (startPctX + 25.0).coerceAtMost(100.0)
+                else -> startPctX
+            }
+        }
+        val endPctY = if (mapping.has("swipeEndY")) mapping.getDouble("swipeEndY") else {
+            when (mapping.optString("swipeDirection", "UP").uppercase()) {
+                "UP" -> (startPctY - 25.0).coerceAtLeast(0.0)
+                "DOWN" -> (startPctY + 25.0).coerceAtMost(100.0)
+                else -> startPctY
+            }
+        }
+        val (endX, endY) = getScreenCoords(endPctX, endPctY)
+        val durationMs = mapping.optLong("swipeDuration", 200L).coerceIn(50L, 2000L)
+        val swipeReturn = mapping.optBoolean("swipeReturn", false)
+
+        val totalFrames = (durationMs / 16L).coerceAtLeast(4L).toInt()
+        var currentFrame = 0
+
+        dispatchButtonCall {
+            try {
+                TouchInjectionPlugin.touchService?.touchDown(pid, startX + ox, startY + oy)
+            } catch (e: Exception) {
+                p.isActive = false
+                p.virtualKey = null
+                activeSwipePointers.remove(swipeId)
+                logInjectFailure("touchDown", pid, e)
+            }
+        }
+
+        val swipeRunnable = object : Runnable {
+            override fun run() {
+                if (!p.isActive) {
+                    activeSwipes.remove(swipeId)
+                    activeSwipePointers.remove(swipeId)
+                    return
+                }
+                currentFrame++
+                val maxFrames = if (swipeReturn) totalFrames * 2 else totalFrames
+                if (currentFrame <= totalFrames) {
+                    val t = currentFrame.toFloat() / totalFrames.toFloat()
+                    val curX = startX + (endX - startX) * t
+                    val curY = startY + (endY - startY) * t
+                    dispatchButtonCall {
+                        try { TouchInjectionPlugin.touchService?.touchMove(pid, curX + ox, curY + oy) }
+                        catch (e: Exception) { logInjectFailure("touchMove", pid, e) }
+                    }
+                    mainHandler.postDelayed(this, 16L)
+                } else if (swipeReturn && currentFrame <= maxFrames) {
+                    val returnFrame = currentFrame - totalFrames
+                    val t = returnFrame.toFloat() / totalFrames.toFloat()
+                    val curX = endX + (startX - endX) * t
+                    val curY = endY + (startY - endY) * t
+                    dispatchButtonCall {
+                        try { TouchInjectionPlugin.touchService?.touchMove(pid, curX + ox, curY + oy) }
+                        catch (e: Exception) { logInjectFailure("touchMove", pid, e) }
+                    }
+                    mainHandler.postDelayed(this, 16L)
+                } else {
+                    dispatchButtonCall {
+                        try { TouchInjectionPlugin.touchService?.touchUp(pid) }
+                        catch (e: Exception) { logInjectFailure("touchUp", pid, e) }
+                    }
+                    p.isActive = false
+                    p.virtualKey = null
+                    activeSwipes.remove(swipeId)
+                    activeSwipePointers.remove(swipeId)
+                }
+            }
+        }
+        activeSwipes[swipeId] = swipeRunnable
+        mainHandler.postDelayed(swipeRunnable, 16L)
+    }
+
+    private fun handleGesture(mapping: JSONObject, offset: Int) {
+        val gestureId = mapping.optString("id", "")
+        if (gestureId.isEmpty()) return
+
+        activeGestures[gestureId]?.let {
+            mainHandler.removeCallbacks(it)
+            activeGestures.remove(gestureId)
+        }
+        activeGesturePointers.remove(gestureId)?.let { oldPid ->
+            pointersById[oldPid]?.let {
+                it.isActive = false
+                it.virtualKey = null
+            }
+            dispatchButtonCall {
+                try { TouchInjectionPlugin.touchService?.touchUp(oldPid) } catch (_: Exception) {}
+            }
+        }
+
+        val points = mapping.optJSONArray("gesturePoints") ?: return
+        if (points.length() == 0) return
+
+        val p = (offset + 2..offset + 15).mapNotNull { pointersById[it] }.find { !it.isActive } ?: return
+        p.isActive = true
+        p.virtualKey = "gesture_$gestureId"
+        val pid = p.id
+        activeGesturePointers[gestureId] = pid
+
+        val (ox, oy) = getAntiBanOffset(mapping.optBoolean("antiBanEnabled", false))
+        var pointIndex = 0
+
+        val firstPoint = points.getJSONObject(0)
+        val (firstX, firstY) = getScreenCoords(firstPoint.getDouble("x"), firstPoint.getDouble("y"))
+        dispatchButtonCall {
+            try {
+                TouchInjectionPlugin.touchService?.touchDown(pid, firstX + ox, firstY + oy)
+            } catch (e: Exception) {
+                p.isActive = false
+                p.virtualKey = null
+                activeGesturePointers.remove(gestureId)
+                logInjectFailure("touchDown", pid, e)
+            }
+        }
+
+        val gestureRunnable = object : Runnable {
+            override fun run() {
+                if (!p.isActive) {
+                    activeGestures.remove(gestureId)
+                    activeGesturePointers.remove(gestureId)
+                    return
+                }
+                pointIndex++
+                if (pointIndex < points.length()) {
+                    val pt = points.getJSONObject(pointIndex)
+                    val (x, y) = getScreenCoords(pt.getDouble("x"), pt.getDouble("y"))
+                    val delay = pt.optLong("delayMs", 50L).coerceAtLeast(16L)
+                    dispatchButtonCall {
+                        try { TouchInjectionPlugin.touchService?.touchMove(pid, x + ox, y + oy) }
+                        catch (e: Exception) { logInjectFailure("touchMove", pid, e) }
+                    }
+                    mainHandler.postDelayed(this, delay)
+                } else {
+                    dispatchButtonCall {
+                        try { TouchInjectionPlugin.touchService?.touchUp(pid) }
+                        catch (e: Exception) { logInjectFailure("touchUp", pid, e) }
+                    }
+                    p.isActive = false
+                    p.virtualKey = null
+                    activeGestures.remove(gestureId)
+                    activeGesturePointers.remove(gestureId)
+                }
+            }
+        }
+        activeGestures[gestureId] = gestureRunnable
+        val initialDelay = firstPoint.optLong("delayMs", 50L).coerceAtLeast(16L)
+        mainHandler.postDelayed(gestureRunnable, initialDelay)
+    }
+
+    // ==================== UNIFIED MACRO SYSTEM ====================
 
     private fun handleMacro(mapping: JSONObject, offset: Int) {
         val macroId = mapping.optString("id", "")
         if (macroId.isEmpty()) return
 
-        activeMacros[macroId]?.let {
-            mainHandler.removeCallbacks(it)
+        // Toggle off if currently running
+        if (activeMacros.containsKey(macroId)) {
+            activeMacros[macroId]?.let { mainHandler.removeCallbacks(it) }
             activeMacros.remove(macroId)
+            activeMacroPointers.remove(macroId)?.let { oldPid ->
+                pointersById[oldPid]?.let {
+                    it.isActive = false
+                    it.virtualKey = null
+                }
+                dispatchButtonCall {
+                    try { TouchInjectionPlugin.touchService?.touchUp(oldPid) } catch (_: Exception) {}
+                }
+            }
             return
         }
 
-        val steps = mapping.optJSONArray("macroSteps") ?: return
-        if (steps.length() == 0) return
+        // Resolve steps: check embedded macroSteps first, then referenced macroId
+        var playbackSpeed = 1.0
+        val steps = if (mapping.has("macroSteps")) {
+            mapping.optJSONArray("macroSteps")
+        } else {
+            val refMacroId = mapping.optString("macroId", "")
+            val macroDef = if (refMacroId.isNotEmpty()) macroDefinitions[refMacroId] else null
+            playbackSpeed = macroDef?.optDouble("playbackSpeed", 1.0) ?: 1.0
+            macroDef?.optJSONArray("actions")
+        }
+
+        if (steps == null || steps.length() == 0) return
+
+        val p = (offset + 2..offset + 15).mapNotNull { pointersById[it] }.find { !it.isActive } ?: return
+        p.isActive = true
+        p.virtualKey = "macro_$macroId"
+        val pid = p.id
+        activeMacroPointers[macroId] = pid
 
         var currentStep = 0
+        val effectiveSpeed = if (playbackSpeed > 0.0) playbackSpeed else 1.0
 
         val macroRunnable = object : Runnable {
             override fun run() {
-                if (currentStep >= steps.length()) {
+                if (currentStep >= steps.length() || !p.isActive) {
+                    dispatchButtonCall {
+                        try { TouchInjectionPlugin.touchService?.touchUp(pid) } catch (_: Exception) {}
+                    }
+                    p.isActive = false
+                    p.virtualKey = null
                     activeMacros.remove(macroId)
+                    activeMacroPointers.remove(macroId)
                     return
                 }
 
                 val step = steps.optJSONObject(currentStep) ?: return
-                val action = step.optString("action", "tap")
-                val x = step.optDouble("x", 50.0)
-                val y = step.optDouble("y", 50.0)
-                val delay = step.optLong("delayMs", 100L)
-                val duration = step.optLong("durationMs", 60L)
+                val actionType = step.optString("type", step.optString("action", "tap")).lowercase()
+                val rawX = step.optDouble("x", 50.0)
+                val rawY = step.optDouble("y", 50.0)
+                // Normalize 0-1000 scale to percentage 0-100
+                val normX = if (rawX > 100.0) rawX / 10.0 else rawX
+                val normY = if (rawY > 100.0) rawY / 10.0 else rawY
 
-                val (screenX, screenY) = getScreenCoords(x, y)
+                val (screenX, screenY) = getScreenCoords(normX, normY)
                 val (ox, oy) = getAntiBanOffset(mapping.optBoolean("antiBanEnabled", false))
 
-                when (action.lowercase()) {
+                val rawDelay = step.optLong("delayMs", 100L)
+                val effectiveDelay = (rawDelay / effectiveSpeed).toLong().coerceAtLeast(16L)
+                val duration = step.optLong("durationMs", 60L)
+
+                when (actionType) {
+                    "touch_down", "down" -> {
+                        dispatchButtonCall {
+                            try {
+                                TouchInjectionPlugin.touchService?.touchDown(pid, screenX + ox, screenY + oy)
+                            } catch (e: Exception) {
+                                logInjectFailure("touchDown", pid, e)
+                            }
+                        }
+                    }
+                    "touch_move", "move" -> {
+                        dispatchButtonCall {
+                            try {
+                                TouchInjectionPlugin.touchService?.touchMove(pid, screenX + ox, screenY + oy)
+                            } catch (e: Exception) {
+                                logInjectFailure("touchMove", pid, e)
+                            }
+                        }
+                    }
+                    "touch_up", "up" -> {
+                        dispatchButtonCall {
+                            try {
+                                TouchInjectionPlugin.touchService?.touchUp(pid)
+                            } catch (e: Exception) {
+                                logInjectFailure("touchUp", pid, e)
+                            }
+                        }
+                    }
                     "tap" -> {
-                        // FIX: same as turbo — this runnable is scheduled on mainHandler (the
-                        // UI thread), so calling injectTap() directly here blocked the UI
-                        // thread for the duration of each macro step's AIDL round-trip.
-                        dispatchTouchCall {
+                        dispatchButtonCall {
                             try {
                                 TouchInjectionPlugin.touchService?.injectTap(screenX + ox, screenY + oy, duration)
                             } catch (e: Exception) {
-                                Log.w(TAG, "Macro tap failed: ${e.message}")
+                                logInjectFailure("injectTap", pid, e)
                             }
                         }
+                    }
+                    "delay" -> {
+                        // Timing pause only
                     }
                 }
 
                 currentStep++
-                mainHandler.postDelayed(this, delay)
+                mainHandler.postDelayed(this, effectiveDelay)
             }
         }
 
         activeMacros[macroId] = macroRunnable
-        macroRunnable.run()
+        mainHandler.post(macroRunnable)
     }
 
     // ==================== MACRO RECORDING (for UI) ====================

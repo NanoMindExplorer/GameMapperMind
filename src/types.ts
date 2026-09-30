@@ -88,11 +88,12 @@ export interface GamepadProfile {
   orientation?: 'landscape' | 'portrait' | 'auto';
   portraitButtons?: VirtualButton[];
   hapticIntensity?: number;
+  macros?: GamepadMacro[];
 }
 
 export interface MacroAction {
   id: string;
-  type: 'touch_down' | 'touch_move' | 'touch_up' | 'delay';
+  type: 'touch_down' | 'touch_move' | 'touch_up' | 'delay' | 'tap';
   x?: number; // scale 0 - 1000 for high resolution
   y?: number;
   delayMs?: number;

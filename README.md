@@ -7,7 +7,7 @@
 [![Shizuku](https://img.shields.io/badge/Requires-Shizuku%20v13%2B-blue)]()
 [![Demo Video](https://img.shields.io/badge/Demo-YouTube-red?logo=youtube)](https://youtu.be/OtdO_hg2ZdI)
 
-Aplikasi pemetaan gamepad (Keymapper) untuk menghubungkan kontroler fisik dengan layar sentuh Android. Mendukung multi-touch injection yang benar (analog + tombol bersamaan tanpa gangguan), 6 interaction types, dan 3-path injection dengan failover otomatis.
+A gamepad mapping application (Keymapper) to bridge physical controllers with Android touchscreens. Supports true multi-touch injection (simultaneous analog + buttons without interference), 6 interaction types, and 3-path injection with automatic failover.
 
 ## Download
 
@@ -17,7 +17,7 @@ Aplikasi pemetaan gamepad (Keymapper) untuk menghubungkan kontroler fisik dengan
       <a href="https://appgallery.cloud.huawei.com/ag/n/app/C118378059?locale=in_ID&source=appshare&subsource=C118378059&shareTo=com.android.bluetooth&shareFrom=appmarket&shareIds=571bc7ac8d1245e4a2aacf86b8da6004_com.android.bluetooth&callType=SHARE" target="_blank">
         <img src="https://img.shields.io/badge/Huawei_AppGallery-Download-red?style=for-the-badge&logo=huawei&logoColor=white" alt="Download from Huawei AppGallery"/>
         <br>
-        <sub>Install langsung dari AppGallery</sub>
+        <sub>Install directly from AppGallery</sub>
       </a>
     </td>
     <td align="center" width="50%">
@@ -39,7 +39,7 @@ Aplikasi pemetaan gamepad (Keymapper) untuk menghubungkan kontroler fisik dengan
 **Requirements:**
 - Android 12+ (API 31)
 - Shizuku v13+ ([download here](https://shizuku.rikka.app/))
-- Gamepad Bluetooth/USB
+- Bluetooth/USB Gamepad
 
 ## Game Test Demo
 
@@ -52,26 +52,26 @@ Aplikasi pemetaan gamepad (Keymapper) untuk menghubungkan kontroler fisik dengan
 [![Watch on YouTube](https://img.shields.io/badge/▶_Watch_on_YouTube-OtdO__hg2ZdI-red?style=for-the-badge&logo=youtube)](https://youtu.be/OtdO_hg2ZdI)
 
 ## Features
-- **Multi-pointer touch injection** — analog stick dan tombol aktif bersamaan tanpa saling mengganggu (ACTION_POINTER_DOWN/UP yang benar)
-- **Dual AIDL dispatch thread** — stick (high priority + coalescing) dan button (normal priority) di thread terpisah untuk eliminasi combo delay
-- **3-path touch injection** (IInputManager AIDL → InputManager class → shell fallback) dengan retry otomatis (tidak lock ke Path C)
-- **Installed Games browser** — launch games directly from app + auto-create profiles
-- **Test Injection button** — verify touch injection works without gamepad
-- **Flexible trigger system** — "Learn Trigger" captures any gamepad button via raw evdev (termasuk BTN_GAMEPAD/BTN_TL2/BTN_TR2 yang non-standard)
+- **Multi-pointer touch injection** — simultaneous analog stick and button actions without mutual interference (proper `ACTION_POINTER_DOWN`/`UP`)
+- **Dual AIDL dispatch thread** — dedicated threads for stick (high priority + coalescing) and button (normal priority) to eliminate combo delays
+- **3-path touch injection** (`IInputManager` AIDL → `InputManager` class → shell fallback) with automatic retry (never locks permanently to Path C)
+- **Installed Games browser** — launch games directly from the app + auto-create profiles
+- **Test Injection button** — verify touch injection works without a gamepad
+- **Flexible trigger system** — "Learn Trigger" captures any gamepad button via raw evdev (including non-standard `BTN_GAMEPAD`/`BTN_TL2`/`BTN_TR2`)
 - **6 interaction types**: Hold, Tap, Turbo (auto-fire), Toggle (lock), Charge (hold-release), Gesture (multi-point path)
-- **Chord triggers** — combine multiple buttons (e.g., LB+RB = special action)
+- **Chord triggers** — combine multiple buttons (e.g., LB + RB = special action)
 - **Macro trigger** — assign recorded macros to any button
 - **Stick-as-drag mode** — analog stick moves touch absolutely (mortar/sniper aim)
-- **Radial deadzone on raw input** — release immediate saat stick kembali ke center (tidak nyangkut)
-- **Visual interaction indicators** — canvas shows ⚡ turbo, ⊕ toggle, ⏱ charge, ~ gesture badges
-- **Multi-gamepad support** (hingga 4 gamepad untuk couch co-op)
+- **Radial deadzone on raw input** — instant release when stick returns to center (no sticking)
+- **Visual interaction indicators** — canvas displays ⚡ turbo, ⊕ toggle, ⏱ charge, ~ gesture badges
+- **Multi-gamepad support** (up to 4 controllers for couch co-op)
 - **Sensitivity curve editor** (linear, exponential, parabolic, concave, custom)
-- **Haptics feedback integration**
+- **Haptic feedback integration**
 - **Profile persistence** (encrypted with AES-256-GCM)
 - **WYSIWYG visual editor** with live gamepad feedback
 - **Macro recorder**
 - **Orientation-aware** (landscape + portrait)
-- **On-screen diagnostic log** — surface raw evdev axis/button names, injection failures, dan unmapped button codes langsung di app (tidak perlu adb logcat)
+- **On-screen diagnostic log** — display raw evdev axis/button names, injection failures, and unmapped button codes directly in the app (no `adb logcat` required)
 
 ## Supported Games (built-in profiles)
 - eFootball 
@@ -84,29 +84,29 @@ Aplikasi pemetaan gamepad (Keymapper) untuk menghubungkan kontroler fisik dengan
 ## Prerequisites
 - **Android 12+ (API 31)** — minimum supported version
 - Shizuku v13+ (https://shizuku.rikka.app/)
-- Gamepad Bluetooth/USB (Xbox, PlayStation, 8BitDo, generic)
+- Bluetooth/USB Gamepad (Xbox, PlayStation, 8BitDo, generic)
 
 ## Setup Shizuku
-1. Install Shizuku dari Play Store.
-2. Aktifkan Developer Options di Android.
+1. Install Shizuku from Google Play Store or GitHub releases.
+2. Enable Developer Options in Android Settings.
 3. Start Shizuku via ADB wireless debugging:
    `adb shell sh /storage/emulated/0/Android/data/moe.shizuku.privileged.api/start.sh`
-4. Buka GameMapperMind, grant permission ke Shizuku.
+4. Open GameMapperMind and grant permission to Shizuku.
 
 ## First-time Setup
-1. Buka app → tab **"Orchestration Control"** → tap **"Start Daemon"**.
-2. Tap **"Test Injection"** button — verify touch appears at screen center.
-3. Pilih game di tab **"Installed Games"** → tap **Play** untuk launch.
-4. Atau buat profile sendiri di tab **"Profile Manager"** → drag tombol di WYSIWYG canvas.
-5. Mulai mainkan game — gamepad fisik akan kontrol game via touch injection.
+1. Open the app → **"Orchestration Control"** tab → tap **"Start Daemon"**.
+2. Tap the **"Test Injection"** button — verify that touch appears at screen center.
+3. Select a game in the **"Installed Games"** tab → tap **Play** to launch.
+4. Or create your own profile in the **"Profile Manager"** tab → drag buttons on the WYSIWYG canvas.
+5. Start playing your game — the physical gamepad will control the game via touch injection.
 
 ## Interaction Types & Trigger Assignment
 
-Setiap node overlay dapat dikonfigurasi dengan interaction type berbeda:
+Each overlay node can be configured with a different interaction type:
 
-| Type | Deskripsi | Use Case |
-|------|-----------|----------|
-| **Hold** | Press = touchDown, release = touchUp (default) | Tombol biasa (Pass, Shoot) |
+| Type | Description | Use Case |
+|------|-------------|----------|
+| **Hold** | Press = touchDown, release = touchUp (default) | Regular buttons (Pass, Shoot) |
 | **Tap** | Single quick tap on press | Menu, pause |
 | **Turbo** | Auto-repeat tap every N ms while held | Auto-fire (RT = 20 taps/sec) |
 | **Toggle** | Press once = touch stays, press again = release | Auto-run, ADS toggle |
@@ -124,114 +124,113 @@ Setiap node overlay dapat dikonfigurasi dengan interaction type berbeda:
 - **Drag**: touch moves absolutely across screen — for mortar/sniper aim
 
 ### Visual Indicators
-Canvas menampilkan badge per interaction type:
+Canvas displays a badge for each interaction type:
 - ⚡ = Turbo | ⊕ = Toggle | ⏱ = Charge | ~ = Gesture | ▸ = Tap | M = Macro | DRAG = Stick drag mode
 
 ## Injection Architecture (Android 12+)
 
-App uses 3-path injection dengan automatic failover dan **tidak permanent lock** ke Path C (selalu retry A → B → C setiap call):
+App uses 3-path injection with automatic failover and **never permanently locks** to Path C (always retries A → B → C on each call):
 
 | Path | Method | Reliability | Latency | Multi-touch |
 |------|--------|-------------|---------|-------------|
 | **A** (primary) | IInputManager AIDL via ServiceManager | Highest — same path as `input` binary | <1ms | Full (multi-pointer) |
 | **B** (fallback) | InputManager class via getSystemService + reflection | High | <1ms | Full (multi-pointer) |
-| **C** (last resort) | `input tap` shell command | Guaranteed | ~100ms | Single-tap only (tidak fire saat ada pointer aktif lain) |
+| **C** (last resort) | `input tap` shell command | Guaranteed | ~100ms | Single-tap only (does not fire when other pointers are active) |
 
 ### Multi-Pointer MotionEvent (v3)
 
-Touch injection menggunakan **Android multi-touch semantics yang benar**:
-- Pointer pertama DOWN: `ACTION_DOWN`, `pointerCount=1`
-- Pointer tambahan DOWN saat lain aktif: `ACTION_POINTER_DOWN`, `pointerCount=SEMUA pointer aktif`
-- Pointer UP saat lain masih aktif: `ACTION_POINTER_UP` (bukan `ACTION_UP`)
-- `actionIndex` di-set ke index pointer yang berubah dalam properties array
-- `downTime` shared dari gesture pertama untuk semua pointer dalam session yang sama
+Touch injection uses **proper Android multi-touch semantics**:
+- First pointer DOWN: `ACTION_DOWN`, `pointerCount=1`
+- Additional pointer DOWN while others are active: `ACTION_POINTER_DOWN`, `pointerCount=ALL active pointers`
+- Pointer UP while others remain active: `ACTION_POINTER_UP` (not `ACTION_UP`)
+- `actionIndex` set to the index of the pointer that changed in the properties array
+- `downTime` shared from the initial gesture across all pointers in the same session
 
-Ini memastikan **analog stick dan tombol aktif bersamaan tanpa saling membatalkan** — saat L_STICK sedang aktif dan tombol A ditekan, Android menerima `ACTION_POINTER_DOWN` dengan kedua pointer, bukan `ACTION_DOWN` baru yang membatalkan session stick.
+This ensures **analog stick and button presses can be active simultaneously without cancelling each other** — when `L_STICK` is active and button `A` is pressed, Android receives `ACTION_POINTER_DOWN` with both pointers, rather than a new `ACTION_DOWN` that interrupts the active stick session.
 
 ### Dual AIDL Dispatch Thread (v2)
 
-Touch calls di-dispatch ke **dua thread terpisah**:
-- **`stickAidlHandler`** (Thread.MAX_PRIORITY) — khusus analog touchDown/touchMove/touchUp. Dengan **coalescing**: hanya `touchMove` terbaru per pointer yang dikirim, move lama di-drop dari queue (caps latency di ~10ms regardless of getevent rate).
-- **`buttonAidlHandler`** (Thread.NORM_PRIORITY) — khusus button touchDown/touchUp/injectTap.
+Touch calls are dispatched to **two separate threads**:
+- **`stickAidlHandler`** (`Thread.MAX_PRIORITY`) — dedicated to analog `touchDown`/`touchMove`/`touchUp`. Includes **coalescing**: only the most recent `touchMove` per pointer is dispatched; older moves in the queue are dropped (caps latency at ~10ms regardless of `getevent` sampling rate).
+- **`buttonAidlHandler`** (`Thread.NORM_PRIORITY`) — dedicated to button `touchDown`/`touchUp`/`injectTap`.
 
-Keduanya jalan **paralel** — Android InputManager menerima `injectInputEvent` concurrent untuk pointer ID berbeda. Button press tidak pernah delay stick movement.
+Both run in **parallel** — Android's InputManager receives concurrent `injectInputEvent` calls for distinct pointer IDs. Button presses never delay analog stick movement.
 
-Shizuku runs as **shell uid (2000)** yang:
+Shizuku runs as **shell uid (2000)**, which:
 - Bypasses hidden API restrictions
-- Has `INJECT_EVENTS` permission
+- Holds `INJECT_EVENTS` permission
 
 ## Gamepad Compatibility
 
-App mendeteksi otomatis layout controller via `getevent -lp` dan menormalisasi axis berdasarkan range real (bukan hardcoded 0..255 atau -32768..32767). Mapping evdev yang didukung:
+The app automatically detects controller layouts via `getevent -lp` and normalizes axis values based on their real hardware ranges (rather than hardcoding `0..255` or `-32768..32767`). Supported evdev mappings:
 
 | Logical Button | evdev Codes | Notes |
 |----------------|-------------|-------|
-| A | `BTN_GAMEPAD`, `BTN_A`, `BTN_SOUTH` | BTN_GAMEPAD = BTN_A = 0x130 di Linux kernel |
+| A | `BTN_GAMEPAD`, `BTN_A`, `BTN_SOUTH` | BTN_GAMEPAD = BTN_A = 0x130 in Linux kernel |
 | B | `BTN_B`, `BTN_EAST` | |
 | X | `BTN_X`, `BTN_NORTH` | |
 | Y | `BTN_Y`, `BTN_WEST` | |
-| LT | `BTN_TL2`, `BTN_LT`, atau analog axis (`ABS_Z`/`ABS_BRAKE`/`ABS_LTRIGGER`) | Digital + analog trigger didukung |
-| RT | `BTN_TR2`, `BTN_RT`, atau analog axis (`ABS_RZ`/`ABS_GAS`/`ABS_RTRIGGER`) | Digital + analog trigger didukung |
+| LT | `BTN_TL2`, `BTN_LT`, or analog axis (`ABS_Z`/`ABS_BRAKE`/`ABS_LTRIGGER`) | Digital + analog triggers supported |
+| RT | `BTN_TR2`, `BTN_RT`, or analog axis (`ABS_RZ`/`ABS_GAS`/`ABS_RTRIGGER`) | Digital + analog triggers supported |
 | LB / RB | `BTN_TL`/`BTN_L1`, `BTN_TR`/`BTN_R1` | |
 | L3 / R3 | `BTN_THUMBL`/`BTN_THUMB`, `BTN_THUMBR`/`BTN_THUMB2` | |
-| D-Pad | `ABS_HAT0X`/`ABS_HAT0Y` (analog hat) atau `BTN_DPAD_*` (discrete) | |
+| D-Pad | `ABS_HAT0X`/`ABS_HAT0Y` (analog hat) or `BTN_DPAD_*` (discrete) | |
 | START / SELECT / HOME | `BTN_START`, `BTN_SELECT`, `BTN_MODE` | |
 
-Right stick auto-detect: jika controller tidak punya `ABS_RX`/`ABS_RY`, app otomatis pakai `ABS_Z`/`ABS_RZ` untuk right stick (umum di generic Bluetooth gamepads).
+Right stick auto-detect: if the controller does not expose `ABS_RX`/`ABS_RY`, the app automatically falls back to `ABS_Z`/`ABS_RZ` for the right stick (common on generic Bluetooth gamepads).
 
 ## Troubleshooting
-- **Gamepad tidak terdeteksi:** Pastikan gamepad terhubung Bluetooth/OTG dan dikenali Android. Cek tab **"Sensor & Input Diagnostics"**. Lihat juga on-screen log untuk `[GAMEPAD-DETECT] axes: ... | buttons: ...` yang menampilkan axis/button yang terdeteksi.
-- **Tombol tertentu tidak bereaksi:** Cek on-screen log untuk `[GAMEPAD-KEY] Unmapped button BTN_XXX` — controller Anda pakai kode non-standard. Laporkan di Issue agar kami tambahkan mapping.
-- **Touch tidak responsif:** Jalankan **"Test Injection"** di tab Shizuku. Log akan menampilkan path mana yang aktif (A/B/C) dan rekomendasi jika ada yang broken. Pastikan muncul `Injection OK via Path A`.
-- **Analog kembali ke tengah saat tombol ditekan:** Fixed di v3 — pastikan APK yang terinstall adalah v3 atau lebih baru (multi-pointer MotionEvent).
-- **Analog tersendat/nyangkut ke bawah:** Fixed di v1+v2 — deadzone check pada raw input + coalescing stick move.
-- **Shizuku mati setelah reboot:** Layanan Shizuku non-root perlu dinyalakan kembali via ADB tiap reboot.
-- **Analog stick tidak bergerak sama sekali:** Jika app jatuh ke Path C (shell fallback) saat ada pointer aktif, analog tidak akan jalan. Path C hanya untuk single-pointer DOWN/UP. Pastikan Path A atau B aktif (cek log `Using Path A`).
+- **Gamepad not detected:** Ensure the gamepad is connected via Bluetooth/OTG and recognized by Android. Check the **"Sensor & Input Diagnostics"** tab. Inspect the on-screen log for `[GAMEPAD-DETECT] axes: ... | buttons: ...` showing detected axes and buttons.
+- **Specific button does not respond:** Check on-screen logs for `[GAMEPAD-KEY] Unmapped button BTN_XXX` — your controller uses a non-standard code. Report this in an Issue so we can add the mapping.
+- **Touch is unresponsive:** Run **"Test Injection"** in the Shizuku tab. The log will indicate which path is active (A/B/C) and show recommendations if any path is failing. Ensure `Injection OK via Path A` appears.
+- **Analog returns to center when a button is pressed:** Fixed in v3 — ensure the installed APK is v3 or newer (proper multi-pointer `MotionEvent`).
+- **Analog feels stuttery or sticks downwards:** Fixed in v1+v2 — radial deadzone checks on raw input + coalesced stick moves.
+- **Shizuku stops after device reboot:** Shizuku service needs to be restarted via ADB on reboot for non-rooted devices.
+- **Analog stick does not move at all:** If the app falls back to Path C (shell fallback) while other pointers are active, analog will not work. Path C is strictly for single-pointer DOWN/UP. Ensure Path A or B is active (check `Using Path A` in logs).
 
 ## FAQ
-**Q: Apakah ini membutuhkan ROOT?**
-A: Tidak, aplikasi berjalan lewat akses Shizuku (shell uid via ADB wireless debugging).
+**Q: Does this require ROOT?**
+A: No, the app operates via Shizuku privilege access (shell UID via ADB wireless debugging).
 
-**Q: Apakah aman dari banned?**
-A: App memakai sentuhan TOOL_TYPE_FINGER dengan source TOUCHSCREEN (bukan MOUSE). Anti-ban mode (Gaussian offset) opsional. Tetap **gunakan dengan risiko pengguna**.
+**Q: Is this safe from bans?**
+A: The app generates `TOOL_TYPE_FINGER` touches with `TOUCHSCREEN` source (not `MOUSE`). An optional anti-ban mode (Gaussian offset) is available. Use **at your own risk**.
 
-**Q: Support controller Xbox dan PS?**
-A: Ya, semua standar mapping Android gamepad terdeteksi. Xbox Bluetooth LT/RT didukung via AXIS_LTRIGGER/RTRIGGER fallback. Generic Bluetooth gamepads (BTN_GAMEPAD, BTN_TL2/BTN_TR2) juga didukung.
+**Q: Does it support Xbox and PlayStation controllers?**
+A: Yes, all standard Android gamepad mappings are supported. Xbox Bluetooth LT/RT triggers are handled via `AXIS_LTRIGGER`/`RTRIGGER` fallback. Generic Bluetooth gamepads (`BTN_GAMEPAD`, `BTN_TL2`/`BTN_TR2`) are also supported.
 
-**Q: Bisa bermain couch multiplayer?**
-A: Bisa, support hingga 4 controllers simultan. Atur config Player (1-4) di masing-masing node tombol.
+**Q: Can I play couch multiplayer?**
+A: Yes, supports up to 4 simultaneous controllers. Configure Player (1–4) settings on individual button nodes.
 
-**Q: Kenapa analog + tombol bisa aktif bersamaan tanpa gangguan?**
-A: v3 menggunakan Android multi-touch MotionEvent yang benar (`ACTION_POINTER_DOWN`/`ACTION_POINTER_UP` dengan semua pointer aktif dalam satu event). Sebelumnya `ACTION_DOWN` dengan `pointerCount=1` membatalkan session stick yang aktif.
+**Q: Why can analog and buttons be active simultaneously without conflict?**
+A: v3 implements proper Android multi-touch `MotionEvent` semantics (`ACTION_POINTER_DOWN`/`ACTION_POINTER_UP` containing all active pointers in a single event). Previously, sending `ACTION_DOWN` with `pointerCount=1` would abort the active stick session.
 
-## Changelog Ringkasan
+## Changelog Summary
 
 ### v2.1.1 (2026-07-15) — Multi-Pointer + Gamepad Compatibility Fix
-- **v3**: Rewrite multi-pointer MotionEvent (`ACTION_POINTER_DOWN`/`ACTION_POINTER_UP` dengan semua pointer aktif) — fix "analog kembali ke tengah saat tombol ditekan"
-- **v3**: `BTN_GAMEPAD → A` mapping (BTN_GAMEPAD = BTN_A = 0x130 di Linux kernel)
-- **v3**: Shell fallback (Path C) tidak fire saat ada pointer aktif lain (mencegah hijack)
-- **v2**: Per-pointer `downTime` tracking (ConcurrentHashMap) — fix ACTION_UP rejected saat multi-pointer
-- **v2**: Dual AIDL dispatch thread (stick MAX_PRIORITY + button NORM_PRIORITY) + coalescing stick move
-- **v2**: Filter BTN_GAMEPAD/BTN_JOYSTICK meta event (NOTE: reverted di v3 karena BTN_GAMEPAD = BTN_A)
-- **v1**: Async dispatch via `dispatchInteraction`, honor `interactionType` universal
-- **v1**: `injectTap` pointer ID 50 (bukan 0) — hindari konflik dengan L_STICK
-- **v1**: Deadzone check pada raw input — fix "analog nyangkut ke bawah"
-- **v1**: `injectMotionEvent` tidak lock ke Path C — selalu retry A → B → C
+- **v3**: Rewrite multi-pointer `MotionEvent` (`ACTION_POINTER_DOWN`/`ACTION_POINTER_UP` containing all active pointers) — fixes "analog snaps to center when button is pressed"
+- **v3**: `BTN_GAMEPAD → A` mapping (`BTN_GAMEPAD` = `BTN_A` = `0x130` in Linux kernel)
+- **v3**: Shell fallback (Path C) does not fire while other pointers are active (prevents hijacking)
+- **v2**: Per-pointer `downTime` tracking (`ConcurrentHashMap`) — fixes `ACTION_UP` rejection during multi-pointer events
+- **v2**: Dual AIDL dispatch threads (stick `MAX_PRIORITY` + button `NORM_PRIORITY`) + stick move coalescing
+- **v2**: Filter `BTN_GAMEPAD`/`BTN_JOYSTICK` meta events (NOTE: reverted in v3 because `BTN_GAMEPAD` = `BTN_A`)
+- **v1**: Async dispatch via `dispatchInteraction`, honors universal `interactionType`
+- **v1**: `injectTap` uses pointer ID 50 (instead of 0) — prevents conflict with `L_STICK`
+- **v1**: Deadzone check on raw input — fixes "analog sticking downwards"
+- **v1**: `injectMotionEvent` does not lock to Path C — always retries A → B → C
 - **v1**: `normalizeTrigger` heuristic fallback (255/1023/4095/32767)
-- **v1**: `handleKeyEvent` log unknown button codes
-- **v1**: `mapEvdevToButton` tambah BTN_LT/BTN_RT alias
+- **v1**: `handleKeyEvent` logs unknown button codes
+- **v1**: `mapEvdevToButton` adds `BTN_LT`/`BTN_RT` aliases
 
-Lihat [CHANGELOG.md](CHANGELOG.md) untuk history lengkap.
+See [CHANGELOG.md](CHANGELOG.md) for full history.
 
 ## Contributing
-Kami menerima Pull Request dan bantuan open source.
-- Buka Issue sebelum membuat PR yang besar.
-- **Setiap release wajib increment `versionCode` di `android/app/build.gradle`**
-- Jalankan `npm run lint` dan `npm test` sebelum commit.
+We welcome Pull Requests and open-source contributions.
+- Open an Issue before submitting large PRs.
+- **Every release must increment `versionCode` in `android/app/build.gradle`**
+- Run `npm run lint` and `npm test` before committing.
 
 ## License
 Apache-2.0
 
 ## Disclaimer
-Aplikasi ini tidak berafiliasi dengan game yang didukung. Gunakan dengan bertanggung jawab. Risiko banned ditanggung user.
-
+This application is not affiliated with any supported games. Use responsibly. Risk of bans is assumed by the user.

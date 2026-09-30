@@ -1,8 +1,14 @@
 package com.nanomindexplorer.gamemappermind
 
 import android.content.Context
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
+import android.os.Build
 import android.os.Handler
 import android.util.Log
+import android.view.Surface
 import android.view.WindowManager
 import org.json.JSONObject
 import kotlin.math.sqrt
@@ -106,6 +112,7 @@ class NativeGamepadMapper(private val context: Context) {
 
         fun resetAll() {
             synchronized(syncLock) {
+                instance?.stopGyroListener()
                 instance?.pointers?.forEach {
                     if (it.isActive) {
                         it.isActive = false
@@ -185,6 +192,156 @@ class NativeGamepadMapper(private val context: Context) {
     @Volatile private var screenInsetLeft = 0.0
     @Volatile private var screenInsetRight = 0.0
 
+    // ==================== NATIVE GYRO AIMING ====================
+    @Volatile var gyroSensitivity: Float = 0f
+    @Volatile var gyroInvertX: Boolean = false
+    @Volatile var gyroInvertY: Boolean = false
+    @Volatile var gyroDeadzone: Float = 0.02f
+    @Volatile private var latestGyroX: Float = 0f
+    @Volatile private var latestGyroY: Float = 0f
+    @Volatile private var currentRawRx: Float = 0f
+    @Volatile private var currentRawRy: Float = 0f
+    @Volatile private var isGyroActive: Boolean = false
+
+    private var sensorManager: SensorManager? = null
+    private var gyroSensor: Sensor? = null
+    @Volatile private var isGyroRegistered = false
+    private val sensorLock = Any()
+
+    private val gyroEventListener = object : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent?) {
+            if (event?.sensor?.type == Sensor.TYPE_GYROSCOPE) {
+                val vals = event.values ?: return
+                if (vals.size >= 3) {
+                    handleGyroSensorEvent(vals[0], vals[1], vals[2])
+                }
+            }
+        }
+
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+    }
+
+    fun startGyroListener() {
+        synchronized(sensorLock) {
+            if (isGyroRegistered) return
+            try {
+                if (sensorManager == null) {
+                    sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
+                }
+                if (gyroSensor == null) {
+                    gyroSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
+                }
+                if (gyroSensor != null) {
+                    val registered = sensorManager?.registerListener(
+                        gyroEventListener,
+                        gyroSensor,
+                        SensorManager.SENSOR_DELAY_GAME,
+                        stickAidlHandler
+                    ) ?: false
+                    isGyroRegistered = registered
+                    Log.i(TAG, "Native gyro sensor registered on stickAidlHandler: $registered (sensitivity=$gyroSensitivity)")
+                } else {
+                    Log.w(TAG, "Native gyro sensor not available on this device")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to register native gyro listener", e)
+            }
+        }
+    }
+
+    fun stopGyroListener() {
+        synchronized(sensorLock) {
+            if (!isGyroRegistered) return
+            try {
+                sensorManager?.unregisterListener(gyroEventListener)
+                isGyroRegistered = false
+                latestGyroX = 0f
+                latestGyroY = 0f
+                isGyroActive = false
+                Log.i(TAG, "Native gyro sensor unregistered")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to unregister native gyro listener", e)
+            }
+        }
+    }
+
+    fun getOrientationAdjustedGyro(gx: Float, gy: Float, gz: Float, rotation: Int): Pair<Float, Float> {
+        return when (rotation) {
+            Surface.ROTATION_90 -> Pair(-gy, gx)   // Standard Landscape: -Y is turn right (X+), +X is tilt down (Y+)
+            Surface.ROTATION_270 -> Pair(gy, -gx)  // Reverse Landscape
+            Surface.ROTATION_180 -> Pair(-gx, -gy) // Reverse Portrait
+            else -> Pair(gz, gx)                  // Portrait
+        }
+    }
+
+    private fun handleGyroSensorEvent(gx: Float, gy: Float, gz: Float) {
+        if (gyroSensitivity <= 0f) return
+
+        val rotation = try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                context.display?.rotation ?: Surface.ROTATION_90
+            } else {
+                @Suppress("DEPRECATION")
+                windowManager.defaultDisplay?.rotation ?: Surface.ROTATION_90
+            }
+        } catch (_: Exception) {
+            Surface.ROTATION_90
+        }
+
+        val (screenGyroX, screenGyroY) = getOrientationAdjustedGyro(gx, gy, gz, rotation)
+        val rawMag = sqrt(screenGyroX * screenGyroX + screenGyroY * screenGyroY)
+
+        if (rawMag < gyroDeadzone) {
+            latestGyroX = 0f
+            latestGyroY = 0f
+            if (isGyroActive) {
+                isGyroActive = false
+                dispatchGyroStickUpdate()
+            }
+            return
+        }
+
+        val signX = if (gyroInvertX) -1f else 1f
+        val signY = if (gyroInvertY) -1f else 1f
+
+        latestGyroX = (screenGyroX * gyroSensitivity * signX).coerceIn(-1f, 1f)
+        latestGyroY = (screenGyroY * gyroSensitivity * signY).coerceIn(-1f, 1f)
+        isGyroActive = true
+
+        dispatchGyroStickUpdate()
+    }
+
+    private fun findGyroAreaMapping(): JSONObject? {
+        for (b in buttonMapCache.values) {
+            if (b.optString("type") == "gyro_area") {
+                return b
+            }
+        }
+        return null
+    }
+
+    private fun dispatchGyroStickUpdate() {
+        synchronized(syncLock) {
+            if (TouchInjectionPlugin.touchService == null) return
+            val rMap = findButtonMapping("R_STICK") ?: findGyroAreaMapping() ?: return
+            val rAlpha = 1f - (rMap.optDouble("smoothing", 0.0).toFloat()).coerceIn(0f, 0.95f)
+
+            val combX = (currentRawRx + latestGyroX).coerceIn(-1f, 1f)
+            val combY = (currentRawRy + latestGyroY).coerceIn(-1f, 1f)
+
+            processStick(
+                combX,
+                combY,
+                rMap,
+                smoothedAxes[0],
+                2,
+                rAlpha,
+                pointersById[1] ?: pointers[1],
+                150f
+            )
+        }
+    }
+
     fun buildMapCache() {
         buttonMapCache.clear()
         triggerMapCache.clear()
@@ -197,6 +354,18 @@ class NativeGamepadMapper(private val context: Context) {
             screenInsetBottom = root.optDouble("screenInsetBottom", 0.0).coerceIn(0.0, 45.0)
             screenInsetLeft = root.optDouble("screenInsetLeft", 0.0).coerceIn(0.0, 45.0)
             screenInsetRight = root.optDouble("screenInsetRight", 0.0).coerceIn(0.0, 45.0)
+
+            gyroSensitivity = root.optDouble("gyroSensitivity", 0.0).toFloat().coerceIn(0f, 10f)
+            gyroInvertX = root.optBoolean("gyroInvertX", false)
+            gyroInvertY = root.optBoolean("gyroInvertY", false)
+            gyroDeadzone = root.optDouble("gyroDeadzone", 0.02).toFloat().coerceIn(0.001f, 0.5f)
+
+            if (gyroSensitivity > 0f) {
+                startGyroListener()
+            } else {
+                stopGyroListener()
+            }
+
             val buttons = root.optJSONArray("buttons") ?: return
 
             for (i in 0 until buttons.length()) {
@@ -235,6 +404,7 @@ class NativeGamepadMapper(private val context: Context) {
         instance?.let { old ->
             old.turboRunnables.values.forEach { old.mainHandler.removeCallbacks(it) }
             old.turboRunnables.clear()
+            old.stopGyroListener()
         }
         instance = this
         buildMapCache()
@@ -321,6 +491,13 @@ class NativeGamepadMapper(private val context: Context) {
         }
 
         val deadzone = mapping.optDouble("deadzone", 0.12).toFloat()
+        // If pointer is right stick (id == 1) and physical stick is in deadzone while gyro is active,
+        // use gyroDeadzone to allow ultra-fine sniper micro-aiming without requiring large tilts.
+        val effectiveDeadzone = if (pointer.id == 1 && currentRawRx == 0f && currentRawRy == 0f && isGyroActive) {
+            gyroDeadzone
+        } else {
+            deadzone
+        }
 
         // FIX (root cause of "analog nyangkut ke bawah"): deadzone check previously ran on
         // the SMOOTHED magnitude. When the stick was released (raw → 0), the smoothed value
@@ -331,7 +508,7 @@ class NativeGamepadMapper(private val context: Context) {
         // circle, touchUp fires and the smoothing buffer is reset to zero. Smoothing is now
         // only applied to non-deadzone input, so it never creates release lag.
         val rawInputMag = sqrt(rawX * rawX + rawY * rawY)
-        if (rawInputMag <= deadzone) {
+        if (rawInputMag <= effectiveDeadzone) {
             if (pointer.isActive) {
                 val pid = pointer.id
                 // Cancel any pending coalesced move for this pointer before dispatching touchUp
@@ -356,7 +533,7 @@ class NativeGamepadMapper(private val context: Context) {
         val sy = smoothBuffer[smoothOffset + 1]
         val rawMag = sqrt(sx * sx + sy * sy)
 
-        val (dzX, dzY) = applyRadialDeadzone(sx, sy, deadzone)
+        val (dzX, dzY) = applyRadialDeadzone(sx, sy, effectiveDeadzone)
         val rescaledMag = sqrt(dzX * dzX + dzY * dzY).coerceIn(0f, 1f)
 
         val curve = mapping.optString("sensitivityCurve", "linear")
@@ -455,13 +632,22 @@ class NativeGamepadMapper(private val context: Context) {
 
             val offset = (gamepadIndex % 4) * 16
             val lMap = findButtonMapping("L_STICK")
-            val rMap = findButtonMapping("R_STICK")
+            val rMap = findButtonMapping("R_STICK") ?: findGyroAreaMapping()
 
             val lAlpha = 1f - (lMap?.optDouble("smoothing", 0.0)?.toFloat() ?: 0f).coerceIn(0f, 0.95f)
             val rAlpha = 1f - (rMap?.optDouble("smoothing", 0.0)?.toFloat() ?: 0f).coerceIn(0f, 0.95f)
 
             processStick(lx, ly, lMap, smoothedAxes[gamepadIndex], 0, lAlpha, pointersById[offset] ?: pointers[0], 100f)
-            processStick(rx, ry, rMap, smoothedAxes[gamepadIndex], 2, rAlpha, pointersById[offset + 1] ?: pointers[1], 150f)
+
+            if (gamepadIndex == 0) {
+                currentRawRx = rx
+                currentRawRy = ry
+                val effRx = (rx + latestGyroX).coerceIn(-1f, 1f)
+                val effRy = (ry + latestGyroY).coerceIn(-1f, 1f)
+                processStick(effRx, effRy, rMap, smoothedAxes[gamepadIndex], 2, rAlpha, pointersById[offset + 1] ?: pointers[1], 150f)
+            } else {
+                processStick(rx, ry, rMap, smoothedAxes[gamepadIndex], 2, rAlpha, pointersById[offset + 1] ?: pointers[1], 150f)
+            }
 
             handleTrigger(gamepadIndex, "LT", l2)
             handleTrigger(gamepadIndex, "RT", r2)

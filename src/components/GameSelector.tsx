@@ -331,7 +331,7 @@ export default function GameSelector({ profiles, activeProfileId, onProfileSelec
                       onChange={(e) => updateProfileValue('gyroSensitivity', parseFloat(e.target.value))}
                     />
                     <span className="block text-[8px] text-slate-500 mt-0.5 leading-normal">Scalar coefficient multiplier mapped onto touch simulation canvas bounds.</span>
-                    <span className="block text-[8px] text-amber-500/80 mt-0.5 leading-normal">⚠ Not yet wired to a gyro input pipeline — value is saved but has no effect yet.</span>
+                    <span className="block text-[8px] text-emerald-400 mt-0.5 leading-normal">✓ Active — hardware gyroscope directly assists R-Stick / Camera aiming.</span>
                   </div>
 
                   <div>

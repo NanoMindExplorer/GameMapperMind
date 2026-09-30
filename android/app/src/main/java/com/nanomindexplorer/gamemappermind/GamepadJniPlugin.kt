@@ -5,31 +5,46 @@ object GamepadJniPlugin {
     private val batchedEvents = mutableListOf<() -> Unit>()
     private var isPending = false
 
-    @Volatile private var pendingAxisGpIdx: Int = -1
-    @Volatile private var pendingAxisLx: Float = 0f
-    @Volatile private var pendingAxisLy: Float = 0f
-    @Volatile private var pendingAxisRx: Float = 0f
-    @Volatile private var pendingAxisRy: Float = 0f
-    @Volatile private var pendingAxisL2: Float = 0f
-    @Volatile private var pendingAxisR2: Float = 0f
-    @Volatile private var hasPendingAxis: Boolean = false
+    private class PendingAxisState {
+        var lx: Float = 0f
+        var ly: Float = 0f
+        var rx: Float = 0f
+        var ry: Float = 0f
+        var l2: Float = 0f
+        var r2: Float = 0f
+        var dirty: Boolean = false
+    }
+
+    private val pendingAxes = Array(4) { PendingAxisState() }
+    private val axisLock = Any()
 
     private val injectionThread = android.os.HandlerThread("GamepadInjection").also { it.start() }
     val injectionHandler = android.os.Handler(injectionThread.looper)
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
     private val processRunnable = Runnable {
-        if (hasPendingAxis) {
-            val gpIdx = pendingAxisGpIdx
-            val lx = pendingAxisLx; val ly = pendingAxisLy
-            val rx = pendingAxisRx; val ry = pendingAxisRy
-            val l2 = pendingAxisL2; val r2 = pendingAxisR2
-            hasPendingAxis = false
-            pendingAxisGpIdx = -1
-            if (NativeGamepadMapper.instance != null) {
-                NativeGamepadMapper.instance?.handleAxes(gpIdx, lx, ly, rx, ry, l2, r2)
+        val dirtyUpdates = mutableListOf<Pair<Int, PendingAxisState>>()
+        synchronized(axisLock) {
+            for (i in 0 until 4) {
+                val state = pendingAxes[i]
+                if (state.dirty) {
+                    val copy = PendingAxisState().apply {
+                        lx = state.lx; ly = state.ly
+                        rx = state.rx; ry = state.ry
+                        l2 = state.l2; r2 = state.r2
+                    }
+                    dirtyUpdates.add(Pair(i, copy))
+                    state.dirty = false
+                }
             }
         }
+
+        for ((gpIdx, state) in dirtyUpdates) {
+            if (NativeGamepadMapper.instance != null) {
+                NativeGamepadMapper.instance?.handleAxes(gpIdx, state.lx, state.ly, state.rx, state.ry, state.l2, state.r2)
+            }
+        }
+
         val toProcess: List<() -> Unit>
         synchronized(batchedEvents) {
             isPending = false
@@ -53,11 +68,14 @@ object GamepadJniPlugin {
     }
 
     fun handleAxisBatched(gamepadIndex: Int, lx: Float, ly: Float, rx: Float, ry: Float, l2: Float, r2: Float) {
-        pendingAxisGpIdx = gamepadIndex
-        pendingAxisLx = lx; pendingAxisLy = ly
-        pendingAxisRx = rx; pendingAxisRy = ry
-        pendingAxisL2 = l2; pendingAxisR2 = r2
-        hasPendingAxis = true
+        if (gamepadIndex !in 0..3) return
+        synchronized(axisLock) {
+            val state = pendingAxes[gamepadIndex]
+            state.lx = lx; state.ly = ly
+            state.rx = rx; state.ry = ry
+            state.l2 = l2; state.r2 = r2
+            state.dirty = true
+        }
         var needsPost = false
         synchronized(batchedEvents) {
             if (!isPending) { isPending = true; needsPost = true }

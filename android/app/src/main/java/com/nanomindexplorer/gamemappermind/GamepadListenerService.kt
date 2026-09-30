@@ -19,8 +19,28 @@ import androidx.core.app.NotificationCompat
 class GamepadListenerService : Service(), InputManager.InputDeviceListener {
 
     private val CHANNEL_ID = "GamepadListenerChannel"
+
+    data class DetectedDevice(
+        val devicePath: String,
+        val axisRanges: Map<String, Pair<Int, Int>>,
+        val rightStickUsesZRZ: Boolean,
+        val buttonNames: Set<String>
+    )
+
+    data class GamepadSlot(
+        val slotIndex: Int, // 0..3
+        val devicePath: String,
+        val axisRanges: Map<String, Pair<Int, Int>>,
+        val rightStickUsesZRZ: Boolean,
+        val buttonNames: Set<String>
+    )
+
+    private val activeSlots = java.util.concurrent.ConcurrentHashMap<String, GamepadSlot>()
+    private val slotLock = Any()
     @Volatile private var isListening = false
-    private var currentGamepadDevice: String? = null
+    val currentGamepadDevice: String?
+        get() = activeSlots.keys.firstOrNull()
+
     private lateinit var inputManager: InputManager
 
     companion object {
@@ -118,26 +138,22 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
         }
     }
 
-    // ==================== HOTPLUG (Lebih Robust) ====================
+    // ==================== HOTPLUG (MULTI-GAMEPAD AWARE) ====================
 
     override fun onInputDeviceAdded(deviceId: Int) {
         val device = inputManager.getInputDevice(deviceId) ?: return
         if (isGamepadDevice(device)) {
             Log.i("GameMapper", "Gamepad connected: ${device.name}")
-            if (!isListening) {
-                startGetEventCapture()
-            }
+            startGetEventCapture()
         }
     }
 
     override fun onInputDeviceRemoved(deviceId: Int) {
         val device = inputManager.getInputDevice(deviceId)
         Log.i("GameMapper", "Input device removed: ${device?.name ?: deviceId}")
-
-        // Jika device yang sedang dipakai disconnect, reset dan coba cari lagi
-        if (currentGamepadDevice != null) {
-            // Untuk sekarang kita stop dulu, nanti akan dicoba reconnect otomatis
-            stopCurrentListener()
+        if (isRunning) {
+            // Re-sync active streams with remaining devices
+            startGetEventCapture()
         }
     }
 
@@ -151,21 +167,26 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
     }
 
     private fun stopCurrentListener() {
-        if (isListening) {
+        stopAllListeners()
+    }
+
+    private fun stopAllListeners() {
+        synchronized(slotLock) {
             isListening = false
-            currentGamepadDevice = null
+            for (slot in activeSlots.values) {
+                NativeGamepadMapper.instance?.resetGamepad(slot.slotIndex)
+            }
+            activeSlots.clear()
             try {
                 TouchInjectionPlugin.touchService?.stopStreamCommand()
             } catch (_: Exception) {}
-            Log.i("GameMapper", "Stopped current getevent listener due to device change")
+            Log.i("GameMapper", "Stopped all getevent streams")
         }
     }
 
-    // ==================== GETEVENT LISTENER ====================
+    // ==================== GETEVENT LISTENER (MULTI-CONTROLLER MULTIPLEXING) ====================
 
     private fun startGetEventCapture() {
-        if (isListening) return
-
         if (!rikka.shizuku.Shizuku.pingBinder() ||
             rikka.shizuku.Shizuku.checkSelfPermission() != android.content.pm.PackageManager.PERMISSION_GRANTED ||
             TouchInjectionPlugin.touchService == null
@@ -173,8 +194,6 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
             Log.w("GameMapper", "Shizuku or TouchService not ready")
             return
         }
-
-        isListening = true
 
         Thread {
             try {
@@ -187,56 +206,72 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
                 val nativeMapper = NativeGamepadMapper.instance ?: NativeGamepadMapper(this)
                 nativeMapper.buildMapCache()
 
-                val gamepadDevice = detectGamepadDevice()
-                if (gamepadDevice == null) {
+                val detectedDevices = detectAllGamepadDevices()
+                if (detectedDevices.isEmpty()) {
                     Log.w("GameMapper", "No gamepad detected")
                     TouchInjectionPlugin.emitGamepadButton("ERROR_NO_GAMEPAD", 0, 0f)
-                    isListening = false
                     return@Thread
                 }
 
-                currentGamepadDevice = gamepadDevice
-                Log.i("GameMapper", "Starting getevent on: $gamepadDevice")
+                synchronized(slotLock) {
+                    // Check for disconnected devices
+                    val detectedPaths = detectedDevices.map { it.devicePath }.toSet()
+                    val toRemove = activeSlots.keys.filter { it !in detectedPaths }
+                    for (removedPath in toRemove) {
+                        val removedSlot = activeSlots.remove(removedPath)
+                        if (removedSlot != null) {
+                            Log.i("GameMapper", "Gamepad removed from slot ${removedSlot.slotIndex}: $removedPath")
+                            NativeGamepadMapper.instance?.resetGamepad(removedSlot.slotIndex)
+                        }
+                    }
 
-                val streamListener = createStreamListener()
-                TouchInjectionPlugin.touchService?.executeStreamCommand(
-                    "getevent -l $gamepadDevice",
-                    streamListener
-                )
+                    // Assign and spawn streams for newly detected devices
+                    for (dev in detectedDevices) {
+                        if (activeSlots.containsKey(dev.devicePath)) {
+                            // Already streaming on this device
+                            continue
+                        }
+
+                        // Find first free slot in 0..3
+                        val occupiedSlots = activeSlots.values.map { it.slotIndex }.toSet()
+                        val freeSlotIndex = (0..3).firstOrNull { it !in occupiedSlots }
+                        if (freeSlotIndex == null) {
+                            Log.w("GameMapper", "Max 4 gamepads already connected. Skipping ${dev.devicePath}")
+                            continue
+                        }
+
+                        val slot = GamepadSlot(
+                            freeSlotIndex,
+                            dev.devicePath,
+                            dev.axisRanges,
+                            dev.rightStickUsesZRZ,
+                            dev.buttonNames
+                        )
+                        activeSlots[dev.devicePath] = slot
+                        isListening = true
+
+                        Log.i("GameMapper", "Starting getevent on ${dev.devicePath} for gamepad slot ${slot.slotIndex}")
+                        val axisNames = if (slot.axisRanges.isEmpty()) "(none)" else slot.axisRanges.keys.sorted().joinToString(", ")
+                        val btnNames = if (slot.buttonNames.isEmpty()) "(none)" else slot.buttonNames.sorted().joinToString(", ")
+                        TouchInjectionPlugin.emitDiagnosticLog("[GAMEPAD-DETECT] Slot ${slot.slotIndex} (${dev.devicePath}): axes: $axisNames | buttons: $btnNames | R-stick uses Z/RZ: ${slot.rightStickUsesZRZ}")
+
+                        val listener = createStreamListener(slot)
+                        TouchInjectionPlugin.touchService?.executeStreamCommand(
+                            "getevent -l ${dev.devicePath}",
+                            listener
+                        )
+                    }
+                }
 
             } catch (e: Exception) {
-                Log.e("GameMapper", "Failed to start getevent", e)
-                isListening = false
+                Log.e("GameMapper", "Failed in startGetEventCapture", e)
             }
         }.apply { isDaemon = true }.start()
     }
 
-    // FIX (bug report: "LT/RT tidak bereaksi", "analog kiri nyangkut/gak smooth"):
-    // normalizeAxis()/normalizeTrigger() previously assumed a hardcoded signed
-    // -32768..32767 range for EVERY axis, including triggers. Real controllers report
-    // wildly different raw ranges per axis (sticks are often -32768..32767, but triggers
-    // are very commonly unsigned 0..255 or 0..1023 — some sticks aren't ±32767 either).
-    // With the old hardcoded formula, a 0..255 trigger would normalize to a near-constant
-    // ~0.50 regardless of press state, permanently tripping the press threshold once and
-    // then never changing again — exactly "LT/RT tidak bereaksi". detectGamepadDevice()
-    // already runs `getevent -lp`, which prints each axis's real min/max — previously
-    // that text was fetched and then thrown away, keeping only the device path. Now it's
-    // parsed and kept so normalization matches the actual hardware.
-    private var detectedAxisRanges: Map<String, Pair<Int, Int>> = emptyMap()
-
-    // FIX (bug report: "analog kanan mati" + "LT/RT tidak bereaksi" together): the code
-    // assumed the Xbox/xpad convention (ABS_RX/RY = right stick, ABS_Z/RZ = triggers). Many
-    // generic/cheap Bluetooth gamepads instead report the right stick on ABS_Z/ABS_RZ and
-    // send triggers as plain digital buttons (BTN_TL2/BTN_TR2), not as any analog axis at
-    // all. Under the old fixed assumption, that combination reads as "right stick frozen at
-    // whatever the trigger happens to report" AND "triggers never analog-cross the press
-    // threshold" simultaneously — matching both symptoms at once. Decided once per connected
-    // device from its actual capability dump, not guessed globally.
-    private var rightStickUsesZRZ = false
-
-    private fun detectGamepadDevice(): String? {
+    private fun detectAllGamepadDevices(): List<DetectedDevice> {
         return try {
-            val result = TouchInjectionPlugin.touchService?.executeShellCommand("getevent -lp") ?: return null
+            val result = TouchInjectionPlugin.touchService?.executeShellCommand("getevent -lp") ?: return emptyList()
             val output = org.json.JSONObject(result).optString("output", "")
             val lines = output.lines()
 
@@ -256,7 +291,8 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
                     currentPath = Regex("/dev/input/event\\d+").find(line)?.value
                     isGamepad = false
                 } else if (line.contains("BTN_A") || line.contains("BTN_GAMEPAD") ||
-                           line.contains("BTN_SOUTH") || line.contains("ABS_HAT0X")) {
+                           line.contains("BTN_SOUTH") || line.contains("ABS_HAT0X") ||
+                           line.contains("BTN_JOYSTICK")) {
                     isGamepad = true
                 }
 
@@ -270,10 +306,6 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
                     }
                 }
 
-                // FIX: previously only ABS_ axis names were collected. Some controllers send
-                // LT/RT as plain digital buttons (BTN_TL2/BTN_TR2) instead of any analog axis
-                // — without seeing the BTN_ names too, there was no way to tell that case
-                // apart from "this controller just doesn't send LT/RT at all".
                 if (currentPath != null && (line.trim().startsWith("BTN_") || line.contains("KEY (0001)"))) {
                     btnLineRegex.findAll(line).forEach { m ->
                         deviceButtonNames.getOrPut(currentPath!!) { mutableSetOf() }.add(m.value)
@@ -285,30 +317,24 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
                 devices.add(currentPath)
             }
 
-            val chosen = devices.firstOrNull()
-            detectedAxisRanges = if (chosen != null) deviceAxisRanges[chosen] ?: emptyMap() else emptyMap()
-            val detectedButtonNames = if (chosen != null) deviceButtonNames[chosen] ?: emptySet() else emptySet()
-            rightStickUsesZRZ = !detectedAxisRanges.containsKey("ABS_RX") &&
-                !detectedAxisRanges.containsKey("ABS_RY") &&
-                detectedAxisRanges.containsKey("ABS_Z") &&
-                detectedAxisRanges.containsKey("ABS_RZ")
-            Log.i("GameMapper", "Detected axis ranges for $chosen: $detectedAxisRanges (rightStickUsesZRZ=$rightStickUsesZRZ), buttons: $detectedButtonNames")
-            // FIX: surface this on-screen too — previously only visible via `adb logcat`,
-            // which most users can't access. Directly useful for diagnosing why a specific
-            // controller's LT/RT or a stick doesn't register: the axis/button names actually
-            // present here are the ground truth for what this hardware sends, no guessing needed.
-            val axisNames = if (detectedAxisRanges.isEmpty()) "(none)" else detectedAxisRanges.keys.sorted().joinToString(", ")
-            val btnNames = if (detectedButtonNames.isEmpty()) "(none)" else detectedButtonNames.sorted().joinToString(", ")
-            TouchInjectionPlugin.emitDiagnosticLog("[GAMEPAD-DETECT] axes: $axisNames | buttons: $btnNames | R-stick uses Z/RZ: $rightStickUsesZRZ")
-            chosen
+            val resultList = mutableListOf<DetectedDevice>()
+            for (path in devices) {
+                val ranges = deviceAxisRanges[path] ?: emptyMap()
+                val btns = deviceButtonNames[path] ?: emptySet()
+                val zrz = !ranges.containsKey("ABS_RX") &&
+                    !ranges.containsKey("ABS_RY") &&
+                    ranges.containsKey("ABS_Z") &&
+                    ranges.containsKey("ABS_RZ")
+                resultList.add(DetectedDevice(path, ranges, zrz, btns))
+            }
+            resultList
         } catch (e: Exception) {
-            Log.e("GameMapper", "detectGamepadDevice failed", e)
-            detectedAxisRanges = emptyMap()
-            null
+            Log.e("GameMapper", "detectAllGamepadDevices failed", e)
+            emptyList()
         }
     }
 
-    private fun createStreamListener() = object : ICommandOutputListener.Stub() {
+    private fun createStreamListener(slot: GamepadSlot) = object : ICommandOutputListener.Stub() {
         private var lStickX = 0f
         private var lStickY = 0f
         private var rStickX = 0f
@@ -316,15 +342,6 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
         private var l2Trigger = 0f
         private var r2Trigger = 0f
         private var hasAxisChange = false
-
-        // FIX (bug report: "[GAMEPAD] A DOWN" repeated 7x in a row with no UP in between):
-        // getevent -l reports raw evdev EV_KEY values, and held keys commonly generate
-        // periodic value=2 (repeat) events in addition to the initial value=1 (press). This
-        // listener previously treated every DOWN-labeled line as a fresh event and forwarded
-        // it straight to both the injection pipeline AND the on-screen log — so a single
-        // physical hold could look like (and in NativeGamepadMapper's case, redundantly
-        // re-process) many separate presses. Track last-known state per raw button name here
-        // and only forward genuine transitions.
         private val lastKeyState = mutableMapOf<String, Boolean>()
 
         override fun onOutputLine(line: String?) {
@@ -333,8 +350,10 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
             when {
                 line.contains("EV_SYN") && line.contains("SYN_REPORT") -> {
                     if (hasAxisChange) {
-                        GamepadJniPlugin.handleAxisBatched(0, lStickX, lStickY, rStickX, rStickY, l2Trigger, r2Trigger)
-                        TouchInjectionPlugin.emitGamepadAxis(floatArrayOf(lStickX, lStickY, rStickX, rStickY, l2Trigger, r2Trigger))
+                        GamepadJniPlugin.handleAxisBatched(slot.slotIndex, lStickX, lStickY, rStickX, rStickY, l2Trigger, r2Trigger)
+                        if (slot.slotIndex == 0) {
+                            TouchInjectionPlugin.emitGamepadAxis(floatArrayOf(lStickX, lStickY, rStickX, rStickY, l2Trigger, r2Trigger))
+                        }
                         hasAxisChange = false
                     }
                 }
@@ -344,13 +363,18 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
         }
 
         override fun onExit(code: Int) {
-            isListening = false
-            currentGamepadDevice = null
-            Log.w("GameMapper", "getevent stream ended (code=$code). Trying to reconnect...")
+            Log.w("GameMapper", "getevent stream ended for ${slot.devicePath} slot ${slot.slotIndex} (code=$code). Trying to reconnect...")
+            synchronized(slotLock) {
+                activeSlots.remove(slot.devicePath)
+                NativeGamepadMapper.instance?.resetGamepad(slot.slotIndex)
+                if (activeSlots.isEmpty()) {
+                    isListening = false
+                }
+            }
 
             if (isRunning) {
                 Handler(Looper.getMainLooper()).postDelayed({
-                    if (isRunning && !isListening) {
+                    if (isRunning && activeSlots.isEmpty()) {
                         startGetEventCapture()
                     }
                 }, 2000)
@@ -369,22 +393,17 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
                 val btnName = mapEvdevToButton(btnRaw)
 
                 if (btnName != "UNKNOWN") {
-                    // FIX: only forward genuine press/release transitions — see lastKeyState
-                    // comment above. Keyed by the RAW evdev name (not the mapped btnName) so
-                    // this can't mask two different physical buttons that happen to map to
-                    // the same logical name.
                     if (lastKeyState[btnRaw] == isDown) return
                     lastKeyState[btnRaw] = isDown
 
-                    GamepadJniPlugin.handleButtonBatched(0, btnName, isDown)
-                    TouchInjectionPlugin.emitGamepadButton(btnName, if (isDown) 1 else 0, 1.0f)
+                    GamepadJniPlugin.handleButtonBatched(slot.slotIndex, btnName, isDown)
+                    if (slot.slotIndex == 0) {
+                        TouchInjectionPlugin.emitGamepadButton(btnName, if (isDown) 1 else 0, 1.0f)
+                    }
                 } else {
-                    // FIX: surface unrecognized button codes to the on-screen diagnostic log
-                    // so the user can see exactly what their hardware sends and we can extend
-                    // mapEvdevToButton() to cover it.
                     if (lastKeyState[btnRaw] != isDown) {
                         lastKeyState[btnRaw] = isDown
-                        TouchInjectionPlugin.emitDiagnosticLog("[GAMEPAD-KEY] Unmapped button $btnRaw ${if (isDown) "DOWN" else "UP"} — raw line: $line")
+                        TouchInjectionPlugin.emitDiagnosticLog("[GAMEPAD-KEY] Slot ${slot.slotIndex} Unmapped button $btnRaw ${if (isDown) "DOWN" else "UP"} — raw line: $line")
                     }
                 }
             }
@@ -406,48 +425,39 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
                     "ABS_RX" -> { rStickX = normalizeAxis(axisType, rawVal); hasAxisChange = true }
                     "ABS_RY" -> { rStickY = normalizeAxis(axisType, rawVal); hasAxisChange = true }
                     "ABS_Z" -> {
-                        if (rightStickUsesZRZ) { rStickX = normalizeAxis(axisType, rawVal) }
+                        if (slot.rightStickUsesZRZ) { rStickX = normalizeAxis(axisType, rawVal) }
                         else { l2Trigger = normalizeTrigger(axisType, rawVal) }
                         hasAxisChange = true
                     }
                     "ABS_RZ" -> {
-                        if (rightStickUsesZRZ) { rStickY = normalizeAxis(axisType, rawVal) }
+                        if (slot.rightStickUsesZRZ) { rStickY = normalizeAxis(axisType, rawVal) }
                         else { r2Trigger = normalizeTrigger(axisType, rawVal) }
                         hasAxisChange = true
                     }
                     "ABS_GAS" -> { r2Trigger = normalizeTrigger(axisType, rawVal); hasAxisChange = true }
                     "ABS_BRAKE" -> { l2Trigger = normalizeTrigger(axisType, rawVal); hasAxisChange = true }
-                    // FIX: D-pad on most controllers reports as ABS_HAT0X/ABS_HAT0Y (-1/0/1), not
-                    // as BTN_DPAD_* keys. This was previously unhandled here entirely — harmless
-                    // while testing on the main app screen (GamepadPlugin's onGenericMotionEvent
-                    // path covers it there), but during actual gameplay MainActivity has no window
-                    // focus so THIS listener is the only path receiving input, and D-pad silently
-                    // did nothing. Mirrors the same DPAD_* button convention GamepadPlugin uses,
-                    // so downstream mapping/dedup in NativeGamepadMapper.handleButton works as-is.
                     "ABS_HAT0X" -> {
-                        GamepadJniPlugin.handleButtonBatched(0, "DPAD_LEFT", rawVal < 0)
-                        GamepadJniPlugin.handleButtonBatched(0, "DPAD_RIGHT", rawVal > 0)
-                        TouchInjectionPlugin.emitGamepadButton("DPAD_LEFT", if (rawVal < 0) 1 else 0, 1.0f)
-                        TouchInjectionPlugin.emitGamepadButton("DPAD_RIGHT", if (rawVal > 0) 1 else 0, 1.0f)
+                        GamepadJniPlugin.handleButtonBatched(slot.slotIndex, "DPAD_LEFT", rawVal < 0)
+                        GamepadJniPlugin.handleButtonBatched(slot.slotIndex, "DPAD_RIGHT", rawVal > 0)
+                        if (slot.slotIndex == 0) {
+                            TouchInjectionPlugin.emitGamepadButton("DPAD_LEFT", if (rawVal < 0) 1 else 0, 1.0f)
+                            TouchInjectionPlugin.emitGamepadButton("DPAD_RIGHT", if (rawVal > 0) 1 else 0, 1.0f)
+                        }
                     }
                     "ABS_HAT0Y" -> {
-                        GamepadJniPlugin.handleButtonBatched(0, "DPAD_UP", rawVal < 0)
-                        GamepadJniPlugin.handleButtonBatched(0, "DPAD_DOWN", rawVal > 0)
-                        TouchInjectionPlugin.emitGamepadButton("DPAD_UP", if (rawVal < 0) 1 else 0, 1.0f)
-                        TouchInjectionPlugin.emitGamepadButton("DPAD_DOWN", if (rawVal > 0) 1 else 0, 1.0f)
+                        GamepadJniPlugin.handleButtonBatched(slot.slotIndex, "DPAD_UP", rawVal < 0)
+                        GamepadJniPlugin.handleButtonBatched(slot.slotIndex, "DPAD_DOWN", rawVal > 0)
+                        if (slot.slotIndex == 0) {
+                            TouchInjectionPlugin.emitGamepadButton("DPAD_UP", if (rawVal < 0) 1 else 0, 1.0f)
+                            TouchInjectionPlugin.emitGamepadButton("DPAD_DOWN", if (rawVal > 0) 1 else 0, 1.0f)
+                        }
                     }
                 }
             } catch (_: Exception) {}
         }
 
-        // FIX: previously hardcoded to a signed -32768..32767 range for every axis
-        // (`raw / 32767f`), which silently breaks any controller whose stick doesn't use
-        // exactly that range. Now uses the real min/max detectGamepadDevice() parsed from
-        // `getevent -lp` for this specific device/axis (centers on the range's actual
-        // midpoint, not an assumed 0), falling back to the old constant only if that
-        // specific axis wasn't found in the capability dump.
         private fun normalizeAxis(axisName: String, raw: Int): Float {
-            val range = detectedAxisRanges[axisName]
+            val range = slot.axisRanges[axisName]
             if (range != null) {
                 val (min, max) = range
                 val half = (max - min) / 2f
@@ -459,15 +469,8 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
             return (raw / 32767f).coerceIn(-1f, 1f)
         }
 
-        // FIX (root cause of "LT/RT tidak bereaksi"): previously assumed the same signed
-        // -32768..32767 range as sticks (`(raw + 32768) / 65535f`). Triggers are very
-        // commonly unsigned 0..255 or 0..1023 instead — under the old formula a 0..255
-        // trigger would always normalize to roughly 0.50 (both released AND fully pressed),
-        // permanently tripping the 0.08 press threshold once on the first tiny jitter and
-        // then never crossing it again. Now scales from the real detected min (released) to
-        // max (fully pressed) for this exact axis, whatever range the hardware actually uses.
         private fun normalizeTrigger(axisName: String, raw: Int): Float {
-            val range = detectedAxisRanges[axisName]
+            val range = slot.axisRanges[axisName]
             if (range != null) {
                 val (min, max) = range
                 val span = (max - min).toFloat()
@@ -475,15 +478,6 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
                     return ((raw - min) / span).coerceIn(0f, 1f)
                 }
             }
-            // Fallback: when the axis range wasn't detected (e.g. detectGamepadDevice failed
-            // to parse getevent -lp output, or the controller uses a non-standard axis),
-            // pick the most likely max based on the raw value's magnitude. Common trigger
-            // ranges: 0..255 (8-bit HID), 0..1023 (10-bit), 0..4095 (12-bit), 0..32767 (15-bit).
-            // The old fallback hardcoded /255f — which on a 0..1023 trigger always returned
-            // 1.0 (clamped) from the very first sample, making the trigger permanently
-            // "pressed" and freezing all subsequent LT/RT input. The heuristic below at least
-            // gives a sane fraction for partial presses on wider ranges, and full presses
-            // still reach 1.0 on every range.
             val maxGuess = when {
                 raw > 4095 -> 32767f
                 raw > 1023 -> 4095f
@@ -545,8 +539,7 @@ class GamepadListenerService : Service(), InputManager.InputDeviceListener {
         super.onDestroy()
         Log.d("GameMapper", "GamepadListenerService: onDestroy")
         isRunning = false
-        isListening = false
-        currentGamepadDevice = null
+        stopAllListeners()
 
         inputManager.unregisterInputDeviceListener(this)
 

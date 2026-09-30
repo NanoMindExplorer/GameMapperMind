@@ -79,59 +79,76 @@ class TouchDaemonService : ITouchService.Stub {
 
     // ==================== STREAM COMMAND ====================
 
-    @Volatile private var streamProcess: Process? = null
-    @Volatile private var streamThread: Thread? = null
+    private class StreamSession(val process: Process, val thread: Thread)
+    private val streamSessions = java.util.concurrent.ConcurrentHashMap<String, StreamSession>()
     private val streamLock = Any()
 
     override fun executeStreamCommand(command: String, listener: ICommandOutputListener) {
         synchronized(streamLock) {
-            stopStreamCommandInternal()
-
-            if (!command.startsWith("getevent -l /dev/input/event")) {
+            val trimmedCmd = command.trim()
+            if (!trimmedCmd.startsWith("getevent -l /dev/input/event") && trimmedCmd != "getevent -l") {
                 try {
-                    listener.onOutputLine("ERROR: Only getevent -l /dev/input/eventN is allowed")
+                    listener.onOutputLine("ERROR: Only getevent -l [/dev/input/eventN] is allowed")
                     listener.onExit(-1)
                 } catch (_: Exception) {}
                 return
             }
 
-            streamThread = Thread {
-                try {
-                    val cmdArray = command.split(" ").toTypedArray()
-                    streamProcess = Runtime.getRuntime().exec(cmdArray)
-                    val reader = streamProcess!!.inputStream.bufferedReader()
+            // Stop any existing stream session for this specific command
+            stopStreamCommandInternal(trimmedCmd)
 
-                    while (!Thread.currentThread().isInterrupted) {
-                        val line = try { reader.readLine() } catch (_: Exception) { break }
-                        if (line == null) break
-                        try { listener.onOutputLine(line) } catch (_: Exception) { break }
-                    }
-
-                    val exitCode = try { streamProcess?.waitFor() ?: -1 } catch (_: Exception) { -1 }
-                    try { listener.onExit(exitCode) } catch (_: Exception) {}
-                } catch (e: Exception) {
+            try {
+                val cmdArray = trimmedCmd.split(" ").filter { it.isNotBlank() }.toTypedArray()
+                val process = Runtime.getRuntime().exec(cmdArray)
+                val thread = Thread {
                     try {
-                        listener.onOutputLine("ERROR: ${e.localizedMessage}")
-                        listener.onExit(-1)
-                    } catch (_: Exception) {}
-                }
-            }.apply { isDaemon = true }
+                        val reader = process.inputStream.bufferedReader()
+                        while (!Thread.currentThread().isInterrupted) {
+                            val line = try { reader.readLine() } catch (_: Exception) { break }
+                            if (line == null) break
+                            try { listener.onOutputLine(line) } catch (_: Exception) { break }
+                        }
+                        val exitCode = try { process.waitFor() } catch (_: Exception) { -1 }
+                        try { listener.onExit(exitCode) } catch (_: Exception) {}
+                    } catch (e: Exception) {
+                        try {
+                            listener.onOutputLine("ERROR: ${e.localizedMessage}")
+                            listener.onExit(-1)
+                        } catch (_: Exception) {}
+                    } finally {
+                        streamSessions.remove(trimmedCmd)
+                    }
+                }.apply { isDaemon = true }
 
-            streamThread?.start()
+                streamSessions[trimmedCmd] = StreamSession(process, thread)
+                thread.start()
+            } catch (e: Exception) {
+                try {
+                    listener.onOutputLine("ERROR: ${e.localizedMessage}")
+                    listener.onExit(-1)
+                } catch (_: Exception) {}
+            }
         }
     }
 
     override fun stopStreamCommand() {
         synchronized(streamLock) {
-            stopStreamCommandInternal()
+            stopAllStreamsInternal()
         }
     }
 
-    private fun stopStreamCommandInternal() {
-        try { streamProcess?.destroyForcibly() } catch (_: Exception) {}
-        streamProcess = null
-        try { streamThread?.interrupt() } catch (_: Exception) {}
-        streamThread = null
+    private fun stopStreamCommandInternal(commandKey: String) {
+        val session = streamSessions.remove(commandKey) ?: return
+        try { session.process.destroyForcibly() } catch (_: Exception) {}
+        try { session.thread.interrupt() } catch (_: Exception) {}
+    }
+
+    private fun stopAllStreamsInternal() {
+        for ((_, session) in streamSessions) {
+            try { session.process.destroyForcibly() } catch (_: Exception) {}
+            try { session.thread.interrupt() } catch (_: Exception) {}
+        }
+        streamSessions.clear()
     }
 
     // ==================== TOUCH INJECTION ====================
@@ -162,8 +179,8 @@ class TouchDaemonService : ITouchService.Stub {
 
     // ==================== OBJECT & ARRAY POOLING (PERFORMANCE) ====================
     // Pre-allocated array pools to eliminate Garbage Collection (GC) pressure in the
-    // 60-120Hz hot path (analog stick move & simultaneous button multi-touch).
-    private val MAX_POOLED_POINTERS = 16
+    // 60-120Hz hot path (analog stick move & simultaneous button multi-touch across up to 4 gamepads).
+    private val MAX_POOLED_POINTERS = 32
 
     // Pre-allocated snapshot buffer to sort active pointers in-place without ArrayList allocations
     private val activePointersSnapshot = Array(MAX_POOLED_POINTERS) { ActivePointer() }

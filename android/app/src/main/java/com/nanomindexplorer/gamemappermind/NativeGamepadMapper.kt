@@ -478,6 +478,9 @@ class NativeGamepadMapper(private val context: Context) {
                 val p = pointersById[offset + i]
                 if (p != null && p.isActive) {
                     val pid = p.id
+                    if (p.type == "analog") {
+                        cancelPendingStickMove(pid)
+                    }
                     val handler = if (p.type == "analog") ::dispatchStickCall else ::dispatchButtonCall
                     handler {
                         try { TouchInjectionPlugin.touchService?.touchUp(pid) } catch (e: Exception) { logInjectFailure("touchUp", pid, e) }

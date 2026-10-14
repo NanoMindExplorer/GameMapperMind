@@ -91,7 +91,7 @@ jobs:
         run: ./gradlew assembleDebug
 
       - name: Upload Release APK Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: GameMapperMind-release-apk
           path: android/app/build/outputs/apk/release/app-release.apk
@@ -99,7 +99,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload Debug APK Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: GameMapperMind-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
